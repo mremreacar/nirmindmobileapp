@@ -1,0 +1,107 @@
+{
+  "expo": {
+    "name": "NirMind",
+    "slug": "nirmind-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./src/assets/images/icon/nirmind-app-icon.jpg",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "scheme": "nirmind",
+    "splash": {
+      "image": "./src/assets/images/icon/nirmind-app-icon.jpg",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.nireya.nirmind",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "Bu uygulama fotoğraflarınıza erişmek için izin gerektirir.",
+        "NSPhotoLibraryAddUsageDescription": "Bu uygulama fotoğraflarınızı kaydetmek için izin gerektirir.",
+        "NSDocumentsFolderUsageDescription": "Bu uygulama dosyalarınıza erişmek için izin gerektirir.",
+        "NSDownloadsFolderUsageDescription": "Bu uygulama indirilen dosyalarınıza erişmek için izin gerektirir.",
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true,
+          "NSExceptionDomains": {
+            "localhost": {
+              "NSExceptionAllowsInsecureHTTPLoads": true
+            }
+          }
+        },
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLName": "nirmind",
+            "CFBundleURLSchemes": ["nirmind"]
+          }
+        ]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.ACCESS_MEDIA_LOCATION",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.ACCESS_MEDIA_LOCATION",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO"
+      ],
+      "package": "com.nireya.nirmind",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "nirmind"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-video",
+      [
+        "expo-document-picker",
+        {
+          "iCloudContainerEnvironment": "Production"
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Bu uygulama fotoğraflarınıza erişmek için izin gerektirir.",
+          "savePhotosPermission": "Bu uygulama fotoğraflarınızı kaydetmek için izin gerektirir.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "6f0c99ca-536a-44e9-8b06-473eb6d14663"
+      }
+    }
+  }
+}
