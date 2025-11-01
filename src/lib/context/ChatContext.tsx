@@ -51,17 +51,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   const backendApiService = BackendApiService.getInstance();
 
   const addMessage = useCallback(async (conversationId: string, message: ChatMessage) => {
-    // Sadece gerçek mesajlar backend'e kaydedilsin
-    if (message.text.trim()) {
-      try {
-        await backendApiService.sendMessage(conversationId, message.text);
-        console.log('✅ Mesaj backend\'e kaydedildi:', message.text.substring(0, 30) + '...');
-      } catch (error) {
-        console.error('❌ Backend mesaj kaydetme hatası:', error);
-      }
-    }
-
-    // Local state'i güncelle
+    // Sadece local state'i güncelle - backend çağrısı useChatMessages'ta yapılıyor
     setConversations(prev => 
       prev.map(conv => 
         conv.id === conversationId 
@@ -170,15 +160,54 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     return newConversation.id;
   }, []);
 
-  const selectConversation = useCallback((conversationId: string) => {
-    setConversations(prev => {
-      const conversation = prev.find(conv => conv.id === conversationId);
+  const selectConversation = useCallback(async (conversationId: string) => {
+    const conversation = conversations.find(conv => conv.id === conversationId);
+    
       if (conversation) {
+      // Eğer mesajlar yüklenmemişse backend'den yükle
+      if (!conversation.messages || conversation.messages.length === 0) {
+        try {
+          const messagesResponse = await backendApiService.getMessages(conversationId);
+          if (messagesResponse.success && messagesResponse.data) {
+            const messages = messagesResponse.data.map((msg: any) => ({
+              id: msg.id,
+              text: msg.text,
+              isUser: msg.isUser,
+              timestamp: new Date(msg.timestamp || msg.createdAt),
+              images: msg.attachments?.filter((a: any) => a.type === 'image').map((a: any) => a.url),
+              files: msg.attachments?.filter((a: any) => a.type === 'file').map((a: any) => ({
+                name: a.filename,
+                uri: a.url,
+                size: a.size,
+                mimeType: a.mimeType
+              }))
+            }));
+            
+            setConversations(prev => 
+              prev.map(conv => 
+                conv.id === conversationId 
+                  ? { ...conv, messages }
+                  : conv
+              )
+            );
+            
+            setCurrentConversation(prev => 
+              prev?.id === conversationId 
+                ? { ...prev, messages }
+                : { ...conversation, messages }
+            );
+          } else {
+            setCurrentConversation(conversation);
+          }
+        } catch (error) {
+          console.error('❌ Mesajlar yüklenirken hata:', error);
+          setCurrentConversation(conversation);
+        }
+      } else {
         setCurrentConversation(conversation);
       }
-      return prev; // conversations state'ini değiştirme
-    });
-  }, []);
+    }
+  }, [conversations, backendApiService]);
 
   const deleteConversation = useCallback((conversationId: string) => {
     setConversations(prev => prev.filter(conv => conv.id !== conversationId));
@@ -211,27 +240,71 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       console.log('📚 Konuşmalar backend\'den yükleniyor...');
       const response = await backendApiService.getConversations();
       
-      if (response.success && response.data?.conversations) {
-        console.log('✅ Backend\'den konuşmalar yüklendi:', response.data.conversations.length);
+      if (response.success && response.data) {
+        const conversationsData = Array.isArray(response.data) ? response.data : response.data.conversations || [];
+        console.log('✅ Backend\'den konuşmalar yüklendi:', conversationsData.length);
         
-        // Backend konuşmalarını ChatConversation formatına çevir
-        const convertedConversations: ChatConversation[] = response.data.conversations.map((conv: any) => ({
+        // Performans için: Sadece ilk konuşmaları mesajlarıyla yükle, diğerlerini lazy load yap
+        const conversationsWithMessages = await Promise.all(
+          conversationsData.slice(0, 10).map(async (conv: any) => {
+            try {
+              const messagesResponse = await backendApiService.getMessages(conv.id);
+              const messages = messagesResponse.success && messagesResponse.data 
+                ? messagesResponse.data.map((msg: any) => ({
+                    id: msg.id,
+                    text: msg.text,
+                    isUser: msg.isUser,
+                    timestamp: new Date(msg.timestamp || msg.createdAt),
+                    images: msg.attachments?.filter((a: any) => a.type === 'image').map((a: any) => a.url),
+                    files: msg.attachments?.filter((a: any) => a.type === 'file').map((a: any) => ({
+                      name: a.filename,
+                      uri: a.url,
+                      size: a.size,
+                      mimeType: a.mimeType
+                    }))
+                  }))
+                : [];
+              
+              return {
+                id: conv.id,
+                title: conv.title,
+                messages,
+                createdAt: new Date(conv.createdAt),
+                updatedAt: new Date(conv.updatedAt)
+              };
+            } catch (error) {
+              console.error(`❌ Konuşma ${conv.id} mesajları yüklenirken hata:`, error);
+              return {
+                id: conv.id,
+                title: conv.title,
+                messages: [],
+                createdAt: new Date(conv.createdAt),
+                updatedAt: new Date(conv.updatedAt)
+              };
+            }
+          })
+        );
+        
+        // Diğer konuşmaları mesajları olmadan ekle (lazy load için)
+        const remainingConversations = conversationsData.slice(10).map((conv: any) => ({
           id: conv.id,
           title: conv.title,
-          messages: conv.messages || [],
+          messages: [],
           createdAt: new Date(conv.createdAt),
           updatedAt: new Date(conv.updatedAt)
         }));
         
-        // Boş konuşmaları filtrele (mesajı olmayan konuşmaları çıkar)
-        const conversationsWithMessages = convertedConversations.filter(conv => 
+        const allConversations = [...conversationsWithMessages, ...remainingConversations];
+        
+        // Sadece mesajı olan konuşmaları göster
+        const filteredConversations = allConversations.filter(conv => 
           conv.messages && conv.messages.length > 0
         );
         
-        console.log(`📊 Toplam konuşma: ${convertedConversations.length}, Mesajlı konuşma: ${conversationsWithMessages.length}`);
+        console.log(`📊 Toplam konuşma: ${allConversations.length}, Mesajlı konuşma: ${filteredConversations.length}`);
         
-        setConversations(conversationsWithMessages);
-        console.log('✅ Mesajlı konuşmalar başarıyla yüklendi:', conversationsWithMessages.length);
+        setConversations(filteredConversations);
+        console.log('✅ Konuşmalar başarıyla yüklendi');
       } else {
         console.log('📭 Backend\'de konuşma bulunamadı');
       }

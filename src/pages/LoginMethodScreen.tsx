@@ -14,6 +14,8 @@ import { useFonts } from "expo-font";
 import { SvgXml } from "react-native-svg";
 import { WebView } from "react-native-webview";
 import CrossAppAuthService from "../services/CrossAppAuthService";
+import GoogleAuthService from "../services/GoogleAuthService";
+import AppleAuthService from "../services/AppleAuthService";
 import { useAuth } from "../contexts/AuthContext";
 
 const { width, height } = Dimensions.get("window");
@@ -48,12 +50,50 @@ const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
   const [webViewUrl, setWebViewUrl] = useState("");
   const { handleAuthCallback } = useAuth();
   const crossAppAuthService = CrossAppAuthService.getInstance();
+  const googleAuthService = GoogleAuthService.getInstance();
+  const appleAuthService = AppleAuthService.getInstance();
 
   let [fontsLoaded] = useFonts({
     "Poppins-Regular": require("@src/assets/fonts/Poppins-Regular .ttf"),
     "Poppins-Medium": require("@src/assets/fonts/Poppins-Medium.ttf"),
     "SpaceGrotesk-Regular": require("@src/assets/fonts/SpaceGrotesk-Regular.ttf"),
   });
+
+  const handleSocialLogin = async (provider: 'google' | 'apple') => {
+    try {
+      setIsLoading(true);
+      console.log(`🔵 ${provider === 'google' ? 'Google' : 'Apple'} login başlatılıyor...`);
+
+      let result;
+      if (provider === 'google') {
+        result = await googleAuthService.signIn();
+      } else {
+        result = await appleAuthService.signIn();
+      }
+
+      if (result.success && result.token) {
+        console.log(`✅ ${provider === 'google' ? 'Google' : 'Apple'} login başarılı`);
+        
+        // Token'ı kaydet ve kullanıcıyı giriş yaptır
+        try {
+          await handleAuthCallback(result.token.accessToken);
+          onLoginSuccess();
+        } catch (error: any) {
+          Alert.alert("Hata", error.message || "Login başarısız");
+        }
+      } else {
+        const errorMessage = result.message || result.error || `${provider === 'google' ? 'Google' : 'Apple'} ile giriş yapılamadı`;
+        if (result.error !== 'CANCELLED') {
+          Alert.alert("Hata", errorMessage);
+        }
+      }
+    } catch (error: any) {
+      console.error(`❌ ${provider === 'google' ? 'Google' : 'Apple'} login hatası:`, error);
+      Alert.alert("Hata", error.message || `${provider === 'google' ? 'Google' : 'Apple'} ile giriş yapılamadı`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleNirpaxLogin = async () => {
     try {
@@ -157,6 +197,36 @@ const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
 
       {/* Login Buttons */}
       <View style={styles.buttonsContainer}>
+        {/* Google Login Button */}
+        <TouchableOpacity
+          style={styles.socialButton}
+          onPress={() => handleSocialLogin('google')}
+          disabled={isLoading}
+        >
+          <View style={styles.socialButtonContent}>
+            <Text style={styles.socialButtonIcon}>G</Text>
+            <Text style={styles.socialButtonText}>Google ile Giriş Yap</Text>
+          </View>
+        </TouchableOpacity>
+
+        {/* Apple Login Button */}
+        <TouchableOpacity
+          style={styles.socialButton}
+          onPress={() => handleSocialLogin('apple')}
+          disabled={isLoading}
+        >
+          <View style={styles.socialButtonContent}>
+            <Text style={styles.socialButtonIcon}>🍎</Text>
+            <Text style={styles.socialButtonText}>Apple ile Giriş Yap</Text>
+          </View>
+        </TouchableOpacity>
+
+        <View style={styles.dividerContainer}>
+          <View style={styles.dividerLine} />
+          <Text style={styles.dividerText}>veya</Text>
+          <View style={styles.dividerLine} />
+        </View>
+
         {/* Nirpax Login Button */}
         <TouchableOpacity
           style={styles.nirpaxButton}
@@ -324,6 +394,50 @@ const styles = StyleSheet.create({
     width: 350,
     justifyContent: "center",
     alignItems: "center",
+    gap: 12,
+  },
+  socialButton: {
+    width: 350,
+    height: 56,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 50,
+    borderWidth: 1,
+    borderColor: "#E5E5E5",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  socialButtonContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+  },
+  socialButtonIcon: {
+    fontSize: 20,
+    fontWeight: "600",
+  },
+  socialButtonText: {
+    fontFamily: "Poppins-Medium",
+    fontSize: 16,
+    fontWeight: "500",
+    color: "#333333",
+  },
+  dividerContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    width: 350,
+    marginVertical: 8,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: "#E5E5E5",
+  },
+  dividerText: {
+    fontFamily: "Poppins-Regular",
+    fontSize: 14,
+    color: "#999999",
+    marginHorizontal: 16,
   },
   nirpaxButton: {
     width: 350,

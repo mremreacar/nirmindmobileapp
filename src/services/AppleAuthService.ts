@@ -1,0 +1,143 @@
+import * as AppleAuthentication from 'expo-apple-authentication';
+import { Platform } from 'react-native';
+import BackendApiService from './BackendApiService';
+
+interface AppleAuthResult {
+  success: boolean;
+  isNewUser?: boolean;
+  user?: any;
+  token?: any;
+  message?: string;
+  error?: string;
+}
+
+class AppleAuthService {
+  private static instance: AppleAuthService;
+
+  static getInstance(): AppleAuthService {
+    if (!AppleAuthService.instance) {
+      AppleAuthService.instance = new AppleAuthService();
+    }
+    return AppleAuthService.instance;
+  }
+
+  async isAvailable(): Promise<boolean> {
+    try {
+      if (Platform.OS !== 'ios') {
+        return false;
+      }
+      
+      const isAvailable = await AppleAuthentication.isAvailableAsync();
+      console.log('🍎 Apple Sign-In mevcut mu?:', isAvailable);
+      return isAvailable;
+    } catch (error) {
+      console.error('❌ Apple Sign-In availability check error:', error);
+      return false;
+    }
+  }
+
+  async signIn(): Promise<AppleAuthResult> {
+    try {
+      if (Platform.OS !== 'ios') {
+        return {
+          success: false,
+          error: 'Apple Sign-In sadece iOS\'ta mevcut',
+          message: 'Apple ile giriş sadece iOS cihazlarda kullanılabilir'
+        };
+      }
+
+      const isAvailable = await this.isAvailable();
+      if (!isAvailable) {
+        return {
+          success: false,
+          error: 'Apple Sign-In mevcut değil',
+          message: 'Bu cihazda Apple Sign-In desteklenmiyor'
+        };
+      }
+
+      console.log('🍎 Apple Sign-In başlatılıyor...');
+
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+
+      console.log('✅ Apple Sign-In tamamlandı');
+
+      if (!credential.user || !credential.identityToken) {
+        throw new Error('Apple hesabından kullanıcı bilgileri alınamadı');
+      }
+
+      const appleUser = {
+        identityToken: credential.identityToken,
+        authorizationCode: credential.authorizationCode,
+        user: {
+          email: credential.email || '',
+          name: credential.fullName ? {
+            firstName: credential.fullName.givenName || '',
+            lastName: credential.fullName.familyName || ''
+          } : null
+        }
+      };
+
+      const backendApiService = BackendApiService.getInstance();
+      const response = await backendApiService.appleAuth(appleUser);
+
+      if (response.success) {
+        console.log('✅ Backend Apple Auth başarılı');
+        return {
+          success: true,
+          isNewUser: response.isNewUser,
+          user: response.data?.user,
+          token: response.data?.token,
+          message: response.message
+        };
+      } else {
+        console.error('❌ Backend Apple Auth başarısız:', response.error);
+        return {
+          success: false,
+          error: response.error || 'Failed to authenticate with backend',
+          message: response.message || 'Backend ile kimlik doğrulama başarısız'
+        };
+      }
+    } catch (error: any) {
+      console.error('❌ Apple Sign-In error:', error);
+      
+      if (error.code === 'ERR_REQUEST_CANCELED') {
+        return { 
+          success: false, 
+          message: 'Apple girişi iptal edildi' 
+        };
+      } else if (error.code === 'ERR_REQUEST_NOT_HANDLED') {
+        return { 
+          success: false, 
+          message: 'Apple girişi işlenemedi' 
+        };
+      } else if (error.code === 'ERR_REQUEST_NOT_INTERACTIVE') {
+        return { 
+          success: false, 
+          message: 'Apple girişi etkileşimli değil' 
+        };
+      } else {
+        return { 
+          success: false, 
+          error: error.message, 
+          message: 'Apple ile giriş yapılamadı' 
+        };
+      }
+    }
+  }
+
+  async signOut(): Promise<void> {
+    try {
+      console.log('✅ Apple oturumu kapatıldı (credential temizlendi)');
+    } catch (error) {
+      console.error('❌ Apple oturumu kapatma hatası:', error);
+    }
+  }
+}
+
+export default AppleAuthService;
+

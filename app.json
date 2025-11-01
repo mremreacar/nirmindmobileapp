@@ -96,7 +96,14 @@
           "savePhotosPermission": "Bu uygulama fotoğraflarınızı kaydetmek için izin gerektirir.",
           "isAccessMediaLocationEnabled": true
         }
-      ]
+      ],
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.331062533957-4n31v4u4ahh8ebpufkdbpj33q6asad04"
+        }
+      ],
+      "expo-apple-authentication"
     ],
     "extra": {
       "eas": {

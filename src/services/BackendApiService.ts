@@ -196,42 +196,6 @@ class BackendApiService {
     return this.makeRequest(`/nirmind/conversations/${conversationId}/messages?page=${page}&limit=${limit}`);
   }
 
-  async createConversation(title: string): Promise<ApiResponse<ConversationData>> {
-    return this.makeRequest('/nirmind/conversations', {
-      method: 'POST',
-      body: JSON.stringify({ title }),
-    });
-  }
-
-  async getConversation(id: string): Promise<ApiResponse<ConversationData>> {
-    return this.makeRequest(`/nirmind/conversations/${id}`);
-  }
-
-  async updateConversation(id: string, title: string): Promise<ApiResponse<ConversationData>> {
-    return this.makeRequest(`/nirmind/conversations/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ title }),
-    });
-  }
-
-  async deleteConversation(id: string): Promise<ApiResponse<void>> {
-    return this.makeRequest(`/nirmind/conversations/${id}`, {
-      method: 'DELETE',
-    });
-  }
-
-  // Message methods
-  async sendMessage(conversationId: string, text: string): Promise<ApiResponse<MessageData>> {
-    return this.makeRequest('/nirmind/messages', {
-      method: 'POST',
-      body: JSON.stringify({ conversationId, text }),
-    });
-  }
-
-  async getMessages(conversationId: string): Promise<ApiResponse<MessageData[]>> {
-    return this.makeRequest(`/nirmind/conversations/${conversationId}/messages`);
-  }
-
   async analyzeAttachment(data: {
     conversationId: string;
     attachmentUrl: string;
@@ -284,6 +248,42 @@ class BackendApiService {
     return this.makeRequest('/nirpax/auth/cross-app-login', {
       method: 'POST',
       body: JSON.stringify({ sourceApp, sourceToken }),
+    });
+  }
+
+  async googleAuth(data: {
+    idToken: string;
+    accessToken: string;
+    email: string;
+    displayName: string;
+    photoURL?: string;
+  }): Promise<ApiResponse<any>> {
+    return this.makeRequest('/nirpax/auth/google', {
+      method: 'POST',
+      body: JSON.stringify({
+        idToken: data.idToken,
+        accessToken: data.accessToken,
+        email: data.email,
+        displayName: data.displayName,
+        photoURL: data.photoURL,
+      }),
+    });
+  }
+
+  async appleAuth(data: {
+    identityToken: string;
+    authorizationCode: string;
+    user: {
+      email: string;
+      name?: {
+        firstName: string;
+        lastName: string;
+      } | null;
+    };
+  }): Promise<ApiResponse<any>> {
+    return this.makeRequest('/nirpax/auth/apple', {
+      method: 'POST',
+      body: JSON.stringify(data),
     });
   }
 }
