@@ -1,4 +1,4 @@
-import { Platform, Alert } from 'react-native';
+import { Platform, Alert, AppState } from 'react-native';
 import * as Speech from 'expo-speech';
 import { Audio } from 'expo-av';
 import { 
@@ -8,6 +8,8 @@ import {
   IOSAudioQuality,
   RecordingOptionsPresets 
 } from 'expo-av/build/Audio/RecordingConstants';
+import BackendApiService from './BackendApiService';
+import * as FileSystem from 'expo-file-system/legacy';
 
 export interface SpeechRecognitionResult {
   text: string;
@@ -29,6 +31,8 @@ class SpeechService {
   private onErrorCallback: ((error: string) => void) | null = null;
   private recording: Audio.Recording | null = null;
   private audioPermission: Audio.PermissionResponse | null = null;
+  private backendApiService = BackendApiService.getInstance();
+  private appStateSubscription: any = null;
 
   async startListening(
     onResult: (result: SpeechRecognitionResult) => void,
@@ -55,6 +59,40 @@ class SpeechService {
       }
       this.audioPermission = permission;
 
+      // Uygulama state kontrolü - iOS'ta background'da audio session başlatılamaz
+      const appState = AppState.currentState;
+      if (appState !== 'active') {
+        console.warn('⚠️ Uygulama background\'da, audio session başlatılamaz. Bekleniyor...', appState);
+        
+        // AppState değişikliğini dinle ve aktif olduğunda başlat
+        return new Promise((resolve) => {
+          const handleAppStateChange = (nextAppState: string) => {
+            if (nextAppState === 'active') {
+              console.log('✅ Uygulama aktif oldu, audio session başlatılıyor...');
+              if (this.appStateSubscription) {
+                this.appStateSubscription.remove();
+                this.appStateSubscription = null;
+              }
+              this.startWhisperRecognition(options).then(resolve);
+            }
+          };
+          
+          this.appStateSubscription = AppState.addEventListener('change', handleAppStateChange);
+          
+          // 5 saniye sonra timeout
+          setTimeout(() => {
+            if (this.appStateSubscription) {
+              this.appStateSubscription.remove();
+              this.appStateSubscription = null;
+            }
+            const errorMsg = 'Uygulama aktif olmadığı için audio session başlatılamadı. Lütfen uygulamayı ön plana getirin.';
+            console.error('❌ AppState timeout:', errorMsg);
+            onError?.(errorMsg);
+            resolve(false);
+          }, 5000);
+        });
+      }
+
       this.isListening = true;
       console.log('Starting speech recognition with OpenAI Whisper...');
 
@@ -73,6 +111,14 @@ class SpeechService {
     try {
       console.log('Starting Whisper recognition...');
       
+      // Uygulama state kontrolü - iOS'ta background'da audio session başlatılamaz
+      const appState = AppState.currentState;
+      if (appState !== 'active') {
+        console.warn('⚠️ Uygulama background\'da, audio session başlatılamaz:', appState);
+        this.onErrorCallback?.('Uygulama aktif değil. Lütfen uygulamayı ön plana getirin.');
+        return false;
+      }
+      
       // Audio session'ı configure et
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
@@ -80,6 +126,9 @@ class SpeechService {
         shouldDuckAndroid: true,
         playThroughEarpieceAndroid: false,
       });
+
+      // Kısa bir delay - iOS'ta audio session'ın aktif olması için
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       // Recording başlat
       this.recording = new Audio.Recording();
@@ -106,6 +155,12 @@ class SpeechService {
     }
 
     this.isListening = false;
+    
+    // AppState subscription'ı temizle
+    if (this.appStateSubscription) {
+      this.appStateSubscription.remove();
+      this.appStateSubscription = null;
+    }
     
     if (this.recognitionTimeout) {
       clearTimeout(this.recognitionTimeout);
@@ -152,46 +207,45 @@ class SpeechService {
 
   private async processAudioWithWhisper(audioUri: string): Promise<void> {
     try {
-      console.log('Processing audio with OpenAI Whisper...');
+      console.log('🎤 Audio backend üzerinden transcription başlatılıyor...');
       
-      // OpenAI Whisper API'ye gönder
-      const formData = new FormData();
-      formData.append('model', 'whisper-1');
-      formData.append('file', {
-        uri: audioUri,
-        type: 'audio/m4a',
-        name: 'recording.m4a',
-      } as any);
-      formData.append('language', 'tr');
-      formData.append('response_format', 'json');
-
-      const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.EXPO_PUBLIC_OPENAI_API_KEY}`,
-        },
-        body: formData,
+      // Audio dosyasını base64'e çevir
+      const base64Audio = await FileSystem.readAsStringAsync(audioUri, {
+        encoding: FileSystem.EncodingType.Base64,
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('OpenAI API error details:', errorText);
-        throw new Error(`OpenAI API error: ${response.status} ${response.statusText} - ${errorText}`);
+      console.log('📤 Audio backend\'e gönderiliyor:', {
+        audioUri: audioUri.substring(0, 50),
+        base64Length: base64Audio.length
+      });
+
+      // Backend'e gönder
+      const response = await this.backendApiService.transcribeAudio(
+        base64Audio,
+        'tr',
+        'audio/m4a'
+      );
+
+      if (response.success && response.data) {
+        console.log('✅ Audio transcription başarılı:', {
+          text: response.data.text.substring(0, 50),
+          textLength: response.data.text.length
+        });
+
+        if (this.onResultCallback && response.data.text) {
+          this.onResultCallback({
+            text: response.data.text,
+            confidence: 0.95,
+            isFinal: true
+          });
+        }
+      } else {
+        throw new Error(response.error || 'Audio transcription failed');
       }
 
-      const result = await response.json();
-      console.log('Whisper API result:', result);
-      
-      if (this.onResultCallback && result.text) {
-        this.onResultCallback({
-          text: result.text,
-          confidence: 0.95,
-          isFinal: true
-        });
-      }
     } catch (error) {
-      console.error('Whisper API error:', error);
-      this.onErrorCallback?.(error instanceof Error ? error.message : 'Whisper API failed');
+      console.error('❌ Audio transcription error:', error);
+      this.onErrorCallback?.(error instanceof Error ? error.message : 'Audio transcription failed');
     }
   }
 

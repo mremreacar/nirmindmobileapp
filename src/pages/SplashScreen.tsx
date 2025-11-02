@@ -40,8 +40,8 @@ const nirmindLogo = `<?xml version="1.0" encoding="UTF-8"?>
 
 const SplashScreen: React.FC = () => {
   let [fontsLoaded] = useFonts({
-    'Poppins-Regular': require('@src/assets/fonts/Poppins-Regular .ttf'),
-    'Poppins-Medium': require('@src/assets/fonts/Poppins-Medium.ttf'),
+    'Poppins-Regular': require('@assets/fonts/Poppins-Regular .ttf'),
+    'Poppins-Medium': require('@assets/fonts/Poppins-Medium.ttf'),
   });
 
   // Memoized responsive calculations for performance

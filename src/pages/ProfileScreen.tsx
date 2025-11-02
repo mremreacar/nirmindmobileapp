@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,12 +7,14 @@ import {
   TouchableOpacity,
   ScrollView,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFonts } from 'expo-font';
 import { SvgXml } from 'react-native-svg';
 import Header from '../components/Header';
 import { useAuth } from '../contexts/AuthContext';
+import BackendApiService from '../services/BackendApiService';
 
 const { width, height } = Dimensions.get('window');
 
@@ -69,16 +71,50 @@ interface ProfileScreenProps {
 }
 
 const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, onChatPress, onHelpCenterPress, onLogout }) => {
-  const { user, logout } = useAuth();
+  const { user: authUser, logout } = useAuth();
+  const [profileData, setProfileData] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const backendApiService = BackendApiService.getInstance();
   
   let [fontsLoaded] = useFonts({
-    'Poppins-Regular': require('@src/assets/fonts/Poppins-Regular .ttf'),
-    'Poppins-Medium': require('@src/assets/fonts/Poppins-Medium.ttf'),
+    'Poppins-Regular': require('@assets/fonts/Poppins-Regular .ttf'),
+    'Poppins-Medium': require('@assets/fonts/Poppins-Medium.ttf'),
   });
+
+  // Backend'den profil bilgilerini çek
+  useEffect(() => {
+    const loadProfile = async () => {
+      try {
+        setIsLoading(true);
+        console.log('📥 Profil bilgileri backend\'den çekiliyor...');
+        const response = await backendApiService.getUserProfile();
+        
+        if (response.success && response.data) {
+          console.log('✅ Profil bilgileri alındı:', response.data.email);
+          setProfileData(response.data);
+        } else {
+          console.warn('⚠️ Profil bilgileri alınamadı, auth user kullanılıyor:', response.error);
+          // Backend'den alınamazsa auth user'ı kullan
+          setProfileData(authUser);
+        }
+      } catch (error) {
+        console.error('❌ Profil yükleme hatası:', error);
+        // Hata durumunda auth user'ı kullan
+        setProfileData(authUser);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadProfile();
+  }, [authUser]);
 
   if (!fontsLoaded) {
     return null;
   }
+
+  // Backend'den gelen profil verisini veya auth user'ı kullan
+  const user = profileData || authUser;
 
   // Kullanıcı adının baş harflerini al
   const getInitials = () => {
@@ -118,8 +154,15 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, onChatPress, onHe
         />
 
         <ScrollView style={styles.profileContent}>
-          {/* Profile Info Section */}
-          <View style={styles.profileInfoSection}>
+          {isLoading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#7E7AE9" />
+              <Text allowFontScaling={false} style={styles.loadingText}>Profil bilgileri yükleniyor...</Text>
+            </View>
+          ) : (
+            <>
+              {/* Profile Info Section */}
+              <View style={styles.profileInfoSection}>
             <View style={styles.profileImageContainer}>
               <View style={styles.profileImage}>
                 {user?.profileImageUrl ? (
@@ -129,12 +172,12 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, onChatPress, onHe
                     resizeMode="cover"
                   />
                 ) : (
-                  <Text style={styles.profileInitials}>{getInitials()}</Text>
+                  <Text allowFontScaling={false} style={styles.profileInitials}>{getInitials()}</Text>
                 )}
               </View>
             </View>
-            <Text style={styles.profileName}>{fullName}</Text>
-            <Text style={styles.profileEmail}>{email}</Text>
+            <Text allowFontScaling={false} style={styles.profileName}>{fullName}</Text>
+            <Text allowFontScaling={false} style={styles.profileEmail}>{email}</Text>
           </View>
 
           {/* User Details Card */}
@@ -143,8 +186,8 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, onChatPress, onHe
               <View style={styles.detailLeft}>
                 <SvgXml xml={phoneIcon} width="20" height="20" />
                 <View style={styles.detailTextContainer}>
-                  <Text style={styles.detailLabel}>Telefon Numarası</Text>
-                  <Text style={styles.detailValue}>{phone}</Text>
+                  <Text allowFontScaling={false} style={styles.detailLabel}>Telefon Numarası</Text>
+                  <Text allowFontScaling={false} style={styles.detailValue}>{phone}</Text>
                 </View>
               </View>
             </View>
@@ -153,8 +196,8 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, onChatPress, onHe
               <View style={styles.detailLeft}>
                 <SvgXml xml={locationIcon} width="20" height="20" />
                 <View style={styles.detailTextContainer}>
-                  <Text style={styles.detailLabel}>Mevcut Adres</Text>
-                  <Text style={styles.detailValue}>{address}</Text>
+                  <Text allowFontScaling={false} style={styles.detailLabel}>Mevcut Adres</Text>
+                  <Text allowFontScaling={false} style={styles.detailValue}>{address}</Text>
                 </View>
               </View>
             </View>
@@ -163,8 +206,8 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, onChatPress, onHe
               <View style={styles.detailLeft}>
                 <SvgXml xml={globeIcon} width="20" height="20" />
                 <View style={styles.detailTextContainer}>
-                  <Text style={styles.detailLabel}>Dil</Text>
-                  <Text style={styles.detailValue}>{language}</Text>
+                  <Text allowFontScaling={false} style={styles.detailLabel}>Dil</Text>
+                  <Text allowFontScaling={false} style={styles.detailValue}>{language}</Text>
                 </View>
               </View>
             </View>
@@ -173,8 +216,8 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, onChatPress, onHe
               <View style={styles.detailLeft}>
                 <SvgXml xml={cardIcon} width="20" height="20" />
                 <View style={styles.detailTextContainer}>
-                  <Text style={styles.detailLabel}>Mevcut Kartım</Text>
-                  <Text style={styles.detailValue}>{cardInfo}</Text>
+                  <Text allowFontScaling={false} style={styles.detailLabel}>Mevcut Kartım</Text>
+                  <Text allowFontScaling={false} style={styles.detailValue}>{cardInfo}</Text>
                 </View>
               </View>
             </View>
@@ -185,7 +228,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, onChatPress, onHe
             <TouchableOpacity style={styles.actionRow} onPress={onHelpCenterPress}>
               <View style={styles.actionLeft}>
                 <SvgXml xml={infoIcon} width="20" height="20" />
-                <Text style={styles.actionText}>Yardım Merkezi</Text>
+                <Text allowFontScaling={false} style={styles.actionText}>Yardım Merkezi</Text>
               </View>
               <SvgXml xml={chevronRightIcon} width="16" height="16" />
             </TouchableOpacity>
@@ -196,19 +239,21 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, onChatPress, onHe
               }}>
                 <View style={styles.actionLeft}>
                   <SvgXml xml={logoutIcon} width="20" height="20" />
-                  <Text style={styles.actionText}>Çıkış Yap</Text>
+                  <Text allowFontScaling={false} style={styles.actionText}>Çıkış Yap</Text>
                 </View>
                 <SvgXml xml={chevronRightIcon} width="16" height="16" />
               </TouchableOpacity>
           </View>
 
-          {/* Footer Text */}
-          <View style={styles.footerSection}>
-            <Text style={styles.footerText}>
-            Tüm kullanıcı bilgileri Nirpax uygulaması{'\n'}
-            üzerinden otomatik olarak alınır.
-            </Text>
-          </View>
+              {/* Footer Text */}
+              <View style={styles.footerSection}>
+                <Text allowFontScaling={false} style={styles.footerText}>
+                Tüm kullanıcı bilgileri Nirpax uygulaması{'\n'}
+                üzerinden otomatik olarak entegre edilir.
+                </Text>
+              </View>
+            </>
+          )}
         </ScrollView>
       </LinearGradient>
     </View>
@@ -338,6 +383,19 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     textAlign: 'center',
     lineHeight: 18,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 100,
+  },
+  loadingText: {
+    fontFamily: 'Poppins-Regular',
+    fontSize: 16,
+    fontWeight: '400',
+    color: '#9CA3AF',
+    marginTop: 16,
   },
 });
 

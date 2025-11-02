@@ -84,8 +84,8 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
   const fullName = user ? `${user.firstName} ${user.lastName}` : 'Kullanıcı';
   
   let [fontsLoaded] = useFonts({
-    'Poppins-Regular': require('@src/assets/fonts/Poppins-Regular .ttf'),
-    'Poppins-Medium': require('@src/assets/fonts/Poppins-Medium.ttf'),
+    'Poppins-Regular': require('@assets/fonts/Poppins-Regular .ttf'),
+    'Poppins-Medium': require('@assets/fonts/Poppins-Medium.ttf'),
   });
 
   if (!fontsLoaded) {
@@ -183,7 +183,7 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
                 width="21"
                 height="18"
               />
-              <Text style={styles.sectionText}>Geçmiş Sohbetler</Text>
+              <Text allowFontScaling={false} style={styles.sectionText}>Geçmiş Sohbetler</Text>
             </View>
           </View>
 
@@ -203,8 +203,8 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
                   onLongPress={() => handleDeleteConversation(conversation.id, conversation.title)}
                 >
                   <View style={styles.chatItemContent}>
-                    <Text style={styles.chatText}>{conversation.title}</Text>
-                    <Text style={styles.chatDate}>
+                    <Text allowFontScaling={false} style={styles.chatText}>{conversation.title}</Text>
+                    <Text allowFontScaling={false} style={styles.chatDate}>
                       {new Date(conversation.updatedAt).toLocaleDateString('tr-TR', {
                         day: 'numeric',
                         month: 'short',
@@ -235,10 +235,10 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
                     resizeMode="cover"
                   />
                 ) : (
-                  <Text style={styles.profileInitials}>{getInitials()}</Text>
+                  <Text allowFontScaling={false} style={styles.profileInitials}>{getInitials()}</Text>
                 )}
               </View>
-              <Text style={styles.profileName}>{fullName}</Text>
+              <Text allowFontScaling={false} style={styles.profileName}>{fullName}</Text>
             </View>
           </TouchableOpacity>
         </View>

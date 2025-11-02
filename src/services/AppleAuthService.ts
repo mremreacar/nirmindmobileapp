@@ -1,6 +1,7 @@
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { Platform } from 'react-native';
 import BackendApiService from './BackendApiService';
+import { jwtDecode } from 'jwt-decode';
 
 interface AppleAuthResult {
   success: boolean;
@@ -70,14 +71,54 @@ class AppleAuthService {
         throw new Error('Apple hesabından kullanıcı bilgileri alınamadı');
       }
 
+      // Email kontrolü - Apple ilk kez login'de email vermeyebilir
+      // Bu durumda identityToken'dan email'i decode edebiliriz
+      let email = credential.email;
+      
+      if (!email && credential.identityToken) {
+        try {
+          // Apple identityToken JWT formatında, içinde email olabilir
+          const decoded = jwtDecode(credential.identityToken) as any;
+          email = decoded.email;
+          
+          if (email) {
+            console.log('✅ Email identityToken\'dan decode edildi:', email);
+          } else {
+            console.warn('⚠️ IdentityToken\'da email bulunamadı');
+          }
+        } catch (decodeError) {
+          console.error('❌ IdentityToken decode hatası:', decodeError);
+        }
+      }
+
+      // Email hala yoksa backend'e gönderip backend'in token'ı doğrulamasını sağlayalım
+      if (!email) {
+        console.warn('⚠️ Email bilgisi yok, backend token doğrulaması ile email alınacak');
+        email = ''; // Backend'e email olmadan gönderelim, backend token'dan alacak
+      }
+
+      // Name bilgisi - Apple sadece ilk girişte verir
+      // Eğer fullName yoksa, kullanıcı daha önce giriş yapmış demektir
+      let firstName = '';
+      let lastName = '';
+      
+      if (credential.fullName) {
+        firstName = credential.fullName.givenName || '';
+        lastName = credential.fullName.familyName || '';
+        console.log('✅ Apple fullName alındı:', firstName, lastName);
+      } else {
+        console.log('⚠️ Apple fullName yok - kullanıcı daha önce giriş yapmış olabilir');
+        // İsim bilgisi yoksa backend'e boş gönderelim, backend mevcut bilgiyi koruyacak
+      }
+
       const appleUser = {
         identityToken: credential.identityToken,
-        authorizationCode: credential.authorizationCode,
+        authorizationCode: credential.authorizationCode || '',
         user: {
-          email: credential.email || '',
-          name: credential.fullName ? {
-            firstName: credential.fullName.givenName || '',
-            lastName: credential.fullName.familyName || ''
+          email: email || '', // Email yoksa boş string, backend token'dan alacak
+          name: (firstName || lastName) ? {
+            firstName: firstName || '',
+            lastName: lastName || ''
           } : null
         }
       };

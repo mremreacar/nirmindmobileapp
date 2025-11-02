@@ -17,6 +17,7 @@ export interface ChatConversation {
   id: string;
   title: string;
   messages: ChatMessage[];
+  isResearchMode?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

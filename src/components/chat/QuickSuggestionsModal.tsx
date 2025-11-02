@@ -4,8 +4,8 @@ import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView } from 'rea
 interface QuickSuggestionsModalProps {
   visible: boolean;
   onClose: () => void;
-  onSelectSuggestion: (suggestion: string) => void;
-  suggestions: string[];
+  onSelectSuggestion: (suggestion: {question: string, promptType: string}) => void;
+  suggestions: Array<{question: string, promptType: string}>;
 }
 
 const QuickSuggestionsModal: React.FC<QuickSuggestionsModalProps> = ({
@@ -45,11 +45,13 @@ const QuickSuggestionsModal: React.FC<QuickSuggestionsModalProps> = ({
             <ScrollView style={styles.suggestionsList}>
               {suggestions.map((suggestion, index) => (
                 <TouchableOpacity
-                  key={index}
+                  key={`${suggestion.question}-${index}`}
                   style={styles.suggestionItem}
                   onPress={() => onSelectSuggestion(suggestion)}
                 >
-                  <Text style={styles.suggestionText}>{suggestion}</Text>
+                  <Text style={styles.suggestionText}>
+                    {typeof suggestion === 'string' ? suggestion : suggestion.question}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>

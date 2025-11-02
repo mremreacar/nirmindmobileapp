@@ -52,7 +52,7 @@ const Header: React.FC<HeaderProps> = ({
   return (
     <View style={styles.header}>
       <Image
-        source={require('../assets/images/elipse-light.png')}
+        source={require('@assets/images/elipse-light.png')}
         style={styles.headerBlur}
         resizeMode="cover"
       />

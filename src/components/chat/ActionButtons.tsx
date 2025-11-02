@@ -48,7 +48,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
           width="18"
           height="18"
         />
-        <Text style={styles.actionButtonText}>Öneriler</Text>
+        <Text allowFontScaling={false} style={styles.actionButtonText}>Öneriler</Text>
       </TouchableOpacity>
       
       <TouchableOpacity 
@@ -65,7 +65,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
           width="19"
           height="18"
         />
-        <Text style={[
+        <Text allowFontScaling={false} style={[
           styles.actionButtonText,
           isResearchMode && styles.actionButtonTextActive
         ]}>

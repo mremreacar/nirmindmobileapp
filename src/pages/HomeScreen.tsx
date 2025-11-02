@@ -32,6 +32,7 @@ import InputComponent from "../components/common/InputComponent";
 import ActionButtons from "../components/chat/ActionButtons";
 import { useChat } from "../lib/context/ChatContext";
 import { useChatMessages } from "../hooks/useChatMessages";
+import { useQuickSuggestions } from "../hooks/useQuickSuggestions";
 import { useDictation, useWaveAnimation } from "../features/dictation";
 import { useFilePermissions, usePermissionDialogs } from "../lib/permissions";
 import {
@@ -73,20 +74,27 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   selectedConversationId,
   onConversationSelected,
 }) => {
-  const { createNewConversation, selectConversation } = useChat();
-  const { sendMessage } = useChatMessages();
+  const { createNewConversation, selectConversation, updateResearchMode } = useChat();
+  const { sendMessage, sendQuickSuggestion } = useChatMessages();
+  const {
+    showQuickSuggestions,
+    setShowQuickSuggestions,
+    currentSuggestions,
+    handleOnerilerPress,
+    isLoadingSuggestions
+  } = useQuickSuggestions();
   const [showChatScreen, setShowChatScreen] = useState(false);
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<any[]>([]);
   const [inputText, setInputText] = useState("");
+  const [pendingInitialMessage, setPendingInitialMessage] = useState<string>("");
+  const [pendingPromptType, setPendingPromptType] = useState<string | undefined>(undefined);
   const [createdConversationId, setCreatedConversationId] = useState<
     string | undefined
   >();
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [arastirmaModu, setArastirmaModu] = useState(false);
-  const [showQuickSuggestions, setShowQuickSuggestions] = useState(false);
-  const [suggestionCycle, setSuggestionCycle] = useState(0);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [plusButtonPressed, setPlusButtonPressed] = useState(false);
   const translateY = useRef(new Animated.Value(height)).current;
@@ -129,9 +137,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   const { showPermissionDialog, showRequiredPermissionsDialog } = usePermissionDialogs();
 
   const [fontsLoaded, fontError] = useFonts({
-    "Poppins-Regular": require("@src/assets/fonts/Poppins-Regular .ttf"),
-    "Poppins-Medium": require("@src/assets/fonts/Poppins-Medium.ttf"),
-    "SpaceGrotesk-Regular": require("@src/assets/fonts/SpaceGrotesk-Regular.ttf"),
+    "Poppins-Regular": require("@assets/fonts/Poppins-Regular .ttf"),
+    "Poppins-Medium": require("@assets/fonts/Poppins-Medium.ttf"),
+    "SpaceGrotesk-Regular": require("@assets/fonts/SpaceGrotesk-Regular.ttf"),
   });
 
   // Font loading error handling
@@ -222,7 +230,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     [onOpenChatHistory]
   );
 
-  const openModal = useCallback(() => {
+  const openModal = useCallback(async () => {
     // "+" butonuna basıldığında direkt Chat ekranını aç
     console.log("💬 Plus butonu tıklandı - Chat ekranı açılıyor");
     
@@ -230,7 +238,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     setPlusButtonPressed(true);
     
     // Boş bir conversation oluştur
-    const conversationId = createNewConversation("Yeni Sohbet", "");
+    const conversationId = await createNewConversation("Yeni Sohbet", "");
     setCreatedConversationId(conversationId);
     setShowChatScreen(true);
 
@@ -247,12 +255,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     }
   }, [createNewConversation, translateXChat, textInputRef]);
 
-  const openChatScreen = useCallback(() => {
+  const openChatScreen = useCallback(async () => {
     // Header'daki chat butonuna basıldığında yeni mesaj sayfası aç
     console.log("💬 Header chat butonu tıklandı - yeni mesaj açılıyor");
 
     // Boş bir conversation oluştur
-    const conversationId = createNewConversation("Yeni Sohbet", "");
+    const conversationId = await createNewConversation("Yeni Sohbet", "");
     setCreatedConversationId(conversationId);
     setShowChatScreen(true);
 
@@ -267,7 +275,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     if (textInputRef.current) {
       textInputRef.current.focus();
     }
-  }, [createNewConversation, translateXChat]);
+  }, [createNewConversation, translateXChat, textInputRef]);
 
   const closeChatScreen = useCallback(() => {
     // Smooth kapatma - hafif animasyon (senior seviyede)
@@ -281,6 +289,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
       
       // Input'u tamamen temizle - Chat ekranından geri dönerken
       setInputText("");
+      setPendingInitialMessage(""); // Pending mesajı da temizle
+      setPendingPromptType(undefined); // Pending promptType'ı da temizle
       setSelectedImages([]); // Seçili resimleri temizle
       setSelectedFiles([]); // Seçili dosyaları temizle
       setArastirmaModu(false); // Araştırma modunu sıfırla
@@ -294,110 +304,60 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     });
   }, [onConversationSelected, translateXChat, width]);
 
-  // Hızlı öneriler listesi - Nireya Ekosistem Markaları (memoized)
-  const hizliOneriler = useMemo(() => [
-    "Nireya ekosistemi nedir?",
-    "NirMind uygulamasının özellikleri nelerdir?",
-    "Nireya markaları hangileridir?",
-    "NirMind nasıl kullanılır?",
-    "Nireya ekosisteminin amacı nedir?",
-    "NirMind'de hangi özellikler var?",
-    "Nireya markalarının ortak özellikleri neler?",
-    "NirMind uygulaması ne işe yarar?",
-    "Nireya ekosisteminde hangi hizmetler sunuluyor?",
-    "NirMind'in diğer uygulamalardan farkı nedir?",
-    "NirMind'de hangi AI özellikleri var?",
-    "Nireya ekosisteminin vizyonu nedir?",
-    "Nireya markalarının misyonu nedir?",
-    "Nireya ekosisteminde hangi teknolojiler kullanılıyor?",
-    "NirMind'de AI özellikleri nasıl çalışıyor?",
-    "Nireya markalarının değerleri nelerdir?",
-    "NirMind'de kullanıcı deneyimi nasıl?",
-    "NirPax nedir ve ne işe yarar?",
-    "NirMind'in özellikleri nelerdir?",
-    "NirPay nasıl çalışır?",
-    "Nireya ekosisteminde dijital güvenlik nasıl sağlanıyor?",
-    "Nireya ekosisteminde lüks yaşam deneyimi nasıl?",
-  ], []);
-
-  // Sonsuz döngü algoritması ile 5 farklı soru seç (memoized)
-  const getCycleSuggestions = useMemo(() => {
-    // Cycle seed oluştur (her basışta farklı)
-    const seed = suggestionCycle;
-
-    // 5 farklı soru seç (tekrar yok)
-    const selectedSuggestions = [];
-    const usedIndices = new Set();
-    let attempts = 0;
-    const maxAttempts = 100; // Sonsuz döngüyü önlemek için
-
-    for (let i = 0; i < 5 && attempts < maxAttempts; i++) {
-      let index;
-      let found = false;
-
-      while (!found && attempts < maxAttempts) {
-        // Pseudo-random index (cycle tutarlı)
-        index =
-          (seed + i * 13 + Math.floor(seed / 5) + attempts * 7) %
-          hizliOneriler.length;
-
-        if (!usedIndices.has(index)) {
-          found = true;
-          usedIndices.add(index);
-          selectedSuggestions.push(hizliOneriler[index]);
-        }
-
-        attempts++;
-      }
-    }
-
-    // Eğer 5 farklı soru bulunamadıysa, kalan soruları ekle
-    if (selectedSuggestions.length < 5) {
-      for (
-        let i = 0;
-        i < hizliOneriler.length && selectedSuggestions.length < 5;
-        i++
-      ) {
-        if (!usedIndices.has(i)) {
-          selectedSuggestions.push(hizliOneriler[i]);
-          usedIndices.add(i);
-        }
-      }
-    }
-
-    return selectedSuggestions;
-  }, [suggestionCycle, hizliOneriler]);
-
-  const handleOnerilerPress = useCallback(() => {
-    // Cycle'ı artır ve modalı aç
-    setSuggestionCycle((prev) => prev + 1);
-    setShowQuickSuggestions(true);
-  }, []);
-
   const handleArastirmaPress = useCallback(() => {
     setArastirmaModu((prev) => !prev);
   }, []);
 
-  const handleQuickSuggestionSelect = useCallback((suggestion: string) => {
-    setShowQuickSuggestions(false);
+  const handleQuickSuggestionSelect = useCallback(async (suggestion: {question: string, promptType: string}) => {
+    console.log('🎯 Öneri seçildi:', suggestion);
+    
+    try {
+      setShowQuickSuggestions(false);
 
-    // Dismiss keyboard
-    textInputRef.current?.blur();
+      // Dismiss keyboard
+      textInputRef.current?.blur();
 
-    // Create new conversation with the selected suggestion
-    const title =
-      suggestion.length > 30 ? suggestion.substring(0, 30) + "..." : suggestion;
-    const conversationId = createNewConversation(title, suggestion);
-
-    setCreatedConversationId(conversationId);
-    setInputText("");
-
-    // Yeni mesajlaşma süreci başlat - Chat ekranına anında geçiş
-    setShowChatScreen(true);
-
-    // Anında geçiş - animasyon yok
-    translateXChat.setValue(0);
-  }, [createNewConversation, translateXChat]);
+      // Home ekranından geldiğinde her zaman yeni konuşma oluştur
+      const title = suggestion.question.length > 30 ? suggestion.question.substring(0, 30) + '...' : suggestion.question;
+      console.log('📝 Yeni konuşma oluşturuluyor:', title);
+      
+      const conversationId = await createNewConversation(title);
+      console.log('✅ Konuşma oluşturuldu:', conversationId);
+      
+      // Yeni konuşmayı seç
+      if (conversationId) {
+        // Conversation'ı seç (await et)
+        console.log('🔍 Konuşma seçiliyor:', conversationId);
+        await selectConversation(conversationId);
+        setCreatedConversationId(conversationId);
+        
+        // Mesajı pendingInitialMessage'e kaydet (ChatScreen'de initialMessage prop'u ile otomatik gönderilecek)
+        // Bu sayede mesaj sadece bir kez gönderilecek
+        setPendingInitialMessage(suggestion.question);
+        setPendingPromptType(suggestion.promptType); // promptType'ı da kaydet
+        
+        // ChatScreen'e geçiş yap
+        console.log('💬 ChatScreen açılıyor...');
+        setShowChatScreen(true);
+        
+        // Smooth animasyon ile aç
+        Animated.timing(translateXChat, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }).start();
+        
+        setInputText("");
+        console.log('✅ Öneri işlemi tamamlandı, mesaj ChatScreen\'de gönderilecek');
+      } else {
+        console.error('❌ Konuşma oluşturulamadı');
+      }
+    } catch (error) {
+      console.error('❌ Öneri seçim hatası:', error);
+      // Hata durumunda modal'ı tekrar aç
+      setShowQuickSuggestions(true);
+    }
+  }, [createNewConversation, selectConversation, translateXChat]);
 
 
   const handleSendFilesOnly = useCallback(async () => {
@@ -418,7 +378,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
 
       // Create new conversation with the file message
       const title = "Dosya/Resim Gönderildi";
-      const conversationId = createNewConversation(title, fileMessage);
+      const conversationId = await createNewConversation(title, fileMessage);
 
       setCreatedConversationId(conversationId);
       setInputText("");
@@ -441,14 +401,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   }, [selectedImages, selectedFiles, createNewConversation, translateXChat]);
 
   const handleSendMessage = useCallback(async () => {
-    console.log("🚀 handleSendMessage çağrıldı:", {
-      inputText: inputText.trim(),
-      selectedImages: selectedImages.length,
-      selectedFiles: selectedFiles.length,
-      isDictating: dictationState.isDictating,
-      isProcessing: dictationState.isProcessing,
-    });
-
     // Herhangi bir içerik varsa (text, resim, dosya, dikte) mesaj gönder
     if (
       inputText.trim() ||
@@ -460,65 +412,57 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
       // Dismiss keyboard
       textInputRef.current?.blur();
 
-      // Loading state başlat
-      // setIsLoading(true);
-
       let finalMessage = inputText.trim();
-
-      // Sadece kullanıcının yazdığı mesajı kullan, sistem mesajı ekleme
-      // finalMessage zaten inputText.trim() olarak ayarlandı
-
-      // Dosya analizi sistemi kaldırıldı - dosyalar direkt OpenAI'ye gönderilecek
-
-      // Create new conversation with the message
-      console.log("📝 Final message oluşturuluyor:", {
-        inputText: inputText.trim(),
-        selectedImagesCount: selectedImages.length,
-        selectedFilesCount: selectedFiles.length,
-        finalMessage: finalMessage,
-      });
 
       const title =
         finalMessage.length > 30
           ? finalMessage.substring(0, 30) + "..."
           : finalMessage || "Dosya gönderildi";
-      const conversationId = createNewConversation(title, finalMessage);
+      
+      // Conversation oluştur ama initialMessage gönderme - ChatScreen'de gönderilecek
+      const conversationId = await createNewConversation(title);
 
-      console.log("💬 Yeni conversation oluşturuldu:", {
-        conversationId,
-        title,
-      });
+      // Araştırma modunu backend'e kaydet
+      if (conversationId && arastirmaModu) {
+        console.log('🔍 Home ekranında araştırma modu aktif, backend\'e kaydediliyor...', {
+          conversationId,
+          arastirmaModu
+        });
+        await updateResearchMode(conversationId, true);
+        console.log('✅ Araştırma modu backend\'e kaydedildi');
+      } else {
+        console.log('🔍 Home ekranında araştırma modu kontrolü:', {
+          conversationId,
+          arastirmaModu,
+          willSave: conversationId && arastirmaModu
+        });
+      }
 
       setCreatedConversationId(conversationId);
+      
+      // Mesajı pendingInitialMessage'e kaydet (ChatScreen'de kullanılacak)
+      setPendingInitialMessage(finalMessage);
 
-      // Mesajı Home ekranında gönderme - sadece conversation oluştur
-      console.log("📤 Conversation oluşturuldu, Chat ekranına geçiliyor:", {
-        finalMessage,
+      console.log('📤 Home ekranından ChatScreen\'e geçiliyor:', {
         conversationId,
-        selectedImages: selectedImages.length,
-        selectedFiles: selectedFiles.length,
+        initialMessage: finalMessage,
+        initialArastirmaModu: arastirmaModu,
+        pendingInitialMessage: finalMessage
       });
 
-      // Chat ekranına geç - mesaj orada gönderilecek
+      // Chat ekranına geç - mesaj orada gönderilecek (inputText henüz temizlenmedi)
       setShowChatScreen(true);
-      
-      // Input'u Chat ekranına geçtikten sonra temizle
-      setTimeout(() => {
-        setInputText("");
-        setSelectedImages([]); // Seçili resimleri temizle
-        setSelectedFiles([]); // Seçili dosyaları temizle
-        setArastirmaModu(false); // Araştırma modunu sıfırla
-        
-        // Keyboard'u kapat
-        Keyboard.dismiss();
-      }, 100); // Kısa bir gecikme ile temizle
 
       // Anında geçiş - animasyon yok
       translateXChat.setValue(0);
-
-      console.log("✅ handleSendMessage tamamlandı");
-    } else {
-      console.log("❌ handleSendMessage: İçerik yok, mesaj gönderilmedi");
+      
+      // Input'u hemen temizle (pendingInitialMessage korunacak)
+      setInputText("");
+      setSelectedImages([]);
+      setSelectedFiles([]);
+      // Araştırma modunu kapatma - ChatScreen'de conversation'a bağlı olacak
+      // setArastirmaModu(false); // Kaldırıldı - ChatScreen'de conversation'dan yüklenecek
+      Keyboard.dismiss();
     }
   }, [
     inputText,
@@ -527,6 +471,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     dictationState.isDictating,
     dictationState.isProcessing,
     createNewConversation,
+    updateResearchMode,
+    arastirmaModu,
     translateXChat,
   ]);
 
@@ -663,11 +609,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
               onClose={closeChatScreen}
               onOpenChatHistory={onOpenChatHistory}
               conversationId={selectedConversationId || createdConversationId}
-              initialArastirmaModu={arastirmaModu} // Araştırma modu korundu
-              initialUploadModalOpen={plusButtonPressed} // Upload modal durumu korundu
-              initialMessage={inputText.trim()} // Input mesajı korundu
-              initialImages={selectedImages} // Resimler korundu
-              initialFiles={selectedFiles} // Dosyalar korundu
+              initialArastirmaModu={arastirmaModu}
+              initialUploadModalOpen={plusButtonPressed}
+              initialMessage={pendingInitialMessage || inputText.trim()} // Pending mesaj varsa onu kullan, yoksa inputText'i kullan
+              initialPromptType={pendingPromptType} // Quick suggestion'dan gelen promptType
+              initialImages={selectedImages}
+              initialFiles={selectedFiles}
             />
           </Modal>
 
@@ -689,25 +636,31 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
                 onPress={(e) => e.stopPropagation()}
               >
                 <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>Hızlı Öneriler</Text>
+                  <Text allowFontScaling={false} style={styles.modalTitle}>Hızlı Öneriler</Text>
                   <TouchableOpacity
                     style={styles.closeButton}
                     onPress={() => setShowQuickSuggestions(false)}
                   >
-                    <Text style={styles.closeButtonText}>✕</Text>
+                    <Text allowFontScaling={false} style={styles.closeButtonText}>✕</Text>
                   </TouchableOpacity>
                 </View>
 
                 <View style={styles.suggestionsList}>
-                  {getCycleSuggestions.map((suggestion, index) => (
-                    <TouchableOpacity
-                      key={`${suggestion}-${index}`}
-                      style={styles.suggestionItem}
-                      onPress={() => handleQuickSuggestionSelect(suggestion)}
-                    >
-                      <Text style={styles.suggestionText}>{suggestion}</Text>
-                    </TouchableOpacity>
-                  ))}
+                  {isLoadingSuggestions ? (
+                    <Text allowFontScaling={false} style={styles.loadingText}>Öneriler yükleniyor...</Text>
+                  ) : currentSuggestions.length > 0 ? (
+                    currentSuggestions.map((suggestion, index) => (
+                      <TouchableOpacity
+                        key={`${suggestion.question}-${index}`}
+                        style={styles.suggestionItem}
+                        onPress={() => handleQuickSuggestionSelect(suggestion)}
+                      >
+                        <Text allowFontScaling={false} style={styles.suggestionText}>{suggestion.question}</Text>
+                      </TouchableOpacity>
+                    ))
+                  ) : (
+                    <Text allowFontScaling={false} style={styles.loadingText}>Öneri bulunamadı</Text>
+                  )}
                 </View>
               </TouchableOpacity>
             </TouchableOpacity>
@@ -898,6 +851,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: "Poppins-Regular",
     lineHeight: 22,
+  },
+  loadingText: {
+    color: "#999999",
+    fontSize: 14,
+    fontFamily: "Poppins-Regular",
+    textAlign: "center",
+    padding: 20,
   },
 });
 

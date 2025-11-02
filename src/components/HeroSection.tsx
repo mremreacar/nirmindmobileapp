@@ -69,8 +69,8 @@ const HeroSection: React.FC = () => {
   const [useFallback, setUseFallback] = useState(false);
 
   let [fontsLoaded] = useFonts({
-    'Poppins-Regular': require('@src/assets/fonts/Poppins-Regular .ttf'),
-    'Poppins-Medium': require('@src/assets/fonts/Poppins-Medium.ttf'),
+    'Poppins-Regular': require('@assets/fonts/Poppins-Regular .ttf'),
+    'Poppins-Medium': require('@assets/fonts/Poppins-Medium.ttf'),
   });
 
   // Lazy load image after component mounts
@@ -126,7 +126,7 @@ const HeroSection: React.FC = () => {
         )}
         {shouldLoadImage && !imageError && !useFallback && (
           <Image
-            source={require('@src/assets/videos/gif.png')}
+            source={require('@assets/videos/gif.png')}
             style={[
               styles.heroGif,
               { opacity: imageLoaded ? 1 : 0 }
@@ -139,20 +139,20 @@ const HeroSection: React.FC = () => {
         )}
         {useFallback && (
           <Image
-            source={require('@src/assets/videos/gif.png')}
+            source={require('@assets/videos/gif.png')}
             style={styles.heroGif}
             resizeMode="contain"
           />
         )}
         {imageError && (
           <View style={styles.errorContainer}>
-            <Text style={styles.errorText}>Görsel yüklenemedi</Text>
+            <Text allowFontScaling={false} style={styles.errorText}>Görsel yüklenemedi</Text>
           </View>
         )}
       </View>
       
-      <Text style={styles.greetingText}>Merhaba, Emre</Text>
-      <Text style={styles.assistantText}>
+      <Text allowFontScaling={false} style={styles.greetingText}>Merhaba, Emre</Text>
+      <Text allowFontScaling={false} style={styles.assistantText}>
         Ben dijital asistanınız NirMind,{'\n'}size nasıl yardımcı olabilirim?
       </Text>
     </View>

@@ -23,6 +23,7 @@ class GoogleAuthService {
     try {
       GoogleSignin.configure({
         webClientId: '331062533957-4n31v4u4ahh8ebpufkdbpj33q6asad04.apps.googleusercontent.com',
+        iosClientId: '331062533957-4n31v4u4ahh8ebpufkdbpj33q6asad04',
         offlineAccess: true,
         forceCodeForRefreshToken: true,
       });
@@ -54,13 +55,45 @@ class GoogleAuthService {
       const userInfo = await GoogleSignin.signIn();
       console.log('✅ Google Sign-In tamamlandı');
 
-      const tokens = await GoogleSignin.getTokens();
-      console.log('✅ Google tokens alındı');
-
-      const googleUser = userInfo.data?.user || userInfo.user || userInfo;
+      // Type-safe user extraction
+      const googleUser = (userInfo as any).data?.user || (userInfo as any).user || userInfo;
       
       if (!googleUser || !googleUser.email) {
         throw new Error('Google hesabından kullanıcı bilgileri alınamadı');
+      }
+
+      // Token'ları al - signIn sonrası kısa bir bekleme ekle
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      let tokens;
+      try {
+        tokens = await GoogleSignin.getTokens();
+        console.log('✅ Google tokens alındı');
+      } catch (tokenError: any) {
+        console.warn('⚠️ getTokens hatası, tekrar deniyor...', tokenError);
+        // Daha uzun bekleme sonrası tekrar dene
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        try {
+          tokens = await GoogleSignin.getTokens();
+          console.log('✅ Google tokens ikinci denemede alındı');
+        } catch (retryError: any) {
+          console.error('❌ getTokens ikinci denemede de başarısız:', retryError);
+          // userInfo içinde token var mı kontrol et
+          const userInfoWithTokens = userInfo as any;
+          if (userInfoWithTokens?.idToken || userInfoWithTokens?.data?.idToken) {
+            console.log('⚠️ userInfo içinden token kullanılıyor');
+            tokens = {
+              idToken: userInfoWithTokens.idToken || userInfoWithTokens.data?.idToken,
+              accessToken: userInfoWithTokens.accessToken || userInfoWithTokens.data?.accessToken || ''
+            };
+          } else {
+            throw new Error('Google token bilgileri alınamadı: ' + retryError.message);
+          }
+        }
+      }
+
+      if (!tokens || !tokens.idToken) {
+        throw new Error('Google token bilgileri alınamadı');
       }
 
       const backendApiService = BackendApiService.getInstance();

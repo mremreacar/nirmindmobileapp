@@ -8,6 +8,7 @@ import {
   Modal,
   ActivityIndicator,
   Alert,
+  Image,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFonts } from "expo-font";
@@ -16,7 +17,9 @@ import { WebView } from "react-native-webview";
 import CrossAppAuthService from "../services/CrossAppAuthService";
 import GoogleAuthService from "../services/GoogleAuthService";
 import AppleAuthService from "../services/AppleAuthService";
+import BackendApiService from "../services/BackendApiService";
 import { useAuth } from "../contexts/AuthContext";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const { width, height } = Dimensions.get("window");
 
@@ -48,15 +51,16 @@ const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [showWebView, setShowWebView] = useState(false);
   const [webViewUrl, setWebViewUrl] = useState("");
-  const { handleAuthCallback } = useAuth();
+  const { handleAuthCallback, setUser } = useAuth();
   const crossAppAuthService = CrossAppAuthService.getInstance();
   const googleAuthService = GoogleAuthService.getInstance();
   const appleAuthService = AppleAuthService.getInstance();
+  const backendApiService = BackendApiService.getInstance();
 
   let [fontsLoaded] = useFonts({
-    "Poppins-Regular": require("@src/assets/fonts/Poppins-Regular .ttf"),
-    "Poppins-Medium": require("@src/assets/fonts/Poppins-Medium.ttf"),
-    "SpaceGrotesk-Regular": require("@src/assets/fonts/SpaceGrotesk-Regular.ttf"),
+    "Poppins-Regular": require("@assets/fonts/Poppins-Regular .ttf"),
+    "Poppins-Medium": require("@assets/fonts/Poppins-Medium.ttf"),
+    "SpaceGrotesk-Regular": require("@assets/fonts/SpaceGrotesk-Regular.ttf"),
   });
 
   const handleSocialLogin = async (provider: 'google' | 'apple') => {
@@ -65,23 +69,69 @@ const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
       console.log(`🔵 ${provider === 'google' ? 'Google' : 'Apple'} login başlatılıyor...`);
 
       let result;
-      if (provider === 'google') {
-        result = await googleAuthService.signIn();
-      } else {
-        result = await appleAuthService.signIn();
+      try {
+        if (provider === 'google') {
+          result = await googleAuthService.signIn();
+        } else {
+          result = await appleAuthService.signIn();
+        }
+      } catch (authError: any) {
+        console.error(`❌ ${provider} auth service error:`, authError);
+        setIsLoading(false);
+        Alert.alert("Hata", authError.message || `${provider === 'google' ? 'Google' : 'Apple'} ile giriş yapılamadı`);
+        return;
       }
+
+      console.log(`📥 ${provider} auth result:`, { 
+        success: result.success, 
+        hasToken: !!result.token,
+        hasUser: !!result.user,
+        error: result.error 
+      });
 
       if (result.success && result.token) {
         console.log(`✅ ${provider === 'google' ? 'Google' : 'Apple'} login başarılı`);
         
         // Token'ı kaydet ve kullanıcıyı giriş yaptır
         try {
-          await handleAuthCallback(result.token.accessToken);
-          onLoginSuccess();
+          // Backend'den gelen user bilgisini kullan
+          if (result.user) {
+            await backendApiService.setAuthToken(result.token.accessToken);
+            await AsyncStorage.setItem('authToken', result.token.accessToken);
+            
+            // User bilgisini kaydet
+            const userData = {
+              id: result.user.id,
+              email: result.user.email,
+              firstName: result.user.firstName,
+              lastName: result.user.lastName,
+              phone: result.user.phone || '',
+              profileImageUrl: result.user.profileImageUrl,
+              nirpaxId: result.user.nirpaxId,
+              apps: ['nirmind'],
+              permissions: {}
+            };
+            
+            await AsyncStorage.setItem('user', JSON.stringify(userData));
+            
+            // AuthContext'i güncelle
+            setUser(userData);
+            
+            console.log(`✅ ${provider === 'google' ? 'Google' : 'Apple'} kullanıcı bilgileri kaydedildi`);
+            setIsLoading(false);
+          } else {
+            // Fallback: handleAuthCallback kullan
+            await handleAuthCallback(result.token.accessToken);
+            setIsLoading(false);
+          }
         } catch (error: any) {
+          console.error(`❌ User kaydetme hatası:`, error);
+          setIsLoading(false);
           Alert.alert("Hata", error.message || "Login başarısız");
         }
       } else {
+        console.log(`❌ ${provider} login başarısız:`, result.error || result.message);
+        setIsLoading(false);
         const errorMessage = result.message || result.error || `${provider === 'google' ? 'Google' : 'Apple'} ile giriş yapılamadı`;
         if (result.error !== 'CANCELLED') {
           Alert.alert("Hata", errorMessage);
@@ -89,9 +139,8 @@ const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
       }
     } catch (error: any) {
       console.error(`❌ ${provider === 'google' ? 'Google' : 'Apple'} login hatası:`, error);
-      Alert.alert("Hata", error.message || `${provider === 'google' ? 'Google' : 'Apple'} ile giriş yapılamadı`);
-    } finally {
       setIsLoading(false);
+      Alert.alert("Hata", error.message || `${provider === 'google' ? 'Google' : 'Apple'} ile giriş yapılamadı`);
     }
   };
 
@@ -136,7 +185,7 @@ const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
       if (parsed.token) {
         try {
           await handleAuthCallback(parsed.token);
-          onLoginSuccess();
+          // handleAuthCallback user state'ini günceller, useEffect otomatik Home'a yönlendirir
         } catch (error: any) {
           Alert.alert("Hata", error.message || "Login başarısız");
         }
@@ -204,7 +253,10 @@ const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
           disabled={isLoading}
         >
           <View style={styles.socialButtonContent}>
-            <Text style={styles.socialButtonIcon}>G</Text>
+            <Image 
+              source={require('@assets/images/icon/Google.png')}
+              style={styles.iconImage}
+            />
             <Text style={styles.socialButtonText}>Google ile Giriş Yap</Text>
           </View>
         </TouchableOpacity>
@@ -216,7 +268,10 @@ const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
           disabled={isLoading}
         >
           <View style={styles.socialButtonContent}>
-            <Text style={styles.socialButtonIcon}>🍎</Text>
+            <Image 
+              source={require('@assets/images/icon/apple-logo.png')}
+              style={styles.iconImage}
+            />
             <Text style={styles.socialButtonText}>Apple ile Giriş Yap</Text>
           </View>
         </TouchableOpacity>
@@ -316,7 +371,7 @@ const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
                   // Token'ı işle ve direkt ana uygulamaya geç
                   try {
                     await handleAuthCallback(message.token);
-                    onLoginSuccess();
+                    // handleAuthCallback user state'ini günceller, useEffect otomatik Home'a yönlendirir
                   } catch (error: any) {
                     Alert.alert("Hata", error.message || "Login başarısız");
                   }
@@ -392,9 +447,6 @@ const styles = StyleSheet.create({
     top: 450,
     left: (width - 350) / 2,
     width: 350,
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 12,
   },
   socialButton: {
     width: 350,
@@ -405,6 +457,7 @@ const styles = StyleSheet.create({
     borderColor: "#E5E5E5",
     justifyContent: "center",
     alignItems: "center",
+    marginBottom: 12,
   },
   socialButtonContent: {
     flexDirection: "row",
@@ -412,9 +465,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 12,
   },
-  socialButtonIcon: {
-    fontSize: 20,
-    fontWeight: "600",
+  iconImage: {
+    width: 20,
+    height: 20,
+    resizeMode: "contain",
   },
   socialButtonText: {
     fontFamily: "Poppins-Medium",
@@ -426,7 +480,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     width: 350,
-    marginVertical: 8,
+    marginVertical: 16,
   },
   dividerLine: {
     flex: 1,

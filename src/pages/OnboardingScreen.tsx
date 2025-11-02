@@ -19,9 +19,9 @@ interface OnboardingScreenProps {
 
 const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onNext }) => {
   let [fontsLoaded] = useFonts({
-    "Poppins-Regular": require("../assets/fonts/Poppins-Regular .ttf"),
-    "Poppins-Medium": require("../assets/fonts/Poppins-Medium.ttf"),
-    "SpaceGrotesk-Regular": require("../assets/fonts/SpaceGrotesk-Regular.ttf"),
+    "Poppins-Regular": require("@assets/fonts/Poppins-Regular .ttf"),
+    "Poppins-Medium": require("@assets/fonts/Poppins-Medium.ttf"),
+    "SpaceGrotesk-Regular": require("@assets/fonts/SpaceGrotesk-Regular.ttf"),
   });
 
   if (!fontsLoaded) {
@@ -39,7 +39,7 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onNext }) => {
       {/* Logo Icon */}
       <View style={styles.logoIconContainer}>
         <Image
-          source={require("@/src/assets/images/logo/nirmind-logo-vertical_1.png")}
+          source={require("@assets/images/logo/nirmind-logo-vertical_1.png")}
           style={styles.logoIconImage}
           resizeMode="contain"
         />

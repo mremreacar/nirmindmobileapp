@@ -5,11 +5,14 @@ import BackendApiService from '../../services/BackendApiService';
 interface ChatContextType {
   conversations: ChatConversation[];
   currentConversation: ChatConversation | null;
-  addMessage: (conversationId: string, message: ChatMessage) => void;
-  createNewConversation: (title: string, initialMessage?: string) => string;
+  addMessage: (conversationId: string, message: ChatMessage) => Promise<void>;
+  removeMessage: (conversationId: string, messageId: string) => void;
+  createNewConversation: (title: string, initialMessage?: string) => Promise<string>;
   selectConversation: (conversationId: string) => void;
   deleteConversation: (conversationId: string) => void;
+  deleteMessage: (conversationId: string, messageId: string) => Promise<void>;
   updateConversationTitle: (conversationId: string, title: string) => void;
+  updateResearchMode: (conversationId: string, isResearchMode: boolean) => Promise<void>;
   loadConversations: () => Promise<void>;
 }
 
@@ -51,9 +54,23 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   const backendApiService = BackendApiService.getInstance();
 
   const addMessage = useCallback(async (conversationId: string, message: ChatMessage) => {
-    // Sadece local state'i güncelle - backend çağrısı useChatMessages'ta yapılıyor
-    setConversations(prev => 
-      prev.map(conv => 
+    console.log('📝 addMessage çağrıldı:', { conversationId, messageId: message.id, isUser: message.isUser, text: message.text.substring(0, 50) });
+    
+    // Duplicate kontrolü - aynı ID'ye sahip mesaj varsa ekleme
+    let messageAdded = false;
+    
+    setConversations(prev => {
+      const conversation = prev.find(conv => conv.id === conversationId);
+      if (conversation) {
+        const messageExists = conversation.messages.some(msg => msg.id === message.id);
+        if (messageExists) {
+          console.log('⚠️ Mesaj zaten mevcut, eklenmedi:', message.id);
+          return prev;
+        }
+      }
+      
+      messageAdded = true;
+      const updated = prev.map(conv => 
         conv.id === conversationId 
           ? {
               ...conv,
@@ -61,69 +78,162 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
               updatedAt: new Date()
             }
           : conv
+      );
+      
+      // currentConversation'ı da güncelle (eğer bu conversation ise)
+      const updatedConversation = updated.find(conv => conv.id === conversationId);
+      if (updatedConversation) {
+        // setCurrentConversation'ı hemen çağır (callback pattern ile güncel state'i al)
+        setCurrentConversation(prevConv => {
+          if (prevConv?.id === conversationId) {
+            const messageExists = prevConv.messages.some(msg => msg.id === message.id);
+            if (!messageExists) {
+              console.log('✅ currentConversation güncellendi:', { conversationId, messageId: message.id });
+              return {
+                ...prevConv,
+                messages: [...prevConv.messages, message],
+                updatedAt: new Date()
+              };
+            } else {
+              console.log('⚠️ currentConversation\'da mesaj zaten var:', message.id);
+            }
+          } else {
+            console.log('⚠️ currentConversation farklı conversation:', { currentId: prevConv?.id, targetId: conversationId });
+          }
+          return prevConv;
+        });
+      }
+      
+      return updated;
+    });
+
+    // İlk kullanıcı mesajından sonra başlık güncelle ve backend'e konuşma kaydet
+    if (message.isUser && message.text.trim() && messageAdded) {
+      setConversations(prev => {
+        const conversation = prev.find(conv => conv.id === conversationId);
+        if (conversation && (conversation.title === "Yeni Sohbet" || conversation.title === "New Conversation")) {
+          // İlk mesajdan otomatik başlık oluştur
+          const newTitle = generateConversationTitle(message.text);
+          
+          // Başlığı güncelle - setTimeout ile async işlemi yap
+          setTimeout(() => {
+            setConversations(prevConvs => 
+              prevConvs.map(conv => 
+                conv.id === conversationId 
+                  ? { ...conv, title: newTitle }
+                  : conv
+              )
+            );
+            
+            setCurrentConversation(prev => 
+              prev && prev.id === conversationId ? { ...prev, title: newTitle } : prev
+            );
+          }, 0);
+          
+          // Backend'e başlık güncellemesi gönder
+          if (!conversationId.startsWith('conv-')) {
+            // Backend ID'si varsa başlığı güncelle
+            backendApiService.updateConversation(conversationId, newTitle).catch(error => {
+              console.error('❌ Backend başlık güncelleme hatası:', error);
+            });
+          } else {
+            // Eğer konuşma local ise (Backend ID'si yoksa), backend'e kaydet
+            backendApiService.createConversation(newTitle).then(response => {
+              if (response.success && response.data) {
+                // Konuşma ID'sini backend ID ile güncelle
+                setConversations(prevConvs => 
+                  prevConvs.map(conv => 
+                    conv.id === conversationId 
+                      ? { ...conv, id: response.data!.id }
+                      : conv
+                  )
+                );
+                
+                // Current conversation'ı da güncelle
+                setCurrentConversation(prev => 
+                  prev && prev.id === conversationId ? { ...prev, id: response.data!.id } : prev
+                );
+              }
+            }).catch(error => {
+              console.error('❌ Local konuşma backend\'e kaydetme hatası:', error);
+            });
+          }
+        }
+        return prev;
+      });
+    }
+    
+    // React'in render cycle'ını tamamlaması için kısa bir delay
+    // Bu sayede kullanıcı mesajı ekranda görünür hale gelir
+    await new Promise(resolve => setTimeout(resolve, 50));
+    console.log('✅ addMessage tamamlandı:', { conversationId, messageId: message.id });
+  }, [backendApiService]);
+
+  // Remove message from conversation (for optimistic updates)
+  const removeMessage = useCallback((conversationId: string, messageId: string) => {
+    setConversations(prev => 
+      prev.map(conv => 
+        conv.id === conversationId 
+          ? {
+              ...conv,
+              messages: conv.messages.filter(msg => msg.id !== messageId)
+            }
+          : conv
       )
     );
-
-    // Update current conversation if it's the one being modified
+    
     if (currentConversation?.id === conversationId) {
       setCurrentConversation(prev => 
         prev ? {
           ...prev,
-          messages: [...prev.messages, message],
-          updatedAt: new Date()
+          messages: prev.messages.filter(msg => msg.id !== messageId)
         } : null
       );
     }
-
-    // İlk kullanıcı mesajından sonra başlık güncelle ve backend'e konuşma kaydet
-    if (message.isUser && message.text.trim()) {
-      const conversation = conversations.find(conv => conv.id === conversationId);
-      if (conversation && conversation.title === "Yeni Sohbet") {
-        // İlk mesajdan otomatik başlık oluştur
-        const newTitle = generateConversationTitle(message.text);
-        updateConversationTitle(conversationId, newTitle);
-        console.log('📝 Konuşma başlığı güncellendi:', newTitle);
-        
-        // Eğer konuşma local ise (Backend ID'si yoksa), backend'e kaydet
-        if (conversationId.startsWith('conv-')) {
-          try {
-            console.log('🔄 Local konuşma backend\'e kaydediliyor...');
-            const response = await backendApiService.createConversation(newTitle);
-            
-            if (response.success && response.data) {
-              // Konuşma ID'sini backend ID ile güncelle
-              setConversations(prev => 
-                prev.map(conv => 
-                  conv.id === conversationId 
-                    ? { ...conv, id: response.data.id }
-                    : conv
-                )
-              );
-              
-              // Current conversation'ı da güncelle
-              if (currentConversation?.id === conversationId) {
-                setCurrentConversation(prev => 
-                  prev ? { ...prev, id: response.data.id } : null
-                );
-              }
-              
-              console.log('✅ Local konuşma backend\'e kaydedildi:', response.data.id);
-            }
-          } catch (error) {
-            console.error('❌ Local konuşma backend\'e kaydetme hatası:', error);
-          }
-        }
-      }
-    }
-  }, [currentConversation, conversations, updateConversationTitle]);
+  }, [currentConversation]);
 
   const createNewConversation = useCallback(async (title: string, initialMessage?: string): Promise<string> => {
     const now = new Date();
-    const newId = `conv-${Date.now()}`;
     
+    // Önce backend'e kaydet
+    try {
+      const response = await backendApiService.createConversation(title, initialMessage);
+      
+      if (response.success && response.data) {
+        // Backend ID'sini kullan
+        const backendId = response.data.id;
+        console.log('✅ Konuşma backend\'e kaydedildi:', backendId);
+        
+        const newConversation: ChatConversation = {
+          id: backendId,
+          title,
+          isResearchMode: false,
+          messages: initialMessage ? [{
+            id: `msg-${Date.now()}`,
+            text: initialMessage,
+            isUser: true,
+            timestamp: now
+          }] : [],
+          createdAt: new Date(response.data.createdAt || now),
+          updatedAt: new Date(response.data.updatedAt || now)
+        };
+        
+        // Local state'e ekle
+        setConversations(prev => [newConversation, ...prev]);
+        setCurrentConversation(newConversation);
+        
+        return backendId;
+      }
+    } catch (error) {
+      console.error('❌ Backend konuşma oluşturma hatası:', error);
+    }
+
+    // Backend'e kaydedilemediyse local ID kullan (fallback)
+    const localId = `conv-${Date.now()}`;
     const newConversation: ChatConversation = {
-      id: newId,
+      id: localId,
       title,
+      isResearchMode: false,
       messages: initialMessage ? [{
         id: `msg-${Date.now()}`,
         text: initialMessage,
@@ -133,81 +243,137 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       createdAt: now,
       updatedAt: now
     };
-
-    // Sadece mesaj varsa backend'e kaydet
-    if (initialMessage && initialMessage.trim()) {
-      try {
-        // Backend'e yeni konuşma oluştur
-        const response = await backendApiService.createConversation(title, initialMessage);
-        
-        if (response.success && response.data) {
-          // Backend ID'sini kullan
-          newConversation.id = response.data.id;
-          console.log('✅ Konuşma backend\'e kaydedildi:', response.data.id);
-        }
-      } catch (error) {
-        console.error('❌ Backend konuşma oluşturma hatası:', error);
-        // Hata durumunda local ID kullan (zaten newId)
-      }
-    } else {
-      console.log('📝 Boş konuşma local olarak oluşturuldu (backend\'e kaydedilmedi):', newId);
-    }
-
-    // Local state'e ekle (backend'e kaydedilmese bile)
+    
     setConversations(prev => [newConversation, ...prev]);
     setCurrentConversation(newConversation);
     
-    return newConversation.id;
-  }, []);
+    return localId;
+  }, [backendApiService]);
 
-  const selectConversation = useCallback(async (conversationId: string) => {
-    const conversation = conversations.find(conv => conv.id === conversationId);
-    
-      if (conversation) {
-      // Eğer mesajlar yüklenmemişse backend'den yükle
-      if (!conversation.messages || conversation.messages.length === 0) {
-        try {
-          const messagesResponse = await backendApiService.getMessages(conversationId);
-          if (messagesResponse.success && messagesResponse.data) {
-            const messages = messagesResponse.data.map((msg: any) => ({
-              id: msg.id,
-              text: msg.text,
-              isUser: msg.isUser,
-              timestamp: new Date(msg.timestamp || msg.createdAt),
-              images: msg.attachments?.filter((a: any) => a.type === 'image').map((a: any) => a.url),
-              files: msg.attachments?.filter((a: any) => a.type === 'file').map((a: any) => ({
-                name: a.filename,
-                uri: a.url,
-                size: a.size,
-                mimeType: a.mimeType
-              }))
-            }));
-            
-            setConversations(prev => 
-              prev.map(conv => 
-                conv.id === conversationId 
-                  ? { ...conv, messages }
-                  : conv
-              )
-            );
-            
-            setCurrentConversation(prev => 
-              prev?.id === conversationId 
-                ? { ...prev, messages }
-                : { ...conversation, messages }
-            );
-          } else {
-            setCurrentConversation(conversation);
-          }
-        } catch (error) {
-          console.error('❌ Mesajlar yüklenirken hata:', error);
-          setCurrentConversation(conversation);
+  // Helper function to load conversation messages - MUST be defined before selectConversation
+  const loadConversationMessages = useCallback(async (conversationId: string, conversation: ChatConversation) => {
+    try {
+      const messagesResponse = await backendApiService.getMessages(conversationId);
+      if (messagesResponse.success && messagesResponse.data && 'messages' in messagesResponse.data) {
+        const backendMessages: ChatMessage[] = (messagesResponse.data as any).messages.map((msg: any) => ({
+          id: msg.id,
+          text: msg.text,
+          isUser: msg.isUser,
+          timestamp: new Date(msg.timestamp || msg.createdAt),
+          images: msg.attachments?.filter((a: any) => a.type === 'IMAGE' || a.type === 'image').map((a: any) => a.url),
+          files: msg.attachments?.filter((a: any) => a.type === 'FILE' || a.type === 'file').map((a: any) => ({
+            name: a.filename,
+            uri: a.url,
+            size: a.size,
+            mimeType: a.mimeType
+          }))
+        }));
+        
+        // Eğer conversation başlığı varsayılan ise ve ilk kullanıcı mesajı varsa başlık oluştur
+        const firstUserMessage = backendMessages.find(msg => msg.isUser && msg.text.trim());
+        if (firstUserMessage && (conversation.title === 'New Conversation' || conversation.title === 'Yeni Sohbet' || !conversation.title.trim())) {
+          const newTitle = generateConversationTitle(firstUserMessage.text);
+          
+          // Backend'e başlık güncellemesi gönder
+          backendApiService.updateConversation(conversationId, newTitle).catch(error => {
+            console.error('❌ Backend başlık güncelleme hatası:', error);
+          });
+          
+          // Local state'i güncelle
+          conversation.title = newTitle;
         }
+        
+        // Mevcut mesajlarla birleştir ve duplicate'leri kaldır
+        setConversations(prev => {
+          const currentConv = prev.find(c => c.id === conversationId);
+          const existingMessages: ChatMessage[] = currentConv?.messages || conversation.messages || [];
+          const existingIds = new Set(existingMessages.map((m: ChatMessage) => m.id));
+          const newMessages = backendMessages.filter((m: ChatMessage) => !existingIds.has(m.id));
+          const mergedMessages: ChatMessage[] = [...existingMessages, ...newMessages];
+          
+          const updated = prev.map(conv => 
+            conv.id === conversationId 
+              ? { ...conv, messages: mergedMessages, title: conversation.title }
+              : conv
+          );
+          
+          setCurrentConversation(updated.find(c => c.id === conversationId) || conversation);
+          
+          return updated;
+        });
       } else {
         setCurrentConversation(conversation);
       }
+    } catch (error) {
+      console.error('❌ Mesajlar yüklenirken hata:', error);
+      setCurrentConversation(conversation);
     }
-  }, [conversations, backendApiService]);
+  }, [backendApiService]);
+
+  const selectConversation = useCallback(async (conversationId: string) => {
+    // Conversation'ı güncel state'den al
+    let conversation: ChatConversation | undefined;
+    
+    setConversations(prev => {
+      conversation = prev.find(conv => conv.id === conversationId);
+      return prev;
+    });
+    
+    // Eğer conversation local state'de yoksa backend'den yükle
+    if (!conversation) {
+      try {
+        const convResponse = await backendApiService.getConversation(conversationId);
+        if (convResponse.success && convResponse.data) {
+          const convData = convResponse.data;
+          const newConversation: ChatConversation = {
+            id: convData.id,
+            title: convData.title,
+            isResearchMode: convData.isResearchMode || false,
+            messages: [],
+            createdAt: new Date(convData.createdAt),
+            updatedAt: new Date(convData.updatedAt)
+          };
+          
+          // Local state'e ekle
+          setConversations(prevConvs => {
+            const exists = prevConvs.find(c => c.id === conversationId);
+            if (!exists) {
+              return [newConversation, ...prevConvs];
+            }
+            return prevConvs;
+          });
+          
+          // Mesajları paralel yükle (non-blocking)
+          // Conversation önce state'e eklendi, mesajlar sonra yüklenecek
+          setCurrentConversation(newConversation);
+          
+          // Mesajları arka planda yükle (await etme)
+          loadConversationMessages(conversationId, newConversation).catch(error => {
+            console.error('❌ Mesajlar yüklenirken hata:', error);
+          });
+          
+          conversation = newConversation;
+        }
+      } catch (error) {
+        console.error('❌ Conversation yüklenirken hata:', error);
+        throw error;
+      }
+    } else {
+      // Conversation var, mesajları kontrol et ve yükle
+      setCurrentConversation(conversation);
+      
+      if (!conversation.messages || conversation.messages.length === 0) {
+        // Mesajları paralel yükle (non-blocking)
+        loadConversationMessages(conversationId, conversation).catch(error => {
+          console.error('❌ Mesajlar yüklenirken hata:', error);
+        });
+      }
+    }
+    
+    if (conversation) {
+      setCurrentConversation(conversation);
+    }
+  }, [backendApiService, loadConversationMessages]);
 
   const deleteConversation = useCallback((conversationId: string) => {
     setConversations(prev => prev.filter(conv => conv.id !== conversationId));
@@ -217,6 +383,42 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       setCurrentConversation(null);
     }
   }, [currentConversation]);
+
+  const deleteMessage = useCallback(async (conversationId: string, messageId: string) => {
+    try {
+      const response = await backendApiService.deleteMessage(messageId);
+      
+      if (response.success) {
+        // Local state'den mesajı kaldır
+        setConversations(prev => 
+          prev.map(conv => 
+            conv.id === conversationId 
+              ? { 
+                  ...conv, 
+                  messages: conv.messages.filter(msg => msg.id !== messageId)
+                }
+              : conv
+          )
+        );
+        
+        // Eğer current conversation ise, onu da güncelle
+        if (currentConversation?.id === conversationId) {
+          setCurrentConversation(prev => 
+            prev ? {
+              ...prev,
+              messages: prev.messages.filter(msg => msg.id !== messageId)
+            } : null
+          );
+        }
+        
+        console.log('✅ Mesaj başarıyla silindi');
+      } else {
+        console.error('❌ Mesaj silme hatası:', response.error);
+      }
+    } catch (error) {
+      console.error('❌ Mesaj silme hatası:', error);
+    }
+  }, [backendApiService, currentConversation]);
 
   const updateConversationTitle = useCallback((conversationId: string, title: string) => {
     setConversations(prev => 
@@ -235,28 +437,55 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     }
   }, [currentConversation]);
 
+  const updateResearchMode = useCallback(async (conversationId: string, isResearchMode: boolean) => {
+    try {
+      const response = await backendApiService.updateResearchMode(conversationId, isResearchMode);
+      
+      if (response.success && response.data) {
+        // Local state'i güncelle
+        setConversations(prev => 
+          prev.map(conv => 
+            conv.id === conversationId 
+              ? { ...conv, isResearchMode, updatedAt: new Date() }
+              : conv
+          )
+        );
+        
+        if (currentConversation?.id === conversationId) {
+          setCurrentConversation(prev => 
+            prev ? { ...prev, isResearchMode, updatedAt: new Date() } : null
+          );
+        }
+      } else {
+        console.error('❌ Araştırma modu güncellenemedi:', response.error || response.message);
+      }
+    } catch (error) {
+      console.error('❌ Araştırma modu güncelleme hatası:', error);
+    }
+  }, [backendApiService, currentConversation]);
+
   const loadConversations = useCallback(async () => {
     try {
       console.log('📚 Konuşmalar backend\'den yükleniyor...');
       const response = await backendApiService.getConversations();
       
       if (response.success && response.data) {
-        const conversationsData = Array.isArray(response.data) ? response.data : response.data.conversations || [];
+        const conversationsData: any[] = Array.isArray(response.data) ? response.data : (response.data as any).conversations || [];
         console.log('✅ Backend\'den konuşmalar yüklendi:', conversationsData.length);
         
         // Performans için: Sadece ilk konuşmaları mesajlarıyla yükle, diğerlerini lazy load yap
-        const conversationsWithMessages = await Promise.all(
+        const conversationsWithMessages: ChatConversation[] = await Promise.all(
           conversationsData.slice(0, 10).map(async (conv: any) => {
             try {
               const messagesResponse = await backendApiService.getMessages(conv.id);
-              const messages = messagesResponse.success && messagesResponse.data 
-                ? messagesResponse.data.map((msg: any) => ({
+              const messages: ChatMessage[] = messagesResponse.success && messagesResponse.data && 'messages' in messagesResponse.data
+                ? (messagesResponse.data as any).messages.map((msg: any) => ({
                     id: msg.id,
                     text: msg.text,
                     isUser: msg.isUser,
                     timestamp: new Date(msg.timestamp || msg.createdAt),
-                    images: msg.attachments?.filter((a: any) => a.type === 'image').map((a: any) => a.url),
-                    files: msg.attachments?.filter((a: any) => a.type === 'file').map((a: any) => ({
+                    images: msg.attachments?.filter((a: any) => a.type === 'IMAGE' || a.type === 'image').map((a: any) => a.url),
+                    files: msg.attachments?.filter((a: any) => a.type === 'FILE' || a.type === 'file').map((a: any) => ({
                       name: a.filename,
                       uri: a.url,
                       size: a.size,
@@ -265,9 +494,24 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
                   }))
                 : [];
               
+              // Eğer başlık varsayılan ise ve ilk kullanıcı mesajı varsa başlık oluştur
+              let finalTitle = conv.title;
+              if ((conv.title === 'New Conversation' || conv.title === 'Yeni Sohbet' || !conv.title.trim()) && messages.length > 0) {
+                const firstUserMessage = messages.find((msg: ChatMessage) => msg.isUser && msg.text.trim());
+                if (firstUserMessage) {
+                  finalTitle = generateConversationTitle(firstUserMessage.text);
+                  
+                  // Backend'e başlık güncellemesi gönder
+                  backendApiService.updateConversation(conv.id, finalTitle).catch(error => {
+                    console.error('❌ Backend başlık güncelleme hatası:', error);
+                  });
+                }
+              }
+              
               return {
                 id: conv.id,
-                title: conv.title,
+                title: finalTitle,
+                isResearchMode: conv.isResearchMode || false,
                 messages,
                 createdAt: new Date(conv.createdAt),
                 updatedAt: new Date(conv.updatedAt)
@@ -277,6 +521,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
               return {
                 id: conv.id,
                 title: conv.title,
+                isResearchMode: conv.isResearchMode || false,
                 messages: [],
                 createdAt: new Date(conv.createdAt),
                 updatedAt: new Date(conv.updatedAt)
@@ -286,15 +531,16 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         );
         
         // Diğer konuşmaları mesajları olmadan ekle (lazy load için)
-        const remainingConversations = conversationsData.slice(10).map((conv: any) => ({
+        const remainingConversations: ChatConversation[] = conversationsData.slice(10).map((conv: any) => ({
           id: conv.id,
           title: conv.title,
-          messages: [],
+          isResearchMode: conv.isResearchMode || false,
+          messages: [] as ChatMessage[],
           createdAt: new Date(conv.createdAt),
           updatedAt: new Date(conv.updatedAt)
         }));
         
-        const allConversations = [...conversationsWithMessages, ...remainingConversations];
+        const allConversations: ChatConversation[] = [...conversationsWithMessages, ...remainingConversations];
         
         // Sadece mesajı olan konuşmaları göster
         const filteredConversations = allConversations.filter(conv => 
@@ -317,10 +563,13 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     conversations,
     currentConversation,
     addMessage,
+    removeMessage,
     createNewConversation,
     selectConversation,
     deleteConversation,
+    deleteMessage,
     updateConversationTitle,
+    updateResearchMode,
     loadConversations,
   };
 
@@ -338,3 +587,5 @@ export const useChat = (): ChatContextType => {
   }
   return context;
 };
+
+

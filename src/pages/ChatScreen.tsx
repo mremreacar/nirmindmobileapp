@@ -35,7 +35,6 @@ import { useKeyboardHandling } from '@/src/hooks/useKeyboardHandling';
 import { useQuickSuggestions } from '@/src/hooks/useQuickSuggestions';
 import { CHAT_CONSTANTS, CHAT_ERRORS } from '@/src/constants/chatConstants';
 import { speechService } from '@/src/services/speechService';
-import { fileService, FileAnalysisResult } from '@/src/services/fileService';
 import { useDictation, useWaveAnimation } from '@/src/features/dictation';
 import { useFilePermissions, usePermissionDialogs } from '@/src/lib/permissions';
 
@@ -76,6 +75,7 @@ interface ChatScreenProps {
   conversationId?: string;
   initialArastirmaModu?: boolean;
   initialUploadModalOpen?: boolean;
+  initialPromptType?: string; // Quick suggestion'dan gelen promptType
 }
 
 const ChatScreen: React.FC<ChatScreenProps> = ({
@@ -88,8 +88,9 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   conversationId,
   initialArastirmaModu = false,
   initialUploadModalOpen = false,
+  initialPromptType,
 }) => {
-  const { currentConversation, addMessage } = useChat();
+  const { currentConversation, addMessage, selectConversation, updateResearchMode } = useChat();
   const { isLoading, sendMessage, sendQuickSuggestion } = useChatMessages();
   const { 
     keyboardHeight, 
@@ -167,9 +168,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   const scrollViewRef = useRef<ScrollView | null>(null);
   const translateY = useRef(new Animated.Value(initialUploadModalOpen ? 0 : height)).current;
 
-  // Initialize with initial message
+  // Initialize with initial message - sadece conversation yoksa set et
   useEffect(() => {
-    if (initialMessage && currentConversation) {
+    // Eğer conversation varsa ve initial message varsa, mesaj otomatik gönderilecek
+    // Bu yüzden input'u sadece conversation yoksa set edelim
+    if (initialMessage && !currentConversation) {
       setInputText(initialMessage);
     }
   }, [initialMessage, currentConversation]);
@@ -194,56 +197,158 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   }, []);
 
   // Auto-send initial message from HomeScreen - sadece bir kez çalışsın
-  const initialMessageSentRef = useRef(false);
+  const initialMessageSentRef = useRef<string | null>(null); // conversationId'yi sakla
+  const initialMessageContentRef = useRef<string | null>(null); // initialMessage içeriğini sakla
   
   useEffect(() => {
-    console.log('🔍 Initial mesaj useEffect kontrolü:', {
+    // conversationId prop'u varsa onu kullan, yoksa currentConversation.id'yi kullan
+    const targetConversationId = conversationId || currentConversation?.id;
+    
+    // Bu conversation için zaten gönderildi mi kontrol et (EN ERKEN KONTROL)
+    if (initialMessageSentRef.current === targetConversationId && initialMessageContentRef.current === initialMessage) {
+      console.log('⚠️ Bu conversation için bu mesaj zaten gönderildi (erken kontrol)');
+      return;
+    }
+    
+    console.log('🔍 Initial message check:', {
       initialMessage,
-      hasConversation: !!currentConversation,
-      isLoading,
-      messageSent: initialMessageSentRef.current
+      conversationId,
+      currentConversationId: currentConversation?.id,
+      targetConversationId,
+      alreadySent: initialMessageSentRef.current,
+      hasCurrentConversation: !!currentConversation,
+      previousMessage: initialMessageContentRef.current,
+      conversationResearchMode: currentConversation?.isResearchMode,
+      initialArastirmaModu,
+      finalResearchMode: currentConversation?.isResearchMode !== undefined 
+        ? currentConversation.isResearchMode 
+        : initialArastirmaModu
     });
     
-    if (initialMessage && currentConversation && !isLoading && !initialMessageSentRef.current) {
-      console.log('📤 Initial mesaj otomatik gönderiliyor:', initialMessage);
+    // Sadece gerçekten initial message varsa ve henüz gönderilmediyse çalış
+    if (!initialMessage || !targetConversationId) {
+      return;
+    }
+    
+    // Conversation henüz yüklenmemişse bekle, ama initialArastirmaModu varsa bekleme
+    // Çünkü initialArastirmaModu prop'u zaten geçerli (Home ekranından geldiğinde)
+    // Eğer initialArastirmaModu undefined ise (geçmiş konuşmalardan geldiğinde), conversation yüklenene kadar bekle
+    if (!currentConversation && conversationId) {
+      if (initialArastirmaModu === undefined) {
+        console.log('⏳ Conversation henüz yüklenmedi ve initialArastirmaModu yok, bekleniyor...');
+        return;
+      } else {
+        console.log('✅ initialArastirmaModu prop\'u var, conversation yüklenmeden mesaj gönderilebilir');
+      }
+    }
+    
+    // Mesaj gönderildi flag'ini set et (async fonksiyon çağrılmadan önce)
+    initialMessageSentRef.current = targetConversationId;
+    initialMessageContentRef.current = initialMessage;
+    
+    console.log('📤 Initial message gönderiliyor:', {
+      message: initialMessage,
+      conversationId: targetConversationId,
+      researchMode: initialArastirmaModu,
+      conversationResearchMode: currentConversation?.isResearchMode,
+      willUseResearchMode: initialArastirmaModu || currentConversation?.isResearchMode
+    });
+    
+    // Send initial message automatically
+    const sendInitialMessage = async () => {
+      const maxRetries = 3;
+      let retryCount = 0;
       
-      // Mesaj gönderildi flag'ini set et
-      initialMessageSentRef.current = true;
-      
-      // Send initial message automatically
-      const sendInitialMessage = async () => {
+      while (retryCount < maxRetries) {
         try {
+          // Conversation'ın database'e kaydedilmesi için kısa bir gecikme
+          // İlk denemede daha kısa delay (200ms), sonraki denemelerde artır
+          if (retryCount > 0) {
+            await new Promise(resolve => setTimeout(resolve, 300 * retryCount));
+          } else {
+            // İlk denemede çok kısa delay (sadece conversation oluşturulması için)
+            await new Promise(resolve => setTimeout(resolve, 200));
+          }
+          
+          // Araştırma modu aktifse RESEARCH promptType kullan
+          // Öncelik sırası:
+          // 1. initialPromptType (Quick suggestion'dan geldiğinde) - en yüksek öncelik
+          // 2. initialArastirmaModu prop'u (Home ekranından geldiğinde)
+          // 3. currentConversation?.isResearchMode (Conversation yüklendiğinde)
+          // 4. false (varsayılan)
+          const researchMode = initialArastirmaModu === true || initialArastirmaModu === false
+            ? initialArastirmaModu  // Home ekranından geçirilmişse (true veya false) onu kullan
+            : (currentConversation?.isResearchMode === true || currentConversation?.isResearchMode === false
+                ? currentConversation.isResearchMode  // Conversation'dan yüklendiğinde onu kullan
+                : false);  // Hiçbiri yoksa false
+          const promptType = initialPromptType || (researchMode ? 'RESEARCH' : undefined);
+          
+          console.log('🔍 Prompt type kontrolü:', {
+            initialPromptType,
+            conversationResearchMode: currentConversation?.isResearchMode,
+            initialArastirmaModu,
+            finalResearchMode: researchMode,
+            finalPromptType: promptType,
+            willUseInitialPromptType: !!initialPromptType,
+            willUseInitialArastirmaModu: initialArastirmaModu === true || initialArastirmaModu === false,
+            willUseConversationMode: currentConversation?.isResearchMode !== undefined
+          });
+          
           await sendMessage(
             initialMessage,
-            currentConversation.id,
-            initialArastirmaModu,
+            targetConversationId,
+            researchMode,
             initialImages,
-            initialFiles
+            initialFiles,
+            promptType
           );
-          console.log('✅ Initial mesaj başarıyla gönderildi');
-        } catch (error) {
-          console.error('❌ Initial mesaj gönderme hatası:', error);
+          // Input'u temizle
+          setInputText("");
+          console.log('✅ Initial message başarıyla gönderildi');
+          return; // Başarılı oldu, çık
+        } catch (error: any) {
+          retryCount++;
+          console.error(`❌ Initial mesaj gönderme hatası (deneme ${retryCount}/${maxRetries}):`, error);
+          
+          // Eğer conversation not found hatası ise ve retry hakkı varsa tekrar dene
+          if (retryCount < maxRetries && error?.message?.includes('Conversation not found')) {
+            console.log(`🔄 Retry ${retryCount}/${maxRetries}...`);
+            continue;
+          }
+          
+          // Retry hakkı bitti veya farklı bir hata
+          initialMessageSentRef.current = null; // Retry için flag'i reset et
+          initialMessageContentRef.current = null;
+          return;
         }
-      };
-      
-      sendInitialMessage();
-    } else {
-      console.log('⚠️ Initial mesaj gönderilmedi:', {
-        hasMessage: !!initialMessage,
-        hasConversation: !!currentConversation,
-        isLoading,
-        alreadySent: initialMessageSentRef.current
-      });
-    }
-  }, [initialMessage, currentConversation?.id, isLoading]); // Sadece gerekli dependency'ler
+      }
+    };
+    
+    sendInitialMessage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialMessage, conversationId, initialArastirmaModu, initialPromptType]); // currentConversation ve isLoading dependency'den kaldırıldı
 
-  // Initialize conversation when component mounts
+  // Initialize conversation when component mounts - NON-BLOCKING
+  // Bu useEffect initialMessage'dan bağımsız çalışmalı
   useEffect(() => {
     if (conversationId) {
-      // selectConversation will be handled by the custom hook
-      console.log('Conversation ID:', conversationId);
+      // Conversation yüklemesini paralel yap, mesaj gönderimini bloklamasın
+      selectConversation(conversationId).catch(error => {
+        console.error('❌ Conversation seçilirken hata:', error);
+      });
     }
-  }, [conversationId]);
+  }, [conversationId, selectConversation]);
+
+  // Load research mode from conversation when conversation changes
+  // Eğer conversation'dan isResearchMode gelmiyorsa initialArastirmaModu prop'unu kullan
+  useEffect(() => {
+    if (currentConversation?.isResearchMode !== undefined) {
+      setArastirmaModu(currentConversation.isResearchMode);
+    } else if (initialArastirmaModu !== undefined) {
+      // Conversation henüz yüklenmemişse initial prop'u kullan
+      setArastirmaModu(initialArastirmaModu);
+    }
+  }, [currentConversation?.isResearchMode, initialArastirmaModu]);
 
   // AI response is handled by useChatMessages hook - no need for duplicate logic
 
@@ -586,12 +691,14 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     
     // Input'u hemen temizle (kullanıcı deneyimi için)
     setInputText("");
-    setArastirmaModu(false);
+    // Araştırma modunu kapatma - conversation'a bağlı bir ayar
     setSelectedImages([]);
     setSelectedFiles([]);
     
     try {
-      await sendMessage(finalMessage, currentConversation.id, arastirmaModu, selectedImages, selectedFiles);
+      // Araştırma modu aktifse RESEARCH promptType kullan
+      const promptType = arastirmaModu ? 'RESEARCH' : undefined;
+      await sendMessage(finalMessage, currentConversation.id, arastirmaModu, selectedImages, selectedFiles, promptType);
       console.log('✅ Kullanıcı mesajı gönderildi, AI cevap bekleniyor...');
     } catch (error) {
       console.error('❌ Mesaj gönderme hatası:', error);
@@ -615,55 +722,17 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
       return;
     }
     
-    console.log('📤 Sadece dosyalar gönderiliyor:', {
+    console.log('📤 Sadece dosyalar backend üzerinden gönderiliyor:', {
       images: selectedImages.length,
       files: selectedFiles.length
     });
     
-    let fileMessage = '';
-    
-    // Resim bilgisi kaldırıldı - sadece AI analizi yapılacak
-    
-    // Eğer dosya seçilmişse, önce dosyaları analiz et
-    if (selectedFiles.length > 0) {
-      try {
-        console.log('📄 Dosyalar analiz ediliyor...');
-        
-        // Her dosya için analiz yap
-        for (const file of selectedFiles) {
-          if (fileService.isFileTypeSupported(file.name)) {
-            console.log(`📄 Analiz ediliyor: ${file.name}`);
-            
-            const analysisResult = await fileService.uploadAndAnalyzeFile(
-              file.uri,
-              file.name,
-              file.name.split('.').pop() || '',
-              (progress) => {
-                console.log(`📄 ${file.name} analiz progress: ${progress}%`);
-              }
-            );
-            
-            console.log('📄 Dosya analizi tamamlandı:', analysisResult);
-            
-            // Analiz sonucunu mesaja ekle
-            fileMessage += `📄 **${file.name}** analizi:\n\n${analysisResult.text}\n\n`;
-          } else {
-            console.log(`⚠️ Desteklenmeyen dosya türü: ${file.name}`);
-            fileMessage += `⚠️ ${file.name} dosyası desteklenmiyor.\n\n`;
-          }
-        }
-      } catch (error) {
-        console.error('❌ Dosya analizi hatası:', error);
-        fileMessage += '❌ Dosya analizi sırasında hata oluştu.\n\n';
-      }
-    }
-    
-    // Dosya bilgisi ile mesaj oluştur
-    // Dosya bilgisi kaldırıldı - sadece AI analizi yapılacak
-    const finalMessage = fileMessage;
-    
-    await sendMessage(finalMessage, currentConversation.id, arastirmaModu, selectedImages, selectedFiles);
-    setArastirmaModu(false);
+    // Dosyaları backend üzerinden gönder (useChatMessages hook'u zaten backend'e yüklüyor)
+    // Boş mesaj ile gönder (sadece dosyalar/görseller)
+    const promptType = arastirmaModu ? 'RESEARCH' : undefined;
+    await sendMessage('', currentConversation.id, arastirmaModu, selectedImages, selectedFiles, promptType);
+    // Araştırma modunu kapatma - conversation'a bağlı bir ayar
+    // setArastirmaModu(false); // Kaldırıldı - conversation'a bağlı bir ayar
     
     // Dosyaları temizle
     setSelectedImages([]);
@@ -675,15 +744,21 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     console.log('✅ Dosyalar gönderildi, AI cevap bekleniyor...');
   };
 
-  const handleQuickSuggestionSelect = async (suggestion: string) => {
+  const handleQuickSuggestionSelect = async (suggestion: {question: string, promptType: string}) => {
     const selectedSuggestion = handleSuggestionSelect(suggestion);
     await sendQuickSuggestion(selectedSuggestion);
   };
 
 
 
-  const handleResearch = () => {
-    setArastirmaModu(!arastirmaModu);
+  const handleResearch = async () => {
+    const newResearchMode = !arastirmaModu;
+    setArastirmaModu(newResearchMode);
+    
+    // Backend'e araştırma modunu kaydet
+    if (currentConversation?.id) {
+      await updateResearchMode(currentConversation.id, newResearchMode);
+    }
   };
 
   // Enhanced keyboard handling - only for input area
@@ -903,6 +978,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             scrollViewRef={scrollViewRef}
             isKeyboardVisible={isKeyboardVisible}
             keyboardHeight={keyboardHeight}
+            conversationId={currentConversation?.id}
             onScrollToEnd={() => {
               // Optional: Additional scroll handling
             }}

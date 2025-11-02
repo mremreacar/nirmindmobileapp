@@ -43,8 +43,8 @@ const HelpCenterScreen: React.FC<HelpCenterScreenProps> = ({ onBack, onChatPress
   const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set());
   
   let [fontsLoaded] = useFonts({
-    'Poppins-Regular': require('@src/assets/fonts/Poppins-Regular .ttf'),
-    'Poppins-Medium': require('@src/assets/fonts/Poppins-Medium.ttf'),
+    'Poppins-Regular': require('@assets/fonts/Poppins-Regular .ttf'),
+    'Poppins-Medium': require('@assets/fonts/Poppins-Medium.ttf'),
   });
 
   if (!fontsLoaded) {

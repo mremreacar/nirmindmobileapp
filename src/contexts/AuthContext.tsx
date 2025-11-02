@@ -54,6 +54,31 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const checkStoredAuth = async () => {
     try {
       console.log('🔍 Nirmind - Stored auth kontrolü başlatılıyor...');
+      
+      // Development modunda test user bypass (test için)
+      if (__DEV__) {
+        const bypassTest = false; // Test için true yapın, production'da false olmalı
+        if (bypassTest) {
+          const testUser = {
+            id: 'test-user-id',
+            email: 'test@test.com',
+            firstName: 'Test',
+            lastName: 'User',
+            phone: '+905551234567',
+            nirpaxId: 'NRP-TEST-001',
+            apps: ['nirmind'],
+            permissions: {}
+          };
+          await AsyncStorage.setItem('authToken', 'test-token');
+          await AsyncStorage.setItem('user', JSON.stringify(testUser));
+          await backendApiService.setAuthToken('test-token');
+          setUser(testUser);
+          setIsLoading(false);
+          console.log('🧪 Test user bypass aktif');
+          return;
+        }
+      }
+      
       const token = await AsyncStorage.getItem('authToken');
       const storedUser = await AsyncStorage.getItem('user');
 
@@ -121,13 +146,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         });
         
         const userData = {
-          id: decoded.sub,
-          email: decoded.email,
-          firstName: decoded.first_name,
-          lastName: decoded.last_name,
-          nirpaxId: decoded.nirpax_id,
-          apps: decoded.apps,
-          permissions: decoded.permissions,
+          id: userProfile?.id || decoded.sub,
+          email: userProfile?.email || decoded.email,
+          firstName: userProfile?.firstName || decoded.first_name || decoded.firstName,
+          lastName: userProfile?.lastName || decoded.last_name || decoded.lastName,
+          nirpaxId: userProfile?.nirpaxId || decoded.nirpaxId || decoded.nirpax_id,
+          apps: decoded.apps || ['nirmind'],
+          permissions: decoded.permissions || {},
           phone,
           address,
           language,
@@ -175,23 +200,28 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  // Nirpax'tan kullanıcı profil bilgilerini çek
+  // Nirmind'den kullanıcı profil bilgilerini çek
   const fetchUserProfileFromNirpax = async (token: string) => {
     try {
-      console.log('🔍 Nirpax\'tan profil bilgileri çekiliyor...');
+      console.log('🔍 Nirmind\'ten profil bilgileri çekiliyor...');
       
-      const response = await fetch('https://nirpax.com/api/nirpax/user/profile', {
-        method: 'GET',
+      const backendUrl = __DEV__ 
+        ? 'http://localhost:3000/api/nirmind/auth/verify'
+        : 'http://192.168.1.166:3000/api/nirmind/auth/verify';
+      
+      const response = await fetch(backendUrl, {
+        method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
+        body: JSON.stringify({ token }),
       });
 
       if (response.ok) {
         const data = await response.json();
         console.log('✅ Nirpax profil bilgileri alındı:', data);
-        return data.data || data;
+        return data.data?.user || data.user || data.data;
       } else {
         console.warn('⚠️ Nirpax profil bilgileri alınamadı:', response.status, response.statusText);
         return null;
@@ -205,10 +235,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const logout = async () => {
     try {
       console.log('🚪 Nirmind - Logout işlemi başlatılıyor...');
+      
+      // Backend'e logout isteği gönder
+      try {
+        await backendApiService.logout();
+      } catch (error) {
+        console.warn('⚠️ Backend logout hatası (non-blocking):', error);
+      }
+      
       await clearAuth();
       console.log('✅ Nirmind - Logout tamamlandı');
     } catch (error) {
       console.error('❌ Nirmind - Logout hatası:', error);
+      // Hata olsa bile local logout yap
+      await clearAuth();
     }
   };
 

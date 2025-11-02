@@ -1,6 +1,8 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Alert } from 'react-native';
+import Markdown from 'react-native-markdown-display';
 import { ChatMessage } from '@/src/lib/mock/types';
+import { useChat } from '@/src/lib/context/ChatContext';
 
 interface MessageListProps {
   messages: ChatMessage[];
@@ -9,6 +11,7 @@ interface MessageListProps {
   isKeyboardVisible?: boolean;
   keyboardHeight?: number;
   onScrollToEnd?: () => void;
+  conversationId?: string;
 }
 
 const MessageList: React.FC<MessageListProps> = ({ 
@@ -17,8 +20,36 @@ const MessageList: React.FC<MessageListProps> = ({
   scrollViewRef,
   isKeyboardVisible = false,
   keyboardHeight = 0,
-  onScrollToEnd
+  onScrollToEnd,
+  conversationId
 }) => {
+  const { deleteMessage } = useChat();
+
+  const handleDeleteMessage = (message: ChatMessage) => {
+    if (!conversationId) {
+      console.error('❌ Conversation ID bulunamadı');
+      return;
+    }
+
+    Alert.alert(
+      'Mesajı Sil',
+      'Bu mesajı silmek istediğinizden emin misiniz?',
+      [
+        {
+          text: 'İptal',
+          style: 'cancel',
+        },
+        {
+          text: 'Sil',
+          style: 'destructive',
+          onPress: () => {
+            deleteMessage(conversationId, message.id);
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <ScrollView
       ref={scrollViewRef}
@@ -57,13 +88,17 @@ const MessageList: React.FC<MessageListProps> = ({
       }}
     >
       {messages.map((message) => (
-        <View
+        <TouchableOpacity
           key={message.id}
-          style={[
-            styles.messageContainer,
-            message.isUser ? styles.userMessage : styles.aiMessage
-          ]}
+          onLongPress={() => handleDeleteMessage(message)}
+          activeOpacity={0.7}
         >
+          <View
+            style={[
+              styles.messageContainer,
+              message.isUser ? styles.userMessage : styles.aiMessage
+            ]}
+          >
           <View style={[
             styles.messageWrapper,
             message.isUser ? styles.userMessageWrapper : styles.aiMessageWrapper
@@ -91,8 +126,8 @@ const MessageList: React.FC<MessageListProps> = ({
                 <View style={styles.filesContainer}>
                   {message.files.map((file, index) => (
                     <View key={index} style={styles.fileItem}>
-                      <Text style={styles.fileIcon}>📄</Text>
-                      <Text style={styles.fileName}>{file.name}</Text>
+                      <Text allowFontScaling={false} style={styles.fileIcon}>📄</Text>
+                      <Text allowFontScaling={false} style={styles.fileName}>{file.name}</Text>
                     </View>
                   ))}
                 </View>
@@ -100,15 +135,24 @@ const MessageList: React.FC<MessageListProps> = ({
               
               {/* Mesaj metni */}
               {message.text && (
-                <Text style={[
-                  styles.messageText,
-                  message.isUser ? styles.userMessageText : styles.aiMessageText
-                ]}>
-                  {message.text}
-                </Text>
+                message.isUser ? (
+                  <Text allowFontScaling={false} style={[
+                    styles.messageText,
+                    styles.userMessageText
+                  ]}>
+                    {message.text}
+                  </Text>
+                ) : (
+                  <Markdown
+                    style={markdownStyles}
+                    allowFontScaling={false}
+                  >
+                    {message.text}
+                  </Markdown>
+                )
               )}
             </View>
-            <Text style={[
+            <Text allowFontScaling={false} style={[
               styles.messageTime,
               message.isUser ? styles.userMessageTime : styles.aiMessageTime
             ]}>
@@ -118,7 +162,8 @@ const MessageList: React.FC<MessageListProps> = ({
               })}
             </Text>
           </View>
-        </View>
+          </View>
+        </TouchableOpacity>
       ))}
       
       {/* Loading indicator */}
@@ -275,6 +320,116 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     flex: 1,
+  },
+});
+
+// Markdown stilleri
+const markdownStyles = StyleSheet.create({
+  body: {
+    fontFamily: 'Poppins-Regular',
+    fontSize: 16,
+    lineHeight: 24,
+    color: '#FFFFFF',
+  },
+  heading1: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 24,
+    lineHeight: 32,
+    color: '#FFFFFF',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  heading2: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 20,
+    lineHeight: 28,
+    color: '#FFFFFF',
+    marginTop: 14,
+    marginBottom: 6,
+  },
+  heading3: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 18,
+    lineHeight: 26,
+    color: '#FFFFFF',
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  heading4: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 16,
+    lineHeight: 24,
+    color: '#FFFFFF',
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  paragraph: {
+    marginTop: 8,
+    marginBottom: 8,
+    color: '#FFFFFF',
+  },
+  strong: {
+    fontFamily: 'Poppins-Bold',
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  em: {
+    fontStyle: 'italic',
+    color: '#FFFFFF',
+  },
+  link: {
+    color: '#FFFFFF',
+    textDecorationLine: 'underline',
+  },
+  listItem: {
+    marginTop: 4,
+    marginBottom: 4,
+    color: '#FFFFFF',
+  },
+  bullet_list: {
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  ordered_list: {
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  code_inline: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: 4,
+    fontFamily: 'monospace',
+    fontSize: 14,
+    color: '#FFFFFF',
+  },
+  fence: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  code_block: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  blockquote: {
+    borderLeftWidth: 4,
+    borderLeftColor: 'rgba(255, 255, 255, 0.3)',
+    paddingLeft: 12,
+    marginTop: 8,
+    marginBottom: 8,
+    color: '#FFFFFF',
+  },
+  hr: {
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    height: 1,
+    marginTop: 16,
+    marginBottom: 16,
   },
 });
 

@@ -5,7 +5,7 @@ class CrossAppAuthService {
   private readonly NIRPAX_DEEP_LINK = 'nirpax://cross-app-auth';
   private readonly NIRPAX_PACKAGE_NAME = 'com.nireya.nirpax'; // Android package name
   private readonly NIRPAX_BUNDLE_ID = 'com.nireya.nirpax'; // iOS bundle ID
-  private readonly BACKEND_LOGIN_URL = 'https://nirpax.com/api/nirpax/auth/cross-app-login-page';
+  private readonly BACKEND_LOGIN_URL = 'http://192.168.1.166:3000/api/nirpax/auth/cross-app-login-page';
 
   private constructor() {}
 

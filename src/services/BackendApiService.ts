@@ -1,19 +1,25 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Backend API URL - Nirmind backend
-const API_BASE_URL = process.env.EXPO_PUBLIC_BACKEND_API_URL || 'https://nirpax.com/api';
+// Backend API URL - Nircore backend
+// iOS simulator'da localhost Mac'in localhost'u olarak çalışır
+// Gerçek cihazda Mac'in IP adresini kullanın (örn: http://192.168.1.166:3000/api)
+const API_BASE_URL = __DEV__ 
+  ? 'http://localhost:3000/api'  // iOS Simulator için
+  : 'http://192.168.1.166:3000/api'; // Gerçek cihaz için (production'da değiştirin)
 
 interface ApiResponse<T = any> {
   success: boolean;
   data?: T;
   error?: string;
   message?: string;
+  isNewUser?: boolean;
 }
 
 interface ConversationData {
   id: string;
   userId: string;
   title: string;
+  isResearchMode?: boolean;
   createdAt: string;
   updatedAt: string;
   isActive: boolean;
@@ -71,15 +77,37 @@ class BackendApiService {
     await AsyncStorage.removeItem('authToken');
   }
 
+  // Logout (optional - backend'e bildirim için)
+  async logout(): Promise<ApiResponse<any>> {
+    try {
+      // Backend'e logout bildirimi gönder (opsiyonel)
+      const response = await this.makeRequest('/nirmind/auth/logout', {
+        method: 'POST',
+      });
+      
+      // Token'ı temizle
+      await this.clearAuthToken();
+      
+      return response;
+    } catch (error: any) {
+      // Hata olsa bile token'ı temizle
+      await this.clearAuthToken();
+      return {
+        success: false,
+        error: error.message || 'Logout failed',
+      };
+    }
+  }
+
   private async makeRequest<T = any>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
     try {
       const token = await this.getAuthToken();
-      const headers: HeadersInit = {
+      const headers: Record<string, string> = {
         'Content-Type': 'application/json',
-        ...(options.headers as HeadersInit || {}),
+        ...(options.headers as Record<string, string> || {}),
       };
 
       if (token) {
@@ -91,7 +119,7 @@ class BackendApiService {
       
       const response = await fetch(fullUrl, {
         ...options,
-        headers,
+        headers: headers as HeadersInit,
       });
 
       // Handle 401 Unauthorized
@@ -109,12 +137,15 @@ class BackendApiService {
         return {
           success: false,
           error: data.message || data.error || 'Bir hata oluştu',
+          message: data.message,
         };
       }
 
       return {
         success: true,
         data: data.data || data,
+        isNewUser: data.isNewUser,
+        message: data.message,
       };
     } catch (error: any) {
       console.error('API Request Error:', error);
@@ -178,6 +209,13 @@ class BackendApiService {
     });
   }
 
+  async updateResearchMode(conversationId: string, isResearchMode: boolean): Promise<ApiResponse<any>> {
+    return this.makeRequest(`/nirmind/conversations/${conversationId}/research-mode`, {
+      method: 'PUT',
+      body: JSON.stringify({ isResearchMode }),
+    });
+  }
+
   async deleteConversation(conversationId: string): Promise<ApiResponse<any>> {
     return this.makeRequest(`/nirmind/conversations/${conversationId}`, {
       method: 'DELETE',
@@ -185,15 +223,21 @@ class BackendApiService {
   }
 
   // Message methods
-  async sendMessage(conversationId: string, message: string, attachments?: any[]): Promise<ApiResponse<any>> {
+  async sendMessage(conversationId: string, message: string, attachments?: any[], promptType?: string): Promise<ApiResponse<any>> {
     return this.makeRequest('/nirmind/messages', {
       method: 'POST',
-      body: JSON.stringify({ conversationId, message, attachments }),
+      body: JSON.stringify({ conversationId, message, attachments, promptType }),
     });
   }
 
   async getMessages(conversationId: string, page: number = 1, limit: number = 50): Promise<ApiResponse<MessageData[]>> {
     return this.makeRequest(`/nirmind/conversations/${conversationId}/messages?page=${page}&limit=${limit}`);
+  }
+
+  async deleteMessage(messageId: string): Promise<ApiResponse<any>> {
+    return this.makeRequest(`/nirmind/messages/${messageId}`, {
+      method: 'DELETE',
+    });
   }
 
   async analyzeAttachment(data: {
@@ -208,8 +252,26 @@ class BackendApiService {
   }
 
   // AI methods
-  async getQuickSuggestions(): Promise<ApiResponse<QuickSuggestion[]>> {
+  async getQuickSuggestions(): Promise<ApiResponse<{question: string, promptType: string}[]>> {
     return this.makeRequest('/nirmind/quick-suggestions');
+  }
+
+  async getQuestions(params?: { category?: string; limit?: number; page?: number }): Promise<ApiResponse<any>> {
+    const queryParams = new URLSearchParams();
+    if (params?.category) queryParams.append('category', params.category);
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.page) queryParams.append('page', params.page.toString());
+    
+    const queryString = queryParams.toString();
+    return this.makeRequest(`/nirmind/questions${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async getResearchSuggestions(limit?: number): Promise<ApiResponse<{question: string, promptType: string}[]>> {
+    const queryParams = new URLSearchParams();
+    if (limit) queryParams.append('limit', limit.toString());
+    
+    const queryString = queryParams.toString();
+    return this.makeRequest(`/nirmind/research-suggestions${queryString ? `?${queryString}` : ''}`);
   }
 
   async getAISuggestions(): Promise<ApiResponse<any>> {
@@ -222,6 +284,66 @@ class BackendApiService {
 
   async getFAQ(): Promise<ApiResponse<any>> {
     return this.makeRequest('/nirmind/faq');
+  }
+
+  // Attachment upload methods
+  async uploadAttachment(
+    type: 'IMAGE' | 'FILE' | 'AUDIO' | 'VIDEO',
+    base64Data: string,
+    filename?: string,
+    mimeType?: string
+  ): Promise<ApiResponse<{
+    url: string;
+    relativeUrl: string;
+    filename: string;
+    size: number;
+    mimeType: string;
+    type: string;
+  }>> {
+    return this.makeRequest('/nirmind/attachments/upload', {
+      method: 'POST',
+      body: JSON.stringify({ type, base64Data, filename, mimeType }),
+    });
+  }
+
+  async uploadMultipleAttachments(
+    attachments: Array<{
+      type: 'IMAGE' | 'FILE' | 'AUDIO' | 'VIDEO';
+      base64Data: string;
+      filename?: string;
+      mimeType?: string;
+    }>
+  ): Promise<ApiResponse<Array<{
+    success: boolean;
+    data?: {
+      url: string;
+      relativeUrl: string;
+      filename: string;
+      size: number;
+      mimeType: string;
+      type: string;
+    };
+    error?: string;
+  }>>> {
+    return this.makeRequest('/nirmind/attachments/upload-multiple', {
+      method: 'POST',
+      body: JSON.stringify({ attachments }),
+    });
+  }
+
+  // Audio transcription (dikte için)
+  async transcribeAudio(
+    audioData: string, // Base64 encoded audio
+    language: string = 'tr',
+    audioType: string = 'audio/m4a'
+  ): Promise<ApiResponse<{
+    text: string;
+    language: string;
+  }>> {
+    return this.makeRequest('/nirmind/audio/transcribe', {
+      method: 'POST',
+      body: JSON.stringify({ audioData, language, audioType }),
+    });
   }
 
   // ==================== Nirpax Auth Routes (Cross-App) ====================
@@ -258,7 +380,7 @@ class BackendApiService {
     displayName: string;
     photoURL?: string;
   }): Promise<ApiResponse<any>> {
-    return this.makeRequest('/nirpax/auth/google', {
+    return this.makeRequest('/nirmind/auth/google', {
       method: 'POST',
       body: JSON.stringify({
         idToken: data.idToken,
@@ -281,7 +403,10 @@ class BackendApiService {
       } | null;
     };
   }): Promise<ApiResponse<any>> {
-    return this.makeRequest('/nirpax/auth/apple', {
+    console.log('🌐 Apple Auth Request:', `${API_BASE_URL}/nirmind/auth/apple`);
+    console.log('📤 Apple Auth Data:', JSON.stringify(data, null, 2));
+    
+    return this.makeRequest('/nirmind/auth/apple', {
       method: 'POST',
       body: JSON.stringify(data),
     });
