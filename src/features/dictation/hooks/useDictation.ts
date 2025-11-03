@@ -1,5 +1,4 @@
 import { useState, useCallback, useRef } from 'react';
-import { Vibration } from 'react-native';
 import { speechService } from '../../../services/speechService';
 import { DictationState, DictationCallbacks, DictationConfig } from '../types';
 
@@ -33,8 +32,7 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
     }
 
     try {
-      // Haptic feedback - başlangıç
-      Vibration.vibrate(50); // 50ms kısa titreşim
+      // Haptic feedback kaldırıldı - kullanıcı titreşim istemiyor
       
       isProcessingRef.current = true;
       setIsDictating(true);
@@ -68,6 +66,7 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
         },
         (error: string) => {
           console.error('Dikte hatası:', error);
+          // Hata durumunda titreşim yapma - kullanıcı Alert ile bilgilendirilecek
           callbacks.onError(error);
           setIsDictating(false);
           setIsListening(false);
@@ -114,8 +113,7 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
         
         // Kısa bir gecikme sonra processing'i kapat (desifre tamamlandı)
         setTimeout(() => {
-          // Haptic feedback - tamamlandı
-          Vibration.vibrate([100, 50, 100]); // Başarı pattern'i
+          // Haptic feedback kaldırıldı - kullanıcı titreşim istemiyor
           setIsProcessing(false);
           callbacks.onStop?.();
         }, 800); // 800ms desifre süresi

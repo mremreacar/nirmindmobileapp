@@ -109,6 +109,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     },
     onError: (error: string) => {
       console.error("Dikte hatası:", error);
+      // Kullanıcıya bilgilendirme mesajı göster
+      Alert.alert("Bilgi", error, [{ text: "Tamam" }]);
     },
     onStart: () => {
       console.log("Dikte başlatıldı");

@@ -9,6 +9,7 @@ import {
   ScrollView,
   Alert,
   Image,
+  Keyboard,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFonts } from 'expo-font';
@@ -98,9 +99,18 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
   }, [loadConversations]);
 
   const handleConversationSelect = (conversationId: string) => {
+    // Klavyeyi kapat
+    Keyboard.dismiss();
     if (onSelectConversation) {
       onSelectConversation(conversationId);
     }
+    onBack();
+  };
+
+  const handleBackPress = () => {
+    // Klavyeyi kapat
+    Keyboard.dismiss();
+    // Sonra geri git
     onBack();
   };
 
@@ -151,7 +161,7 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
             <TouchableOpacity 
               style={styles.backButton}
               activeOpacity={1}
-              onPress={onBack}
+              onPress={handleBackPress}
             >
               <SvgXml 
                 xml={leftArrowIcon}
@@ -190,20 +200,24 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
           {/* Chat List */}
           <View style={styles.chatList}>
             {conversations
-              .filter(conv => 
-                conv.title.toLowerCase().includes((searchText || '').toLowerCase()) &&
-                conv.messages && conv.messages.length > 0 // Sadece mesajı olan konuşmaları göster
-              )
+              .filter(conv => {
+                const title = conv.title || '';
+                const search = searchText || '';
+                return (
+                  title.toLowerCase().includes(search.toLowerCase()) &&
+                  conv.messages && conv.messages.length > 0 // Sadece mesajı olan konuşmaları göster
+                );
+              })
               .map((conversation) => (
                 <TouchableOpacity 
                   key={conversation.id} 
                   style={styles.chatItem}
                   activeOpacity={1}
                   onPress={() => handleConversationSelect(conversation.id)}
-                  onLongPress={() => handleDeleteConversation(conversation.id, conversation.title)}
+                  onLongPress={() => handleDeleteConversation(conversation.id, conversation.title || 'Sohbet')}
                 >
                   <View style={styles.chatItemContent}>
-                    <Text allowFontScaling={false} style={styles.chatText}>{conversation.title}</Text>
+                    <Text allowFontScaling={false} style={styles.chatText}>{conversation.title || 'Sohbet'}</Text>
                     <Text allowFontScaling={false} style={styles.chatDate}>
                       {new Date(conversation.updatedAt).toLocaleDateString('tr-TR', {
                         day: 'numeric',

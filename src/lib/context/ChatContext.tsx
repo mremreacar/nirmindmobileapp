@@ -25,6 +25,10 @@ interface ChatProviderProps {
 // Konuşma başlığı oluşturma fonksiyonu
 const generateConversationTitle = (messageText: string): string => {
   // Mesajı temizle ve kısalt
+  if (!messageText || typeof messageText !== 'string') {
+    return 'Yeni Sohbet';
+  }
+  
   let title = messageText.trim();
   
   // Çok uzun mesajları kısalt
@@ -108,7 +112,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     });
 
     // İlk kullanıcı mesajından sonra başlık güncelle ve backend'e konuşma kaydet
-    if (message.isUser && message.text.trim() && messageAdded) {
+    if (message.isUser && message.text && message.text.trim() && messageAdded) {
       setConversations(prev => {
         const conversation = prev.find(conv => conv.id === conversationId);
         if (conversation && (conversation.title === "Yeni Sohbet" || conversation.title === "New Conversation")) {
@@ -257,7 +261,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       if (messagesResponse.success && messagesResponse.data && 'messages' in messagesResponse.data) {
         const backendMessages: ChatMessage[] = (messagesResponse.data as any).messages.map((msg: any) => ({
           id: msg.id,
-          text: msg.text,
+          text: msg.text || '', // text undefined olabilir, boş string olarak set et
           isUser: msg.isUser,
           timestamp: new Date(msg.timestamp || msg.createdAt),
           images: msg.attachments?.filter((a: any) => a.type === 'IMAGE' || a.type === 'image').map((a: any) => a.url),
@@ -270,8 +274,8 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         }));
         
         // Eğer conversation başlığı varsayılan ise ve ilk kullanıcı mesajı varsa başlık oluştur
-        const firstUserMessage = backendMessages.find(msg => msg.isUser && msg.text.trim());
-        if (firstUserMessage && (conversation.title === 'New Conversation' || conversation.title === 'Yeni Sohbet' || !conversation.title.trim())) {
+        const firstUserMessage = backendMessages.find(msg => msg.isUser && msg.text && msg.text.trim());
+        if (firstUserMessage && (conversation.title === 'New Conversation' || conversation.title === 'Yeni Sohbet' || !(conversation.title || '').trim())) {
           const newTitle = generateConversationTitle(firstUserMessage.text);
           
           // Backend'e başlık güncellemesi gönder
@@ -481,7 +485,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
               const messages: ChatMessage[] = messagesResponse.success && messagesResponse.data && 'messages' in messagesResponse.data
                 ? (messagesResponse.data as any).messages.map((msg: any) => ({
                     id: msg.id,
-                    text: msg.text,
+                    text: msg.text || '', // text undefined olabilir, boş string olarak set et
                     isUser: msg.isUser,
                     timestamp: new Date(msg.timestamp || msg.createdAt),
                     images: msg.attachments?.filter((a: any) => a.type === 'IMAGE' || a.type === 'image').map((a: any) => a.url),
@@ -495,9 +499,9 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
                 : [];
               
               // Eğer başlık varsayılan ise ve ilk kullanıcı mesajı varsa başlık oluştur
-              let finalTitle = conv.title;
-              if ((conv.title === 'New Conversation' || conv.title === 'Yeni Sohbet' || !conv.title.trim()) && messages.length > 0) {
-                const firstUserMessage = messages.find((msg: ChatMessage) => msg.isUser && msg.text.trim());
+              let finalTitle = conv.title || '';
+              if ((conv.title === 'New Conversation' || conv.title === 'Yeni Sohbet' || !(conv.title || '').trim()) && messages.length > 0) {
+                const firstUserMessage = messages.find((msg: ChatMessage) => msg.isUser && msg.text && msg.text.trim());
                 if (firstUserMessage) {
                   finalTitle = generateConversationTitle(firstUserMessage.text);
                   

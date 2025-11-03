@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, StyleSheet, Keyboard, Linking } from 'react-native';
+import { View, StyleSheet, Keyboard as RNKeyboard, Linking } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import SplashScreen from './src/pages/SplashScreen';
@@ -40,7 +40,7 @@ function AppContent() {
   // Simple transition function - no animations
   const performSmoothTransition = useCallback((targetScreen: Screen) => {
     // Önce klavyeyi kapat
-    Keyboard.dismiss();
+    RNKeyboard.dismiss();
     // Sonra sayfa geçişini yap
     setCurrentScreen(targetScreen);
   }, []);
@@ -127,10 +127,12 @@ function AppContent() {
   }, [performSmoothTransition]);
 
   const handleBackToHome = useCallback(() => {
+    RNKeyboard.dismiss(); // Klavyeyi kapat
     performSmoothTransition(Screen.HOME);
   }, [performSmoothTransition]);
 
   const handleSelectConversation = useCallback((conversationId: string) => {
+    RNKeyboard.dismiss(); // Klavyeyi kapat
     setSelectedConversationId(conversationId);
     performSmoothTransition(Screen.HOME);
   }, [performSmoothTransition]);
