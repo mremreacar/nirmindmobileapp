@@ -45,23 +45,6 @@ function AppContent() {
     setCurrentScreen(targetScreen);
   }, []);
 
-  useEffect(() => {
-    // Auth durumu kontrol edilene kadar splash ekranında kal
-    if (isLoading) {
-      return;
-    }
-
-    // Auth kontrolü tamamlandı
-    if (user) {
-      // Kullanıcı giriş yapmış, profil bilgilerini kontrol et
-      checkProfileCompleteness();
-    } else {
-      // Kullanıcı giriş yapmamış, onboarding'e git
-      console.log('ℹ️ Kullanıcı giriş yapmamış, onboarding ekranına yönlendiriliyor');
-      performSmoothTransition(Screen.ONBOARDING);
-    }
-  }, [isLoading, user, checkProfileCompleteness, performSmoothTransition]);
-
   const checkProfileCompleteness = useCallback(async () => {
     try {
       console.log('🔍 Profil bilgileri kontrol ediliyor...');
@@ -100,6 +83,23 @@ function AppContent() {
       performSmoothTransition(Screen.HOME);
     }
   }, [performSmoothTransition, backendApiService]);
+
+  useEffect(() => {
+    // Auth durumu kontrol edilene kadar splash ekranında kal
+    if (isLoading) {
+      return;
+    }
+
+    // Auth kontrolü tamamlandı
+    if (user) {
+      // Kullanıcı giriş yapmış, profil bilgilerini kontrol et
+      checkProfileCompleteness();
+    } else {
+      // Kullanıcı giriş yapmamış, onboarding'e git
+      console.log('ℹ️ Kullanıcı giriş yapmamış, onboarding ekranına yönlendiriliyor');
+      performSmoothTransition(Screen.ONBOARDING);
+    }
+  }, [isLoading, user, checkProfileCompleteness, performSmoothTransition]);
 
   // Optimized navigation handlers with smooth transitions
   const handleOnboardingNext = useCallback(() => {

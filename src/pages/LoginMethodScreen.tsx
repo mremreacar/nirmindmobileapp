@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import * as React from "react";
+import { useState } from "react";
 import {
   View,
   Text,
@@ -47,10 +48,10 @@ interface LoginMethodScreenProps {
   onLoginSuccess: () => void;
 }
 
-const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
+const LoginMethodScreen = ({
   onBack,
   onLoginSuccess,
-}) => {
+}: LoginMethodScreenProps): React.JSX.Element | null => {
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isAppleLoading, setIsAppleLoading] = useState(false);
   const [isNirpaxLoading, setIsNirpaxLoading] = useState(false);

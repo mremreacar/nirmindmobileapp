@@ -22,6 +22,7 @@
         "NSPhotoLibraryAddUsageDescription": "Bu uygulama fotoğraflarınızı kaydetmek için izin gerektirir.",
         "NSDocumentsFolderUsageDescription": "Bu uygulama dosyalarınıza erişmek için izin gerektirir.",
         "NSDownloadsFolderUsageDescription": "Bu uygulama indirilen dosyalarınıza erişmek için izin gerektirir.",
+        "NSSpeechRecognitionUsageDescription": "Bu uygulama, sesle komut veya dikte özelliğini kullanabilmeniz için ses tanıma erişimine ihtiyaç duyar.",
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true,
           "NSExceptionDomains": {
@@ -37,14 +38,10 @@
         "CFBundleURLTypes": [
           {
             "CFBundleURLName": "nirmind",
-            "CFBundleURLSchemes": [
-              "nirmind"
-            ]
+            "CFBundleURLSchemes": ["nirmind"]
           }
         ],
-        "LSApplicationQueriesSchemes": [
-          "nirpax"
-        ]
+        "LSApplicationQueriesSchemes": ["nirpax"]
       },
       "appleTeamId": "5B43Y4572U"
     },
@@ -74,10 +71,7 @@
               "scheme": "nirmind"
             }
           ],
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ]
+          "category": ["BROWSABLE", "DEFAULT"]
         }
       ]
     },
