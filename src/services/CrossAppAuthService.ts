@@ -1,11 +1,15 @@
 import { Linking, Platform } from 'react-native';
 
+const API_BASE_URL = __DEV__ 
+  ? 'http://192.168.0.186:3000/api'  // Mac'in local IP adresi (iOS Simulator için)
+  : 'https://api.nireya.com/api';
+
 class CrossAppAuthService {
   private static instance: CrossAppAuthService;
   private readonly NIRPAX_DEEP_LINK = 'nirpax://cross-app-auth';
   private readonly NIRPAX_PACKAGE_NAME = 'com.nireya.nirpax'; // Android package name
   private readonly NIRPAX_BUNDLE_ID = 'com.nireya.nirpax'; // iOS bundle ID
-  private readonly BACKEND_LOGIN_URL = 'http://192.168.1.166:3000/api/nirpax/auth/cross-app-login-page';
+  private readonly BACKEND_LOGIN_URL = `${API_BASE_URL}/nirpax/auth/cross-app-login-page`;
 
   private constructor() {}
 

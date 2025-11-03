@@ -60,11 +60,26 @@ class GoogleAuthService {
       const userInfo = await GoogleSignin.signIn();
       console.log('✅ Google Sign-In tamamlandı');
 
+      // Kullanıcı vazgeçtiyse kontrol et
+      if (!userInfo || !userInfo.data || !userInfo.data.user) {
+        console.log('ℹ️ Google Sign-In iptal edildi');
+        return {
+          success: false,
+          error: 'CANCELLED',
+          message: 'Giriş iptal edildi'
+        };
+      }
+
       // Type-safe user extraction
       const googleUser = (userInfo as any).data?.user || (userInfo as any).user || userInfo;
       
       if (!googleUser || !googleUser.email) {
-        throw new Error('Google hesabından kullanıcı bilgileri alınamadı');
+        console.log('ℹ️ Google Sign-In iptal edildi veya kullanıcı bilgileri alınamadı');
+        return {
+          success: false,
+          error: 'CANCELLED',
+          message: 'Giriş iptal edildi'
+        };
       }
 
       // Token'ları al - signIn sonrası kısa bir bekleme ekle
@@ -130,15 +145,19 @@ class GoogleAuthService {
         };
       }
     } catch (error: any) {
-      console.error('❌ Google Sign-In error:', error);
-
+      // Kullanıcı iptal ettiyse sessizce iptal et
       if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+        console.log('ℹ️ Google Sign-In iptal edildi');
         return {
           success: false,
           error: 'CANCELLED',
           message: 'Giriş iptal edildi'
         };
-      } else if (error.code === statusCodes.IN_PROGRESS) {
+      }
+      
+      console.error('❌ Google Sign-In error:', error);
+
+      if (error.code === statusCodes.IN_PROGRESS) {
         return {
           success: false,
           error: 'IN_PROGRESS',

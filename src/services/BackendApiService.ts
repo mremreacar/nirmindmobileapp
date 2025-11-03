@@ -13,6 +13,10 @@ interface ApiResponse<T = any> {
   error?: string;
   message?: string;
   isNewUser?: boolean;
+  errorName?: string;
+  errorCode?: string;
+  errorDetails?: any;
+  errorStack?: string;
 }
 
 interface ConversationData {
@@ -134,11 +138,20 @@ class BackendApiService {
       const data = await response.json();
 
       if (!response.ok) {
+        console.error('❌ Backend Error Response:', {
+          status: response.status,
+          statusText: response.statusText,
+          data: data
+        });
+        
         return {
           success: false,
           error: data.message || data.error || 'Bir hata oluştu',
           message: data.message,
-          details: data.details,
+          errorName: data.errorName,
+          errorCode: data.errorCode,
+          errorDetails: data.errorDetails,
+          errorStack: data.errorStack,
         };
       }
 

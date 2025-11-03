@@ -137,21 +137,36 @@ class AppleAuthService {
         };
       } else {
         console.error('❌ Backend Apple Auth başarısız:', response.error);
+        console.error('❌ Backend Error Details:', {
+          errorName: response.errorName,
+          errorCode: response.errorCode,
+          errorDetails: response.errorDetails,
+          errorStack: response.errorStack
+        });
         return {
           success: false,
           error: response.error || 'Failed to authenticate with backend',
-          message: response.message || 'Backend ile kimlik doğrulama başarısız'
+          message: response.message || 'Backend ile kimlik doğrulama başarısız',
+          errorName: response.errorName,
+          errorCode: response.errorCode,
+          errorDetails: response.errorDetails,
+          errorStack: response.errorStack
         };
       }
     } catch (error: any) {
-      console.error('❌ Apple Sign-In error:', error);
-      
-      if (error.code === 'ERR_REQUEST_CANCELED') {
+      // Kullanıcı iptal ettiyse sessizce iptal et
+      if (error.code === 'ERR_REQUEST_CANCELED' || error.message?.includes('canceled')) {
+        console.log('ℹ️ Apple Sign-In iptal edildi');
         return { 
-          success: false, 
+          success: false,
+          error: 'CANCELLED',
           message: 'Apple girişi iptal edildi' 
         };
-      } else if (error.code === 'ERR_REQUEST_NOT_HANDLED') {
+      }
+      
+      console.error('❌ Apple Sign-In error:', error);
+      
+      if (error.code === 'ERR_REQUEST_NOT_HANDLED') {
         return { 
           success: false, 
           message: 'Apple girişi işlenemedi' 

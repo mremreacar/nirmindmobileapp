@@ -9,7 +9,10 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Platform,
+  StatusBar,
 } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFonts } from "expo-font";
 import { SvgXml } from "react-native-svg";
@@ -48,10 +51,13 @@ const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
   onBack,
   onLoginSuccess,
 }) => {
-  const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [isAppleLoading, setIsAppleLoading] = useState(false);
+  const [isNirpaxLoading, setIsNirpaxLoading] = useState(false);
   const [showWebView, setShowWebView] = useState(false);
   const [webViewUrl, setWebViewUrl] = useState("");
   const { handleAuthCallback, setUser } = useAuth();
+  const insets = useSafeAreaInsets();
   const crossAppAuthService = CrossAppAuthService.getInstance();
   const googleAuthService = GoogleAuthService.getInstance();
   const appleAuthService = AppleAuthService.getInstance();
@@ -64,8 +70,10 @@ const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
   });
 
   const handleSocialLogin = async (provider: 'google' | 'apple') => {
+    const setLoading = provider === 'google' ? setIsGoogleLoading : setIsAppleLoading;
+    
     try {
-      setIsLoading(true);
+      setLoading(true);
       console.log(`🔵 ${provider === 'google' ? 'Google' : 'Apple'} login başlatılıyor...`);
 
       let result;
@@ -77,8 +85,12 @@ const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
         }
       } catch (authError: any) {
         console.error(`❌ ${provider} auth service error:`, authError);
-        setIsLoading(false);
-        Alert.alert("Hata", authError.message || `${provider === 'google' ? 'Google' : 'Apple'} ile giriş yapılamadı`);
+        setLoading(false);
+        Alert.alert(
+          "Giriş Başarısız",
+          "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+          [{ text: "Tamam" }]
+        );
         return;
       }
 
@@ -118,83 +130,145 @@ const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
             setUser(userData);
             
             console.log(`✅ ${provider === 'google' ? 'Google' : 'Apple'} kullanıcı bilgileri kaydedildi`);
-            setIsLoading(false);
+            setLoading(false);
           } else {
             // Fallback: handleAuthCallback kullan
             await handleAuthCallback(result.token.accessToken);
-            setIsLoading(false);
+            setLoading(false);
           }
         } catch (error: any) {
           console.error(`❌ User kaydetme hatası:`, error);
-          setIsLoading(false);
-          Alert.alert("Hata", error.message || "Login başarısız");
+          setLoading(false);
+          Alert.alert(
+            "Giriş Başarısız",
+            "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+            [{ text: "Tamam" }]
+          );
         }
       } else {
-        console.log(`❌ ${provider} login başarısız:`, result.error || result.message);
-        setIsLoading(false);
-        const errorMessage = result.message || result.error || `${provider === 'google' ? 'Google' : 'Apple'} ile giriş yapılamadı`;
-        if (result.error !== 'CANCELLED') {
-          Alert.alert("Hata", errorMessage);
+        setLoading(false);
+        // Kullanıcı iptal etmediyse uyarı göster
+        if (result.error !== 'CANCELLED' && result.error !== 'USER_CANCELLED') {
+          console.log(`❌ ${provider} login başarısız:`, result.error || result.message);
+          Alert.alert(
+            "Giriş Başarısız",
+            "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+            [{ text: "Tamam" }]
+          );
+        } else {
+          console.log(`ℹ️ ${provider} login iptal edildi`);
         }
       }
     } catch (error: any) {
       console.error(`❌ ${provider === 'google' ? 'Google' : 'Apple'} login hatası:`, error);
-      setIsLoading(false);
-      Alert.alert("Hata", error.message || `${provider === 'google' ? 'Google' : 'Apple'} ile giriş yapılamadı`);
+      setLoading(false);
+      Alert.alert(
+        "Giriş Başarısız",
+        "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+        [{ text: "Tamam" }]
+      );
     }
   };
 
   const handleNirpaxLogin = async () => {
     try {
-      setIsLoading(true);
+      setIsNirpaxLoading(true);
       console.log("🔵 Nirpax login başlatılıyor...");
 
-      const result = await crossAppAuthService.initiateNirpaxLogin();
-
-      if (result.type === "deep-link") {
-        // Deep link ile Nirpax açıldı, kullanıcı Nirpax'ta login olacak
-        // Callback deep link üzerinden gelecek
-        console.log("✅ Nirpax uygulaması açıldı");
-        setIsLoading(false);
-      } else if (result.type === "webview" && result.url) {
-        // WebView ile backend login sayfası gösterilecek
-        console.log("🌐 WebView login açılıyor");
-        setWebViewUrl(result.url);
-        setShowWebView(true);
-        setIsLoading(false);
-      }
+      // Direkt HTML sayfasını aç (deep link kontrolü yapmadan)
+      const webViewUrl = crossAppAuthService.getWebViewLoginUrl();
+      console.log("🌐 WebView login açılıyor:", webViewUrl);
+      setWebViewUrl(webViewUrl);
+      setShowWebView(true);
+      setIsNirpaxLoading(false);
     } catch (error: any) {
       console.error("❌ Nirpax login hatası:", error);
-      Alert.alert("Hata", error.message || "Nirpax ile giriş yapılamadı");
-      setIsLoading(false);
+      setIsNirpaxLoading(false);
+      Alert.alert(
+        "Giriş Başarısız",
+        "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+        [{ text: "Tamam" }]
+      );
     }
+  };
+
+  const parseTokenFromUrl = (url: string): { token?: string; error?: string } => {
+    try {
+      // URL'den token veya error parametresini çıkar
+      const tokenMatch = url.match(/[?&]token=([^&]+)/);
+      const errorMatch = url.match(/[?&]error=([^&]+)/);
+      
+      if (tokenMatch) {
+        const token = decodeURIComponent(tokenMatch[1]);
+        return { token };
+      } else if (errorMatch) {
+        const error = decodeURIComponent(errorMatch[1]);
+        return { error };
+      }
+    } catch (error) {
+      console.error("❌ URL parse hatası:", error);
+    }
+    return {};
   };
 
   const handleWebViewNavigationStateChange = async (navState: any) => {
     const { url, loading } = navState;
     console.log("🌐 WebView navigation:", url, "loading:", loading);
 
-    // Check if it's a callback URL
-    if (url.startsWith("nirmind://auth-callback")) {
+    // Check if it's a callback URL with token
+    if (url && url.includes("nirmind://auth-callback")) {
       console.log("✅ Callback URL yakalandı!");
-      setShowWebView(false);
-      setIsLoading(true);
-
-      const parsed = crossAppAuthService.parseAuthCallback(url);
-
+      
+      const parsed = parseTokenFromUrl(url);
+      
       if (parsed.token) {
+        console.log("✅ Token redirect URL'den alındı");
+        setShowWebView(false);
+        
         try {
           await handleAuthCallback(parsed.token);
-          // handleAuthCallback user state'ini günceller, useEffect otomatik Home'a yönlendirir
         } catch (error: any) {
-          Alert.alert("Hata", error.message || "Login başarısız");
+          console.error("❌ Auth callback hatası:", error);
+          Alert.alert(
+            "Giriş Başarısız",
+            "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+            [{ text: "Tamam" }]
+          );
         }
+        return false; // Prevent navigation
       } else if (parsed.error) {
-        Alert.alert("Hata", parsed.error);
+        console.error("❌ Redirect URL'den hata:", parsed.error);
+        Alert.alert(
+          "Giriş Başarısız",
+          "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+          [{ text: "Tamam" }]
+        );
+        setShowWebView(false);
+        return false; // Prevent navigation
       }
+    }
 
-      setIsLoading(false);
-      return false; // Prevent navigation
+    // Check if URL contains token parameter (fallback for other redirect formats)
+    if (url && url.includes("token=")) {
+      console.log("🔍 URL'de token parametresi bulundu");
+      const parsed = parseTokenFromUrl(url);
+      
+      if (parsed.token) {
+        console.log("✅ Token URL parametresinden alındı");
+        setShowWebView(false);
+        
+        try {
+          await handleAuthCallback(parsed.token);
+        } catch (error: any) {
+          console.error("❌ Auth callback hatası:", error);
+          Alert.alert(
+            "Giriş Başarısız",
+            "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+            [{ text: "Tamam" }]
+          );
+        }
+        return false; // Prevent navigation
+      }
     }
 
     // Allow navigation for the initial load and API calls
@@ -206,8 +280,15 @@ const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
     console.log("🔍 Should start load:", url);
 
     // If it's our callback URL, intercept it
-    if (url.startsWith("nirmind://auth-callback")) {
+    if (url && url.includes("nirmind://auth-callback")) {
       console.log("🚫 Blocking navigation, handling callback");
+      handleWebViewNavigationStateChange({ url, loading: false });
+      return false; // Block the navigation
+    }
+
+    // Check if URL contains token parameter
+    if (url && url.includes("token=")) {
+      console.log("🚫 Blocking navigation, token detected in URL");
       handleWebViewNavigationStateChange({ url, loading: false });
       return false; // Block the navigation
     }
@@ -250,14 +331,20 @@ const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
         <TouchableOpacity
           style={styles.socialButton}
           onPress={() => handleSocialLogin('google')}
-          disabled={isLoading}
+          disabled={isGoogleLoading || isAppleLoading || isNirpaxLoading}
         >
           <View style={styles.socialButtonContent}>
-            <Image 
-              source={require('@assets/images/icon/Google.png')}
-              style={styles.iconImage}
-            />
-            <Text style={styles.socialButtonText}>Google ile Giriş Yap</Text>
+            {isGoogleLoading ? (
+              <ActivityIndicator color="#333333" size="small" />
+            ) : (
+              <>
+                <Image 
+                  source={require('@assets/images/icon/Google.png')}
+                  style={styles.iconImage}
+                />
+                <Text style={styles.socialButtonText}>Google ile Giriş Yap</Text>
+              </>
+            )}
           </View>
         </TouchableOpacity>
 
@@ -265,14 +352,20 @@ const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
         <TouchableOpacity
           style={styles.socialButton}
           onPress={() => handleSocialLogin('apple')}
-          disabled={isLoading}
+          disabled={isGoogleLoading || isAppleLoading || isNirpaxLoading}
         >
           <View style={styles.socialButtonContent}>
-            <Image 
-              source={require('@assets/images/icon/apple-logo.png')}
-              style={styles.iconImage}
-            />
-            <Text style={styles.socialButtonText}>Apple ile Giriş Yap</Text>
+            {isAppleLoading ? (
+              <ActivityIndicator color="#333333" size="small" />
+            ) : (
+              <>
+                <Image 
+                  source={require('@assets/images/icon/apple-logo.png')}
+                  style={styles.iconImage}
+                />
+                <Text style={styles.socialButtonText}>Apple ile Giriş Yap</Text>
+              </>
+            )}
           </View>
         </TouchableOpacity>
 
@@ -286,7 +379,7 @@ const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
         <TouchableOpacity
           style={styles.nirpaxButton}
           onPress={handleNirpaxLogin}
-          disabled={isLoading}
+          disabled={isGoogleLoading || isAppleLoading || isNirpaxLoading}
         >
           <LinearGradient
             colors={["#00DDA5", "#007759"]}
@@ -294,7 +387,7 @@ const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
           >
-            {isLoading ? (
+            {isNirpaxLoading ? (
               <ActivityIndicator color="#FFFFFF" />
             ) : (
               <View style={styles.nirpaxButtonContent}>
@@ -313,23 +406,32 @@ const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
         </TouchableOpacity>
       </View>
 
+      {/* Info Text */}
+      <View style={styles.infoContainer}>
+        <Text style={styles.infoText}>
+          NirMind uygulamasında hesabınız oluştuğunda, otomatik olarak Nirpax hesabında da oluşur.
+        </Text>
+      </View>
+
       {/* WebView Modal */}
       <Modal
         visible={showWebView}
         animationType="slide"
         onRequestClose={() => setShowWebView(false)}
       >
-        <View style={styles.webViewContainer}>
-          <View style={styles.webViewHeader}>
+        <SafeAreaView style={styles.webViewContainer} edges={['top']}>
+          <StatusBar barStyle="light-content" backgroundColor="#16163C" />
+          <View style={[styles.webViewHeader, { paddingTop: Math.max(insets.top, 10) }]}>
             <TouchableOpacity
               onPress={() => setShowWebView(false)}
-              style={styles.closeButton}
+              style={[styles.closeButton, { top: Math.max(insets.top, 10) }]}
             >
               <Text style={styles.closeButtonText}>✕ Kapat</Text>
             </TouchableOpacity>
             <Text style={styles.webViewTitle}>Nirpax ile Giriş</Text>
           </View>
           <WebView
+            style={styles.webView}
             source={{ 
               uri: webViewUrl,
               headers: {
@@ -373,8 +475,17 @@ const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
                     await handleAuthCallback(message.token);
                     // handleAuthCallback user state'ini günceller, useEffect otomatik Home'a yönlendirir
                   } catch (error: any) {
+                    console.error("❌ Auth callback hatası:", error);
                     Alert.alert("Hata", error.message || "Login başarısız");
                   }
+                } else if (message.type === 'LOGIN_ERROR' && message.error) {
+                  console.error('❌ Login error via postMessage:', message.error);
+                  Alert.alert(
+                    "Giriş Başarısız",
+                    "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+                    [{ text: "Tamam" }]
+                  );
+                  setShowWebView(false);
                 }
               } catch (error) {
                 console.error('❌ WebView message parse hatası:', error);
@@ -386,7 +497,7 @@ const LoginMethodScreen: React.FC<LoginMethodScreenProps> = ({
               </View>
             )}
           />
-        </View>
+        </SafeAreaView>
       </Modal>
     </LinearGradient>
   );
@@ -529,20 +640,26 @@ const styles = StyleSheet.create({
   webViewContainer: {
     flex: 1,
     backgroundColor: "#FFFFFF",
+    width: width,
+    height: height,
+  },
+  webView: {
+    flex: 1,
+    width: width,
   },
   webViewHeader: {
-    height: 60,
+    minHeight: 60,
     backgroundColor: "#16163C",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 16,
-    paddingTop: 10,
+    paddingBottom: 10,
+    width: width,
   },
   closeButton: {
     position: "absolute",
     left: 16,
-    top: 20,
     padding: 8,
   },
   closeButtonText: {
@@ -564,6 +681,21 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#FFFFFF",
+  },
+  infoContainer: {
+    position: "absolute",
+    top: 720,
+    left: (width - 350) / 2,
+    width: 350,
+    paddingHorizontal: 20,
+  },
+  infoText: {
+    fontFamily: "Poppins-Regular",
+    fontSize: 12,
+    fontWeight: "400",
+    color: "#999999",
+    textAlign: "center",
+    lineHeight: 18,
   },
 });
 

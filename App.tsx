@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, StyleSheet, Keyboard, Linking } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import SplashScreen from './src/pages/SplashScreen';
 import OnboardingScreen from './src/pages/OnboardingScreen';
 import LoginMethodScreen from './src/pages/LoginMethodScreen';
@@ -8,16 +9,19 @@ import HomeScreen from './src/pages/HomeScreen';
 import ChatHistoryScreen from './src/pages/ChatHistoryScreen';
 import ProfileScreen from './src/pages/ProfileScreen';
 import HelpCenterScreen from './src/pages/HelpCenterScreen';
+import CompleteProfileScreen from './src/pages/CompleteProfileScreen';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import { ChatProvider } from './src/lib/context/ChatContext';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { DeepLinkHandler } from './src/components/DeepLinkHandler';
+import BackendApiService from './src/services/BackendApiService';
 
 // Navigation enum for type safety and performance
 enum Screen {
   SPLASH = 'splash',
   ONBOARDING = 'onboarding',
   LOGIN = 'login',
+  COMPLETE_PROFILE = 'completeProfile',
   HOME = 'home',
   CHAT_HISTORY = 'chatHistory',
   PROFILE = 'profile',
@@ -28,9 +32,10 @@ enum Screen {
 function AppContent() {
   const [currentScreen, setCurrentScreen] = useState<Screen>(Screen.SPLASH);
   const [selectedConversationId, setSelectedConversationId] = useState<string | undefined>();
+  const [profileCompleteData, setProfileCompleteData] = useState<any>(null);
   const timerRef = useRef<NodeJS.Timeout | undefined>(undefined);
   const { user, isLoading } = useAuth();
-  
+  const backendApiService = BackendApiService.getInstance();
 
   // Simple transition function - no animations
   const performSmoothTransition = useCallback((targetScreen: Screen) => {
@@ -48,15 +53,53 @@ function AppContent() {
 
     // Auth kontrolü tamamlandı
     if (user) {
-      // Kullanıcı giriş yapmış, direkt home'a git
-      console.log('✅ Kullanıcı giriş yapmış, home ekranına yönlendiriliyor');
-      performSmoothTransition(Screen.HOME);
+      // Kullanıcı giriş yapmış, profil bilgilerini kontrol et
+      checkProfileCompleteness();
     } else {
       // Kullanıcı giriş yapmamış, onboarding'e git
       console.log('ℹ️ Kullanıcı giriş yapmamış, onboarding ekranına yönlendiriliyor');
       performSmoothTransition(Screen.ONBOARDING);
     }
-  }, [isLoading, user, performSmoothTransition]);
+  }, [isLoading, user, checkProfileCompleteness, performSmoothTransition]);
+
+  const checkProfileCompleteness = useCallback(async () => {
+    try {
+      console.log('🔍 Profil bilgileri kontrol ediliyor...');
+      const response = await backendApiService.getUserProfile();
+      
+      if (response.success && response.data) {
+        if (response.data.hasMissingFields && response.data.missingFields?.length > 0) {
+          console.log('⚠️ Eksik bilgiler var:', response.data.missingFields);
+          
+          // Placeholder değerleri kontrol et ve boş string olarak gönder
+          const isPlaceholderValue = (value: string | undefined): boolean => {
+            if (!value) return true;
+            const normalized = value.trim().toLowerCase();
+            return normalized === 'apple' || normalized === 'google' || normalized === 'user' || normalized === '';
+          };
+
+          setProfileCompleteData({
+            firstName: isPlaceholderValue(response.data.firstName) ? '' : response.data.firstName,
+            lastName: isPlaceholderValue(response.data.lastName) ? '' : response.data.lastName,
+            phone: response.data.phone || '',
+            missingFields: response.data.missingFields,
+          });
+          performSmoothTransition(Screen.COMPLETE_PROFILE);
+        } else {
+          console.log('✅ Profil bilgileri tamam');
+          performSmoothTransition(Screen.HOME);
+        }
+      } else {
+        // Profil alınamadı, direkt home'a git
+        console.log('⚠️ Profil kontrol edilemedi, home\'a yönlendiriliyor');
+        performSmoothTransition(Screen.HOME);
+      }
+    } catch (error) {
+      console.error('❌ Profil kontrol hatası:', error);
+      // Hata durumunda direkt home'a git
+      performSmoothTransition(Screen.HOME);
+    }
+  }, [performSmoothTransition, backendApiService]);
 
   // Optimized navigation handlers with smooth transitions
   const handleOnboardingNext = useCallback(() => {
@@ -68,6 +111,13 @@ function AppContent() {
   }, [performSmoothTransition]);
 
   const handleLoginSuccess = useCallback(() => {
+    // Login başarılı, profil kontrolü yapılacak (useEffect'te)
+    checkProfileCompleteness();
+  }, [checkProfileCompleteness]);
+
+  const handleProfileComplete = useCallback(() => {
+    // Profil tamamlandı, home'a git
+    setProfileCompleteData(null);
     performSmoothTransition(Screen.HOME);
   }, [performSmoothTransition]);
 
@@ -126,6 +176,11 @@ function AppContent() {
         return <OnboardingScreen onNext={handleOnboardingNext} />;
       case Screen.LOGIN:
         return <LoginMethodScreen onBack={handleLoginBack} onLoginSuccess={handleLoginSuccess} />;
+      case Screen.COMPLETE_PROFILE:
+        return <CompleteProfileScreen 
+          onComplete={handleProfileComplete}
+          initialData={profileCompleteData}
+        />;
       case Screen.HOME:
         return <HomeScreen 
           onOpenChatHistory={handleOpenChatHistory} 
@@ -153,7 +208,7 @@ function AppContent() {
       default:
         return <SplashScreen />;
     }
-  }, [currentScreen, selectedConversationId, handleOnboardingNext, handleLoginBack, handleLoginSuccess, handleOpenChatHistory, handleBackToHome, handleSelectConversation, handleOpenProfile, handleBackFromProfile, handleChatFromProfile, handleOpenHelpCenter, handleBackFromHelpCenter, handleChatFromHelpCenter]);
+  }, [currentScreen, selectedConversationId, profileCompleteData, handleOnboardingNext, handleLoginBack, handleLoginSuccess, handleProfileComplete, handleOpenChatHistory, handleBackToHome, handleSelectConversation, handleOpenProfile, handleBackFromProfile, handleChatFromProfile, handleOpenHelpCenter, handleBackFromHelpCenter, handleChatFromHelpCenter]);
 
   return (
     <ErrorBoundary>
@@ -171,9 +226,11 @@ function AppContent() {
 // Ana App component'i - AuthProvider ile sarılmış
 export default function App() {
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
+    <SafeAreaProvider>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }
 

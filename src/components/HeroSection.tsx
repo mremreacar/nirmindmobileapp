@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useFonts } from 'expo-font';
+import { useAuth } from '../contexts/AuthContext';
 // import { VideoView, useVideoPlayer } from 'expo-video';
 
 const { width, height } = Dimensions.get('window');
@@ -63,10 +64,27 @@ const getResponsiveAssistantFontSize = () => {
 };
 
 const HeroSection: React.FC = () => {
+  const { user } = useAuth();
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [shouldLoadImage, setShouldLoadImage] = useState(false);
   const [useFallback, setUseFallback] = useState(false);
+
+  // Kullanıcı adını formatla
+  const getUserName = () => {
+    if (!user) return 'Kullanıcı';
+    
+    // İsim varsa kullan, yoksa "Kullanıcı"
+    const firstName = user.firstName?.trim() || '';
+    if (firstName) {
+      // İlk harf büyük, geri kalan küçük
+      return firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
+    }
+    
+    return 'Kullanıcı';
+  };
+
+  const displayName = getUserName();
 
   let [fontsLoaded] = useFonts({
     'Poppins-Regular': require('@assets/fonts/Poppins-Regular .ttf'),
@@ -151,7 +169,9 @@ const HeroSection: React.FC = () => {
         )}
       </View>
       
-      <Text allowFontScaling={false} style={styles.greetingText}>Merhaba, Emre</Text>
+      <Text allowFontScaling={false} style={styles.greetingText}>
+        Merhaba{displayName ? `, ${displayName}` : ''}
+      </Text>
       <Text allowFontScaling={false} style={styles.assistantText}>
         Ben dijital asistanınız NirMind,{'\n'}size nasıl yardımcı olabilirim?
       </Text>
