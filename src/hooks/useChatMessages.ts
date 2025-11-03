@@ -143,18 +143,33 @@ export const useChatMessages = () => {
                 encoding: FileSystem.EncodingType.Base64,
               });
               
+              // Dosya tipini belirle - görsel dosyaları IMAGE olarak gönder
+              const mimeType = file.mimeType || 'application/octet-stream';
+              const fileName = file.name || '';
+              const fileExtension = fileName.toLowerCase().split('.').pop() || '';
+              
+              // Görsel dosyaları IMAGE olarak gönder
+              let attachmentType: 'IMAGE' | 'FILE' | 'AUDIO' | 'VIDEO' = 'FILE';
+              if (mimeType.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic'].includes(fileExtension)) {
+                attachmentType = 'IMAGE';
+              } else if (mimeType.startsWith('video/')) {
+                attachmentType = 'VIDEO';
+              } else if (mimeType.startsWith('audio/')) {
+                attachmentType = 'AUDIO';
+              }
+              
               // Backend'e yükle
               const uploadResponse = await backendApiService.uploadAttachment(
-                'FILE',
+                attachmentType,
                 base64Data,
                 file.name,
-                file.mimeType || 'application/octet-stream'
+                mimeType
               );
               
               if (uploadResponse.success && uploadResponse.data) {
-                console.log('✅ Dosya yüklendi:', uploadResponse.data.url);
+                console.log(`✅ ${attachmentType === 'IMAGE' ? 'Görsel' : 'Dosya'} yüklendi:`, uploadResponse.data.url);
                 return {
-                  type: 'FILE',
+                  type: attachmentType,
                   url: uploadResponse.data.url,
                   filename: uploadResponse.data.filename,
                   size: uploadResponse.data.size,
@@ -208,13 +223,29 @@ export const useChatMessages = () => {
         
         // Backend'den dönen gerçek userMessage ile optimistic mesajı değiştir
         if (userMessage) {
+          // Backend'den gelen attachments'ları images ve files'a çevir
+          const backendImages = userMessage.attachments
+            ?.filter((att: any) => att.type === 'IMAGE')
+            .map((att: any) => att.url) || [];
+          
+          const backendFiles = userMessage.attachments
+            ?.filter((att: any) => att.type === 'FILE' || att.type === 'AUDIO' || att.type === 'VIDEO')
+            .map((att: any) => ({
+              name: att.filename || '',
+              uri: att.url
+            })) || [];
+
+          // Backend'den gelen attachments varsa onları kullan, yoksa frontend'deki uploadedImageUrls'i kullan
+          const finalImages = backendImages.length > 0 ? backendImages : (uploadedImageUrls.length > 0 ? uploadedImageUrls : undefined);
+          const finalFiles = backendFiles.length > 0 ? backendFiles : (uploadedFileUrls.length > 0 ? uploadedFileUrls.map(url => ({ name: '', uri: url })) : undefined);
+
           const userChatMessage: ChatMessage = {
             id: userMessage.id,
             text: userMessage.text,
             isUser: true,
             timestamp: new Date(userMessage.timestamp || userMessage.createdAt),
-            images: uploadedImageUrls.length > 0 ? uploadedImageUrls : undefined,
-            files: uploadedFileUrls.length > 0 ? uploadedFileUrls.map(url => ({ name: '', uri: url })) : undefined
+            images: finalImages,
+            files: finalFiles
           };
           
           // Optimistic mesajı kaldır ve gerçek mesajı ekle
