@@ -55,6 +55,7 @@ import {
   Platform,
   Modal,
   FlatList,
+  Keyboard,
 } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 import * as ImagePicker from 'expo-image-picker';
@@ -274,8 +275,9 @@ const UploadModal: React.FC<UploadModalProps> = ({
           sortBy: 'creationTime',
         });
         
-        console.log('📸 Toplam fotoğraf sayısı:', assets.assets.length);
-        console.log('📸 Fotoğraf detayları:', assets.assets.map(p => ({ filename: p.filename, uri: p.uri })));
+        if (__DEV__) {
+          console.log('📸 Toplam fotoğraf sayısı:', assets.assets.length);
+        }
         
         // Her fotoğraf için gerçek URI'yı al
         const photosWithRealUri = await Promise.all(
@@ -283,14 +285,6 @@ const UploadModal: React.FC<UploadModalProps> = ({
             try {
               const assetInfo = await MediaLibrary.getAssetInfoAsync(asset);
               const isHEIC = asset.filename?.toLowerCase().includes('heic') || asset.filename?.toLowerCase().includes('heif');
-              
-              console.log('📸 Asset info:', {
-                id: asset.id,
-                filename: asset.filename,
-                originalUri: asset.uri,
-                realUri: assetInfo.localUri || assetInfo.uri,
-                isHEIC: isHEIC
-              });
 
               // React Native otomatik olarak HEIC'leri destekler
               // Sadece gerçek URI'yı kullan, dönüştürme yapmıyoruz
@@ -307,7 +301,9 @@ const UploadModal: React.FC<UploadModalProps> = ({
           })
         );
         
-        console.log('📸 Seçilen fotoğraflar:', photosWithRealUri.length);
+        if (__DEV__) {
+          console.log('📸 Son fotoğraflar yüklendi:', photosWithRealUri.length);
+        }
         setRecentPhotos(photosWithRealUri);
       } else {
         console.log('❌ Medya kütüphanesi izni verilmedi:', status);
@@ -344,9 +340,11 @@ const UploadModal: React.FC<UploadModalProps> = ({
     }
   };
 
-  // Modal açıldığında son fotoğrafları yükle
+  // Modal açıldığında son fotoğrafları yükle ve klavyeyi kapat
   useEffect(() => {
     if (visible) {
+      // Klavyeyi kapat
+      Keyboard.dismiss();
       loadRecentPhotos();
     }
   }, [visible]);
@@ -449,13 +447,6 @@ const UploadModal: React.FC<UploadModalProps> = ({
                     const isHEIC = photo.filename?.toLowerCase().includes('heic') || photo.filename?.toLowerCase().includes('heif');
                     // HEIC formatı için doğrudan URI kullan, React Native otomatik dönüştürür
                     const imageUri = photo.uri;
-                    
-                    console.log(`📸 Fotoğraf ${index + 1}:`, {
-                      filename: photo.filename,
-                      uri: photo.uri,
-                      isHEIC: isHEIC,
-                      imageUri: imageUri
-                    });
                     
                     return (
                       <TouchableOpacity

@@ -1,11 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Backend API URL - Nircore backend
-// iOS simulator'da localhost Mac'in localhost'u olarak çalışır
-// Gerçek cihazda Mac'in IP adresini kullanın (örn: http://192.168.1.166:3000/api)
+// iOS simulator ve gerçek cihazda Mac'in IP adresini kullanın
+// Localhost bazen iOS simülatörde çalışmayabilir
 const API_BASE_URL = __DEV__ 
-  ? 'http://localhost:3000/api'  // iOS Simulator için
-  : 'http://192.168.1.166:3000/api'; // Gerçek cihaz için (production'da değiştirin)
+  ? 'http://192.168.0.186:3000/api'  // Mac'in local IP adresi (iOS Simulator için)
+  : 'https://api.astroboard.test/api'; // Production API URL
 
 interface ApiResponse<T = any> {
   success: boolean;
@@ -138,6 +138,7 @@ class BackendApiService {
           success: false,
           error: data.message || data.error || 'Bir hata oluştu',
           message: data.message,
+          details: data.details,
         };
       }
 
@@ -380,14 +381,23 @@ class BackendApiService {
     displayName: string;
     photoURL?: string;
   }): Promise<ApiResponse<any>> {
+    // Backend user objesi bekliyor: { idToken, accessToken, user: { email, name, photo, ... } }
+    const nameParts = data.displayName?.split(' ') || [];
+    const firstName = nameParts[0] || '';
+    const lastName = nameParts.slice(1).join(' ') || '';
+    
     return this.makeRequest('/nirmind/auth/google', {
       method: 'POST',
       body: JSON.stringify({
         idToken: data.idToken,
         accessToken: data.accessToken,
-        email: data.email,
-        displayName: data.displayName,
-        photoURL: data.photoURL,
+        user: {
+          email: data.email,
+          name: data.displayName || '',
+          givenName: firstName,
+          familyName: lastName,
+          photo: data.photoURL || '',
+        },
       }),
     });
   }

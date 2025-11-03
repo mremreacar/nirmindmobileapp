@@ -27,6 +27,10 @@
           "NSExceptionDomains": {
             "localhost": {
               "NSExceptionAllowsInsecureHTTPLoads": true
+            },
+            "192.168.0.186": {
+              "NSExceptionAllowsInsecureHTTPLoads": true,
+              "NSIncludesSubdomains": true
             }
           }
         },
@@ -37,6 +41,9 @@
               "nirmind"
             ]
           }
+        ],
+        "LSApplicationQueriesSchemes": [
+          "nirpax"
         ]
       },
       "appleTeamId": "5B43Y4572U"
@@ -96,7 +103,7 @@
       [
         "@react-native-google-signin/google-signin",
         {
-          "iosUrlScheme": "com.googleusercontent.apps.331062533957-4n31v4u4ahh8ebpufkdbpj33q6asad04"
+          "iosUrlScheme": "com.googleusercontent.apps.331062533957-d7fbhednl9gi1og0u8fqcb281qhj7480"
         }
       ],
       "expo-apple-authentication"

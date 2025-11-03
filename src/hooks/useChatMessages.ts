@@ -117,6 +117,8 @@ export const useChatMessages = () => {
                 };
               } else {
                 console.error('❌ Resim yükleme hatası:', uploadResponse.error);
+                console.error('❌ Resim yükleme detayları:', uploadResponse.message || uploadResponse);
+                // Hata olsa bile null döndür, böylece diğer dosyalar yüklenmeye devam eder
                 return null;
               }
             } catch (error) {
@@ -160,6 +162,8 @@ export const useChatMessages = () => {
                 };
               } else {
                 console.error('❌ Dosya yükleme hatası:', uploadResponse.error);
+                console.error('❌ Dosya yükleme detayları:', uploadResponse.message || uploadResponse);
+                // Hata olsa bile null döndür, böylece diğer dosyalar yüklenmeye devam eder
                 return null;
               }
             } catch (error) {

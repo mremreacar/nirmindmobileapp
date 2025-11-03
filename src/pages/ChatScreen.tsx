@@ -181,20 +181,31 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   useEffect(() => {
     if (initialUploadModalOpen) {
       console.log('📁 UploadModal başlangıçta açık olarak ayarlanıyor');
+      // Klavyeyi kapat ve input'u blur et
+      if (textInputRef.current) {
+        textInputRef.current.blur();
+      }
+      dismissKeyboard();
+      setIsInputFocused(false);
       setShowUploadModal(true);
     }
   }, [initialUploadModalOpen]);
 
-  // Chat ekranına geçerken input'u otomatik focus'la
+  // Chat ekranına geçerken input'u otomatik focus'la - sadece UploadModal açık değilse
   useEffect(() => {
+    // Eğer UploadModal açıksa klavyeyi açma
+    if (showUploadModal) {
+      return;
+    }
+    
     const timer = setTimeout(() => {
-      if (textInputRef.current) {
+      if (textInputRef.current && !showUploadModal) {
         textInputRef.current.focus();
       }
     }, 300); // Kısa bir gecikme ile focus'la
 
     return () => clearTimeout(timer);
-  }, []);
+  }, [showUploadModal]);
 
   // Auto-send initial message from HomeScreen - sadece bir kez çalışsın
   const initialMessageSentRef = useRef<string | null>(null); // conversationId'yi sakla
@@ -367,6 +378,14 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
 
   const openUploadModal = () => {
+    // Klavyeyi kapat ve input'u blur et
+    if (textInputRef.current) {
+      textInputRef.current.blur();
+    }
+    dismissKeyboard();
+    setIsInputFocused(false);
+    
+    // Modal'ı aç ve animasyonu başlat
     setShowUploadModal(true);
     Animated.spring(translateY, {
       toValue: 0,
@@ -376,13 +395,28 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     }).start();
   };
 
-  const closeUploadModal = () => {
+  const closeUploadModal = (shouldFocusInput = false) => {
     Animated.timing(translateY, {
       toValue: height,
       duration: CHAT_CONSTANTS.ANIMATION_DURATION,
       useNativeDriver: true,
     }).start(() => {
       setShowUploadModal(false);
+      
+      // Modal kapandıktan sonra input'a focus yap (eğer isteniyorsa)
+      if (shouldFocusInput) {
+        // Animasyon tamamlandıktan sonra delay ile focus yap
+        // Modal animasyonu (300ms) + kısa bir ek delay (150ms) = 450ms toplam
+        setTimeout(() => {
+          if (textInputRef.current) {
+            // RequestAnimationFrame ile smooth focus
+            requestAnimationFrame(() => {
+              textInputRef.current?.focus();
+              setIsInputFocused(true);
+            });
+          }
+        }, 150); // Modal animasyonu tamamlandıktan sonra 150ms delay
+      }
     });
   };
 
@@ -434,8 +468,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
           setSelectedImages(prev => [...prev, ...validImages]);
           console.log(`📸 ${validImages.length} resim seçildi`);
           
-          // Seçim tamamlandı, modal'ı otomatik kapat
-          closeUploadModal();
+          // Seçim tamamlandı, modal'ı otomatik kapat ve input'a focus yap
+          closeUploadModal(true);
           
           if (validImages.length < result.assets.length) {
             Alert.alert(
@@ -557,8 +591,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             setSelectedFiles(prev => [...prev, ...newFiles]);
             console.log(`📁 ${validFiles.length} dosya seçildi`);
             
-            // Seçim tamamlandı, modal'ı otomatik kapat
-            closeUploadModal();
+            // Seçim tamamlandı, modal'ı otomatik kapat ve input'a focus yap
+            closeUploadModal(true);
             
             if (validFiles.length < supportedFiles.length) {
               const oversizedCount = supportedFiles.length - validFiles.length;
@@ -1067,8 +1101,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
           onSelectRecentPhoto={(photoUri) => {
             console.log('📸 Son fotoğraflardan seçildi:', photoUri);
             setSelectedImages((prev) => [...prev, photoUri]);
-            // Seçim tamamlandı, modal'ı otomatik kapat
-            closeUploadModal();
+            // Seçim tamamlandı, modal'ı otomatik kapat ve input'a focus yap
+            closeUploadModal(true);
           }}
           onPickDocument={pickDocument}
           onRemoveImage={(index) => {

@@ -21,9 +21,14 @@ class GoogleAuthService {
     }
 
     try {
+      // iOS Google Sign-In için:
+      // - iosClientId: iOS uygulaması için Client ID (bundle ID ile eşleşmeli)
+      // - webClientId: Backend token verification için OAuth 2.0 Web Client ID
+      // NOT: iOS'ta token iosClientId ile oluşturulur ama backend'de webClientId ile verify edilir
+      // Eğer aynı Client ID kullanılıyorsa her ikisi de aynı olabilir
       GoogleSignin.configure({
-        webClientId: '331062533957-4n31v4u4ahh8ebpufkdbpj33q6asad04.apps.googleusercontent.com',
-        iosClientId: '331062533957-4n31v4u4ahh8ebpufkdbpj33q6asad04',
+        webClientId: '331062533957-d7fbhednl9gi1og0u8fqcb281qhj7480.apps.googleusercontent.com', // Backend verification için
+        iosClientId: '331062533957-d7fbhednl9gi1og0u8fqcb281qhj7480.apps.googleusercontent.com', // iOS app için
         offlineAccess: true,
         forceCodeForRefreshToken: true,
       });
@@ -116,10 +121,12 @@ class GoogleAuthService {
         };
       } else {
         console.error('❌ Backend Google Auth başarısız:', response.error);
+        console.error('❌ Backend hata detayları:', response.details || response);
         return {
           success: false,
           error: response.error || 'Google authentication failed',
-          message: response.message || 'Failed to authenticate with backend'
+          message: response.message || 'Failed to authenticate with backend',
+          details: response.details
         };
       }
     } catch (error: any) {
