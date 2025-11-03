@@ -1,8 +1,11 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Alert } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Alert, Modal, Linking, Dimensions } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { ChatMessage } from '@/src/lib/mock/types';
 import { useChat } from '@/src/lib/context/ChatContext';
+import { WebView } from 'react-native-webview';
+
+const { width, height } = Dimensions.get('window');
 
 interface MessageListProps {
   messages: ChatMessage[];
@@ -24,6 +27,7 @@ const MessageList: React.FC<MessageListProps> = ({
   conversationId
 }) => {
   const { deleteMessage } = useChat();
+  const [previewFile, setPreviewFile] = useState<{ uri: string; name: string; mimeType?: string } | null>(null);
 
   const handleDeleteMessage = (message: ChatMessage) => {
     if (!conversationId) {
@@ -50,6 +54,51 @@ const MessageList: React.FC<MessageListProps> = ({
     );
   };
 
+  const handleFilePress = (file: { name: string; uri?: string }) => {
+    if (!file.uri) {
+      Alert.alert('Hata', 'Dosya URL\'si bulunamadı');
+      return;
+    }
+
+    // Dosya uzantısına göre MIME type belirle
+    const fileExtension = file.name.toLowerCase().split('.').pop() || '';
+    let mimeType = 'application/octet-stream';
+    
+    if (['pdf'].includes(fileExtension)) {
+      mimeType = 'application/pdf';
+    } else if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(fileExtension)) {
+      mimeType = `image/${fileExtension === 'jpg' ? 'jpeg' : fileExtension}`;
+    } else if (['txt', 'md'].includes(fileExtension)) {
+      mimeType = 'text/plain';
+    } else if (['html', 'htm'].includes(fileExtension)) {
+      mimeType = 'text/html';
+    }
+
+    setPreviewFile({
+      uri: file.uri,
+      name: file.name,
+      mimeType
+    });
+  };
+
+  const closePreview = () => {
+    setPreviewFile(null);
+  };
+
+  const openFileInBrowser = async (uri: string) => {
+    try {
+      const canOpen = await Linking.canOpenURL(uri);
+      if (canOpen) {
+        await Linking.openURL(uri);
+      } else {
+        Alert.alert('Hata', 'Dosya açılamadı');
+      }
+    } catch (error) {
+      console.error('❌ Dosya açma hatası:', error);
+      Alert.alert('Hata', 'Dosya açılırken bir hata oluştu');
+    }
+  };
+
   return (
     <ScrollView
       ref={scrollViewRef}
@@ -69,8 +118,13 @@ const MessageList: React.FC<MessageListProps> = ({
       directionalLockEnabled={false}
       canCancelContentTouches={true}
       delaysContentTouches={false}
+      keyboardDismissMode="on-drag"
+      maintainVisibleContentPosition={{
+        minIndexForVisible: 0,
+        autoscrollToTopThreshold: 10,
+      }}
       onContentSizeChange={() => {
-        // Auto-scroll to bottom when new messages arrive
+        // Auto-scroll to bottom when new messages arrive - delay ile daha smooth
         setTimeout(() => {
           if (scrollViewRef.current) {
             scrollViewRef.current.scrollToEnd({ animated: true });
@@ -79,7 +133,7 @@ const MessageList: React.FC<MessageListProps> = ({
         onScrollToEnd?.();
       }}
       onLayout={() => {
-        // Auto-scroll to bottom on layout
+        // Auto-scroll to bottom on layout - delay ile daha smooth
         setTimeout(() => {
           if (scrollViewRef.current) {
             scrollViewRef.current.scrollToEnd({ animated: false });
@@ -112,10 +166,13 @@ const MessageList: React.FC<MessageListProps> = ({
                 <View style={styles.imagesContainer}>
                   {message.images.map((imageUri, index) => (
                     <Image
-                      key={index}
+                      key={`${message.id}-image-${index}`}
                       source={{ uri: imageUri }}
                       style={styles.messageImage}
                       resizeMode="cover"
+                      onError={(error) => {
+                        console.error('❌ Image yüklenemedi:', imageUri, error.nativeEvent.error);
+                      }}
                     />
                   ))}
                 </View>
@@ -125,10 +182,15 @@ const MessageList: React.FC<MessageListProps> = ({
               {message.files && message.files.length > 0 && (
                 <View style={styles.filesContainer}>
                   {message.files.map((file, index) => (
-                    <View key={index} style={styles.fileItem}>
+                    <TouchableOpacity 
+                      key={index} 
+                      style={styles.fileItem}
+                      onPress={() => handleFilePress(file)}
+                      activeOpacity={0.7}
+                    >
                       <Text allowFontScaling={false} style={styles.fileIcon}>📄</Text>
                       <Text allowFontScaling={false} style={styles.fileName}>{file.name}</Text>
-                    </View>
+                    </TouchableOpacity>
                   ))}
                 </View>
               )}
@@ -182,6 +244,63 @@ const MessageList: React.FC<MessageListProps> = ({
           </View>
         </View>
       )}
+      
+      {/* Dosya Önizleme Modalı */}
+      <Modal
+        visible={previewFile !== null}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={closePreview}
+      >
+        <View style={styles.previewModalOverlay}>
+          <TouchableOpacity 
+            style={styles.previewModalCloseButton}
+            onPress={closePreview}
+          >
+            <Text style={styles.previewModalCloseText}>✕</Text>
+          </TouchableOpacity>
+          
+          {previewFile && (
+            <>
+              <View style={styles.previewModalHeader}>
+                <Text style={styles.previewModalFileName} numberOfLines={2}>
+                  {previewFile.name}
+                </Text>
+              </View>
+              
+              <View style={styles.previewModalContent}>
+                {previewFile.mimeType?.startsWith('image/') ? (
+                  <Image 
+                    source={{ uri: previewFile.uri }} 
+                    style={styles.previewImage}
+                    resizeMode="contain"
+                  />
+                ) : previewFile.mimeType === 'application/pdf' ? (
+                  <WebView
+                    source={{ uri: previewFile.uri }}
+                    style={styles.previewWebView}
+                    startInLoadingState={true}
+                    scalesPageToFit={true}
+                  />
+                ) : (
+                  <View style={styles.previewUnsupportedContainer}>
+                    <Text style={styles.previewUnsupportedText}>📄</Text>
+                    <Text style={styles.previewUnsupportedLabel}>
+                      Bu dosya türü önizlenemiyor
+                    </Text>
+                    <TouchableOpacity 
+                      style={styles.previewOpenButton}
+                      onPress={() => openFileInBrowser(previewFile.uri)}
+                    >
+                      <Text style={styles.previewOpenButtonText}>Tarayıcıda Aç</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            </>
+          )}
+        </View>
+      </Modal>
     </ScrollView>
   );
 };
@@ -299,7 +418,8 @@ const styles = StyleSheet.create({
     width: 200,
     height: 200,
     borderRadius: 12,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    minHeight: 200,
   },
   filesContainer: {
     marginBottom: 8,
@@ -320,6 +440,92 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     flex: 1,
+  },
+  // Dosya Önizleme Modal Stilleri
+  previewModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  previewModalCloseButton: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  previewModalCloseText: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  previewModalHeader: {
+    position: 'absolute',
+    top: 50,
+    left: 20,
+    right: 70,
+    zIndex: 1000,
+  },
+  previewModalFileName: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Poppins-Medium',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  previewModalContent: {
+    flex: 1,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: 100,
+    paddingBottom: 50,
+  },
+  previewImage: {
+    width: width * 0.9,
+    height: height * 0.7,
+    borderRadius: 12,
+  },
+  previewWebView: {
+    width: width * 0.9,
+    height: height * 0.7,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+  },
+  previewUnsupportedContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  previewUnsupportedText: {
+    fontSize: 64,
+    marginBottom: 20,
+  },
+  previewUnsupportedLabel: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Poppins-Medium',
+    marginBottom: 30,
+    textAlign: 'center',
+  },
+  previewOpenButton: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  previewOpenButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Poppins-Medium',
   },
 });
 
