@@ -333,7 +333,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   useEffect(() => {
     if (conversationId) {
       // Conversation yüklemesini paralel yap, mesaj gönderimini bloklamasın
-      selectConversation(conversationId).catch(error => {
+      selectConversation(conversationId).catch((error: any) => {
         console.error('❌ Conversation seçilirken hata:', error);
       });
     }
@@ -1081,7 +1081,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         visible={showUploadModal}
         animationType="slide"
         transparent={true}
-        onRequestClose={closeUploadModal}
+        onRequestClose={() => closeUploadModal()}
       >
         <UploadModal
           visible={showUploadModal}

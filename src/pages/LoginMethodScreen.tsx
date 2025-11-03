@@ -151,11 +151,22 @@ const LoginMethodScreen = ({
         // Kullanıcı iptal etmediyse uyarı göster
         if (result.error !== 'CANCELLED' && result.error !== 'USER_CANCELLED') {
           console.log(`❌ ${provider} login başarısız:`, result.error || result.message);
-          Alert.alert(
-            "Giriş Başarısız",
-            "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
-            [{ text: "Tamam" }]
-          );
+          const errorMessage = result.error || result.message || 'Giriş işlemi tamamlanamadı.';
+          
+          // Network hatası kontrolü
+          if (errorMessage.includes('Network') || errorMessage.includes('502') || errorMessage.includes('Sunucu hatası')) {
+            Alert.alert(
+              "Bağlantı Hatası",
+              "Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edin ve tekrar deneyin.",
+              [{ text: "Tamam" }]
+            );
+          } else {
+            Alert.alert(
+              "Giriş Başarısız",
+              errorMessage,
+              [{ text: "Tamam" }]
+            );
+          }
         } else {
           console.log(`ℹ️ ${provider} login iptal edildi`);
         }
@@ -163,11 +174,29 @@ const LoginMethodScreen = ({
     } catch (error: any) {
       console.error(`❌ ${provider === 'google' ? 'Google' : 'Apple'} login hatası:`, error);
       setLoading(false);
-      Alert.alert(
-        "Giriş Başarısız",
-        "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
-        [{ text: "Tamam" }]
-      );
+      
+      const errorMessage = error.message || 'Giriş işlemi tamamlanamadı.';
+      
+      // Özel hata mesajları
+      if (errorMessage.includes('Network') || errorMessage.includes('502') || errorMessage.includes('Sunucu hatası')) {
+        Alert.alert(
+          "Bağlantı Hatası",
+          "Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edin ve tekrar deneyin.",
+          [{ text: "Tamam" }]
+        );
+      } else if (errorMessage.includes('JSON Parse error')) {
+        Alert.alert(
+          "Sunucu Hatası",
+          "Sunucudan beklenmeyen bir yanıt alındı. Lütfen daha sonra tekrar deneyin.",
+          [{ text: "Tamam" }]
+        );
+      } else {
+        Alert.alert(
+          "Giriş Başarısız",
+          errorMessage,
+          [{ text: "Tamam" }]
+        );
+      }
     }
   };
 
@@ -216,9 +245,14 @@ const LoginMethodScreen = ({
     const { url, loading } = navState;
     console.log("🌐 WebView navigation:", url, "loading:", loading);
 
+    // Skip if still loading
+    if (loading) {
+      return;
+    }
+
     // Check if it's a callback URL with token
-    if (url && url.includes("nirmind://auth-callback")) {
-      console.log("✅ Callback URL yakalandı!");
+    if (url && (url.includes("nirmind://auth-callback") || url.startsWith("nirmind://"))) {
+      console.log("✅ Callback URL yakalandı:", url);
       
       const parsed = parseTokenFromUrl(url);
       
@@ -228,30 +262,30 @@ const LoginMethodScreen = ({
         
         try {
           await handleAuthCallback(parsed.token);
+          onLoginSuccess();
         } catch (error: any) {
           console.error("❌ Auth callback hatası:", error);
           Alert.alert(
             "Giriş Başarısız",
-            "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+            error.message || "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
             [{ text: "Tamam" }]
           );
         }
-        return false; // Prevent navigation
+        return;
       } else if (parsed.error) {
         console.error("❌ Redirect URL'den hata:", parsed.error);
         Alert.alert(
           "Giriş Başarısız",
-          "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
-          [{ text: "Tamam" }]
+          decodeURIComponent(parsed.error) || "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+          [{ text: "Tamam", onPress: () => setShowWebView(false) }]
         );
-        setShowWebView(false);
-        return false; // Prevent navigation
+        return;
       }
     }
 
     // Check if URL contains token parameter (fallback for other redirect formats)
-    if (url && url.includes("token=")) {
-      console.log("🔍 URL'de token parametresi bulundu");
+    if (url && url.includes("token=") && !url.includes("cross-app-login-page")) {
+      console.log("🔍 URL'de token parametresi bulundu:", url);
       const parsed = parseTokenFromUrl(url);
       
       if (parsed.token) {
@@ -260,20 +294,18 @@ const LoginMethodScreen = ({
         
         try {
           await handleAuthCallback(parsed.token);
+          onLoginSuccess();
         } catch (error: any) {
           console.error("❌ Auth callback hatası:", error);
           Alert.alert(
             "Giriş Başarısız",
-            "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+            error.message || "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
             [{ text: "Tamam" }]
           );
         }
-        return false; // Prevent navigation
+        return;
       }
     }
-
-    // Allow navigation for the initial load and API calls
-    return true;
   };
 
   const handleShouldStartLoad = (request: any) => {
@@ -281,20 +313,20 @@ const LoginMethodScreen = ({
     console.log("🔍 Should start load:", url);
 
     // If it's our callback URL, intercept it
-    if (url && url.includes("nirmind://auth-callback")) {
+    if (url && (url.includes("nirmind://auth-callback") || url.startsWith("nirmind://"))) {
       console.log("🚫 Blocking navigation, handling callback");
       handleWebViewNavigationStateChange({ url, loading: false });
       return false; // Block the navigation
     }
 
-    // Check if URL contains token parameter
-    if (url && url.includes("token=")) {
+    // Check if URL contains token parameter (but not the login page itself)
+    if (url && url.includes("token=") && !url.includes("cross-app-login-page")) {
       console.log("🚫 Blocking navigation, token detected in URL");
       handleWebViewNavigationStateChange({ url, loading: false });
       return false; // Block the navigation
     }
 
-    // Allow all other requests
+    // Allow all other requests (including API calls and the login page)
     return true;
   };
 
@@ -456,16 +488,47 @@ const LoginMethodScreen = ({
             onError={(syntheticEvent) => {
               const { nativeEvent } = syntheticEvent;
               console.error('❌ WebView error:', nativeEvent);
+              Alert.alert(
+                'Bağlantı Hatası',
+                'Sayfa yüklenirken bir hata oluştu. Lütfen internet bağlantınızı kontrol edin ve tekrar deneyin.',
+                [
+                  { 
+                    text: 'Kapat', 
+                    onPress: () => setShowWebView(false),
+                    style: 'cancel'
+                  },
+                  { 
+                    text: 'Yeniden Dene', 
+                    onPress: () => {
+                      // WebView'i yeniden yükle
+                      setWebViewUrl('');
+                      setTimeout(() => {
+                        const url = crossAppAuthService.getWebViewLoginUrl();
+                        setWebViewUrl(url);
+                      }, 100);
+                    }
+                  }
+                ]
+              );
             }}
             onHttpError={(syntheticEvent) => {
               const { nativeEvent } = syntheticEvent;
               console.error('❌ WebView HTTP error:', nativeEvent);
+              if (nativeEvent.statusCode >= 400) {
+                Alert.alert(
+                  'Sunucu Hatası',
+                  `Sunucu hatası oluştu (${nativeEvent.statusCode}). Lütfen daha sonra tekrar deneyin.`,
+                  [{ text: 'Tamam', onPress: () => setShowWebView(false) }]
+                );
+              }
             }}
             onMessage={async (event) => {
-              console.log('📨 WebView message:', event.nativeEvent.data);
+              const messageData = event.nativeEvent.data;
+              console.log('📨 WebView message received:', messageData);
               
               try {
-                const message = JSON.parse(event.nativeEvent.data);
+                const message = JSON.parse(messageData);
+                console.log('📨 Parsed message:', message);
                 
                 if (message.type === 'LOGIN_SUCCESS' && message.token) {
                   console.log('✅ Login token alındı via postMessage');
@@ -474,22 +537,37 @@ const LoginMethodScreen = ({
                   // Token'ı işle ve direkt ana uygulamaya geç
                   try {
                     await handleAuthCallback(message.token);
-                    // handleAuthCallback user state'ini günceller, useEffect otomatik Home'a yönlendirir
+                    onLoginSuccess();
                   } catch (error: any) {
                     console.error("❌ Auth callback hatası:", error);
-                    Alert.alert("Hata", error.message || "Login başarısız");
+                    Alert.alert(
+                      "Giriş Başarısız",
+                      error.message || "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+                      [{ text: "Tamam" }]
+                    );
                   }
                 } else if (message.type === 'LOGIN_ERROR' && message.error) {
                   console.error('❌ Login error via postMessage:', message.error);
                   Alert.alert(
                     "Giriş Başarısız",
-                    "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
-                    [{ text: "Tamam" }]
+                    message.error || "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+                    [{ text: "Tamam", onPress: () => setShowWebView(false) }]
                   );
-                  setShowWebView(false);
                 }
-              } catch (error) {
-                console.error('❌ WebView message parse hatası:', error);
+              } catch (error: any) {
+                // Belki de direkt token string olarak geldi
+                if (messageData && messageData.length > 50 && !messageData.includes('{')) {
+                  console.log('⚠️ Message direkt token gibi görünüyor, parse ediliyor...');
+                  try {
+                    setShowWebView(false);
+                    await handleAuthCallback(messageData);
+                    onLoginSuccess();
+                  } catch (tokenError: any) {
+                    console.error('❌ Token parse hatası:', tokenError);
+                  }
+                } else {
+                  console.error('❌ WebView message parse hatası:', error, 'Raw data:', messageData);
+                }
               }
             }}
             renderLoading={() => (

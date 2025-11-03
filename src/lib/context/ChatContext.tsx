@@ -8,7 +8,7 @@ interface ChatContextType {
   addMessage: (conversationId: string, message: ChatMessage) => Promise<void>;
   removeMessage: (conversationId: string, messageId: string) => void;
   createNewConversation: (title: string, initialMessage?: string) => Promise<string>;
-  selectConversation: (conversationId: string) => void;
+  selectConversation: (conversationId: string) => Promise<void>;
   deleteConversation: (conversationId: string) => void;
   deleteMessage: (conversationId: string, messageId: string) => Promise<void>;
   updateConversationTitle: (conversationId: string, title: string) => void;

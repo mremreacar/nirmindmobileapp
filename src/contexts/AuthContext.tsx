@@ -205,9 +205,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       console.log('🔍 Nirmind\'ten profil bilgileri çekiliyor...');
       
-      const backendUrl = __DEV__ 
-        ? 'http://192.168.0.186:3000/api/nirmind/auth/verify'
-        : 'https://api.astroboard.test/api/nirmind/auth/verify';
+      // Gerçek domain üzerinde test ediliyor
+      const backendUrl = 'https://nirpax.com/api/nirmind/auth/verify';
       
       const response = await fetch(backendUrl, {
         method: 'POST',

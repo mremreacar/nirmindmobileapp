@@ -1,11 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Backend API URL - Nircore backend
-// iOS simulator ve gerçek cihazda Mac'in IP adresini kullanın
-// Localhost bazen iOS simülatörde çalışmayabilir
-const API_BASE_URL = __DEV__ 
-  ? 'http://192.168.0.186:3000/api'  // Mac'in local IP adresi (iOS Simulator için)
-  : 'https://api.astroboard.test/api'; // Production API URL
+// Gerçek domain üzerinde test ediliyor
+const API_BASE_URL = 'https://nirpax.com/api';
 
 interface ApiResponse<T = any> {
   success: boolean;
@@ -111,8 +108,12 @@ class BackendApiService {
       const token = await this.getAuthToken();
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
+        'Accept': 'application/json',
         ...(options.headers as Record<string, string> || {}),
       };
+
+      // User-Agent ekleme - Cloudflare için gerekli olmayabilir ve sorun yaratabilir
+      // React Native fetch otomatik User-Agent ekler
 
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
@@ -120,11 +121,48 @@ class BackendApiService {
 
       const fullUrl = `${API_BASE_URL}${endpoint}`;
       console.log('🌐 API Request:', options.method || 'GET', fullUrl);
+      console.log('📤 Request Headers:', JSON.stringify(headers, null, 2));
       
-      const response = await fetch(fullUrl, {
-        ...options,
+      // Request body varsa logla (ilk 200 karakter)
+      if (options.body) {
+        const bodyPreview = typeof options.body === 'string' 
+          ? options.body.substring(0, 200) + (options.body.length > 200 ? '...' : '')
+          : JSON.stringify(options.body).substring(0, 200);
+        console.log('📤 Request Body Preview:', bodyPreview);
+        console.log('📤 Request Body Size:', typeof options.body === 'string' ? options.body.length : JSON.stringify(options.body).length, 'bytes');
+      }
+      
+      // Fetch options - Cloudflare için optimize edilmiş
+      const fetchOptions: RequestInit = {
+        method: options.method || 'GET',
         headers: headers as HeadersInit,
+        ...options,
+        // Cloudflare için HTTP/1.1 kullan (HTTP/2 bazı durumlarda sorun yaratabilir)
+        cache: 'no-cache',
+        credentials: 'omit', // CORS için
+      };
+      
+      let response: Response;
+      try {
+        response = await fetch(fullUrl, fetchOptions);
+      } catch (fetchError: any) {
+        console.error('❌ Fetch error:', fetchError);
+        // Network hatası - retry yapabiliriz
+        if (fetchError.message?.includes('Network') || fetchError.message?.includes('Failed to fetch')) {
+          console.log('🔄 Retrying request after network error...');
+          await new Promise(resolve => setTimeout(resolve, 1000)); // 1 saniye bekle
+          response = await fetch(fullUrl, fetchOptions);
+        } else {
+          throw fetchError;
+        }
+      }
+      
+      console.log('📥 Response Status:', response.status, response.statusText);
+      const responseHeaders: Record<string, string> = {};
+      response.headers.forEach((value, key) => {
+        responseHeaders[key] = value;
       });
+      console.log('📥 Response Headers:', JSON.stringify(responseHeaders, null, 2));
 
       // Handle 401 Unauthorized
       if (response.status === 401 && this.onUnauthorizedCallback) {
@@ -135,7 +173,28 @@ class BackendApiService {
         };
       }
 
-      const data = await response.json();
+      // Content-Type kontrolü
+      const contentType = response.headers.get('content-type');
+      const isJson = contentType && contentType.includes('application/json');
+      
+      let data: any;
+      if (isJson) {
+        data = await response.json();
+      } else {
+        // HTML veya başka bir format döndüyse
+        const text = await response.text();
+        console.error('❌ Backend HTML/Text Response:', {
+          status: response.status,
+          statusText: response.statusText,
+          contentType: contentType,
+          preview: text.substring(0, 200)
+        });
+        
+        return {
+          success: false,
+          error: `Sunucu hatası (${response.status}): ${response.statusText}. Endpoint bulunamadı veya geçersiz yanıt döndü.`,
+        };
+      }
 
       if (!response.ok) {
         console.error('❌ Backend Error Response:', {
@@ -399,19 +458,29 @@ class BackendApiService {
     const firstName = nameParts[0] || '';
     const lastName = nameParts.slice(1).join(' ') || '';
     
+    const requestBody = {
+      idToken: data.idToken,
+      accessToken: data.accessToken,
+      user: {
+        email: data.email,
+        name: data.displayName || '',
+        givenName: firstName,
+        familyName: lastName,
+        photo: data.photoURL || '',
+      },
+    };
+    
+    console.log('📤 Google Auth Request Body:', {
+      hasIdToken: !!requestBody.idToken,
+      hasAccessToken: !!requestBody.accessToken,
+      email: requestBody.user.email,
+      name: requestBody.user.name,
+      idTokenPreview: requestBody.idToken ? requestBody.idToken.substring(0, 20) + '...' : 'missing'
+    });
+    
     return this.makeRequest('/nirmind/auth/google', {
       method: 'POST',
-      body: JSON.stringify({
-        idToken: data.idToken,
-        accessToken: data.accessToken,
-        user: {
-          email: data.email,
-          name: data.displayName || '',
-          givenName: firstName,
-          familyName: lastName,
-          photo: data.photoURL || '',
-        },
-      }),
+      body: JSON.stringify(requestBody),
     });
   }
 

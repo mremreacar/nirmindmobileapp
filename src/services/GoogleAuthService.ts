@@ -116,33 +116,60 @@ class GoogleAuthService {
         throw new Error('Google token bilgileri alınamadı');
       }
 
-      const backendApiService = BackendApiService.getInstance();
-      const response = await backendApiService.googleAuth({
-        idToken: tokens.idToken,
-        accessToken: tokens.accessToken,
+      console.log('📤 Google auth data hazırlanıyor:', {
+        hasIdToken: !!tokens.idToken,
+        hasAccessToken: !!tokens.accessToken,
         email: googleUser.email,
-        displayName: googleUser.name || '',
-        photoURL: googleUser.photo || '',
+        name: googleUser.name,
+        photo: googleUser.photo
       });
 
-      if (response.success) {
-        console.log('✅ Backend Google Auth başarılı');
-        return {
-          success: true,
-          isNewUser: response.isNewUser,
-          user: response.data?.user,
-          token: response.data?.token,
-          message: response.message
-        };
-      } else {
-        console.error('❌ Backend Google Auth başarısız:', response.error);
-        console.error('❌ Backend hata detayları:', response.details || response);
-        return {
-          success: false,
-          error: response.error || 'Google authentication failed',
-          message: response.message || 'Failed to authenticate with backend',
-          details: response.details
-        };
+      const backendApiService = BackendApiService.getInstance();
+      
+      try {
+        const response = await backendApiService.googleAuth({
+          idToken: tokens.idToken,
+          accessToken: tokens.accessToken,
+          email: googleUser.email,
+          displayName: googleUser.name || '',
+          photoURL: googleUser.photo || '',
+        });
+
+        console.log('📥 Backend Google Auth response:', {
+          success: response.success,
+          hasUser: !!response.data?.user,
+          hasToken: !!response.data?.token,
+          error: response.error
+        });
+
+        if (response.success) {
+          console.log('✅ Backend Google Auth başarılı');
+          return {
+            success: true,
+            isNewUser: response.isNewUser,
+            user: response.data?.user,
+            token: response.data?.token,
+            message: response.message
+          };
+        } else {
+          console.error('❌ Backend Google Auth başarısız:', response.error);
+          console.error('❌ Backend hata detayları:', {
+            error: response.error,
+            message: response.message,
+            errorName: response.errorName,
+            errorCode: response.errorCode,
+            errorDetails: response.errorDetails
+          });
+          return {
+            success: false,
+            error: response.error || 'Google authentication failed',
+            message: response.message || 'Failed to authenticate with backend',
+            details: response.errorDetails
+          };
+        }
+      } catch (networkError: any) {
+        console.error('❌ Network error during Google auth:', networkError);
+        throw networkError; // Re-throw to be caught by outer catch
       }
     } catch (error: any) {
       // Kullanıcı iptal ettiyse sessizce iptal et

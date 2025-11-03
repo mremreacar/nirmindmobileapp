@@ -1,8 +1,7 @@
 import { Linking, Platform } from 'react-native';
 
-const API_BASE_URL = __DEV__ 
-  ? 'http://192.168.0.186:3000/api'  // Mac'in local IP adresi (iOS Simulator için)
-  : 'https://api.nireya.com/api';
+// Gerçek domain üzerinde test ediliyor
+const API_BASE_URL = 'https://nirpax.com/api';
 
 class CrossAppAuthService {
   private static instance: CrossAppAuthService;

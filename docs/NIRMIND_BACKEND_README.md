@@ -127,7 +127,7 @@ Authorization: Bearer <JWT_TOKEN>
 ### Base URL
 
 - **Development**: `http://localhost:3000/api/nirmind`
-- **Production**: `https://api.astroboard.test/api/nirmind`
+- **Production**: `https://nirpax.com/api/nirmind`
 
 ### Health Check
 
