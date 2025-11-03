@@ -139,6 +139,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     },
     onError: (error: string) => {
       console.error('Chat dikte hatası:', error);
+      // Kullanıcıya bilgilendirme mesajı göster
+      Alert.alert('Bilgi', error, [{ text: 'Tamam' }]);
     },
     onStart: () => {
       console.log('Chat dikte başlatıldı');
@@ -191,21 +193,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     }
   }, [initialUploadModalOpen]);
 
-  // Chat ekranına geçerken input'u otomatik focus'la - sadece UploadModal açık değilse
-  useEffect(() => {
-    // Eğer UploadModal açıksa klavyeyi açma
-    if (showUploadModal) {
-      return;
-    }
-    
-    const timer = setTimeout(() => {
-      if (textInputRef.current && !showUploadModal) {
-        textInputRef.current.focus();
-      }
-    }, 300); // Kısa bir gecikme ile focus'la
-
-    return () => clearTimeout(timer);
-  }, [showUploadModal]);
+  // Chat ekranı açıldığında otomatik klavye açılmasını engelle
+  // Kullanıcı manuel olarak input'a dokunmalı
 
   // Auto-send initial message from HomeScreen - sadece bir kez çalışsın
   const initialMessageSentRef = useRef<string | null>(null); // conversationId'yi sakla
@@ -395,7 +384,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     }).start();
   };
 
-  const closeUploadModal = (shouldFocusInput = false) => {
+  const closeUploadModal = useCallback((shouldFocusInput = false) => {
     Animated.timing(translateY, {
       toValue: height,
       duration: CHAT_CONSTANTS.ANIMATION_DURATION,
@@ -404,9 +393,10 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
       setShowUploadModal(false);
       
       // Modal kapandıktan sonra input'a focus yap (eğer isteniyorsa)
+      // Delay'i artırdık - performans için
       if (shouldFocusInput) {
         // Animasyon tamamlandıktan sonra delay ile focus yap
-        // Modal animasyonu (300ms) + kısa bir ek delay (150ms) = 450ms toplam
+        // Modal animasyonu (300ms) + ek delay (300ms) = 600ms toplam (daha smooth)
         setTimeout(() => {
           if (textInputRef.current) {
             // RequestAnimationFrame ile smooth focus
@@ -415,10 +405,10 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
               setIsInputFocused(true);
             });
           }
-        }, 150); // Modal animasyonu tamamlandıktan sonra 150ms delay
+        }, 300); // Delay artırıldı - daha smooth
       }
     });
-  };
+  }, [translateY, height, textInputRef]);
 
   const pickImage = async () => {
     // Çakışma kontrolü
@@ -813,18 +803,19 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     handleKeyPress(key, handleSendMessage);
   };
 
-  const handleInputFocus = () => {
-    // Auto-scroll to input when focused
+  const handleInputFocus = useCallback(() => {
+    // Auto-scroll to input when focused - delay ile daha smooth
     if (scrollViewRef.current && isKeyboardVisible) {
-      const scrollOffset = getScrollOffset();
-      scrollViewRef.current.scrollToEnd({ animated: true });
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
     }
-  };
+  }, [isKeyboardVisible]);
 
-  const handleInputBlur = () => {
+  const handleInputBlur = useCallback(() => {
     // Optional: Keep focus state for better UX
     // setIsInputFocused(false);
-  };
+  }, []);
 
 
 
@@ -979,8 +970,9 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
       >
       <KeyboardAvoidingView 
         style={styles.chatGradient}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+        enabled={Platform.OS === 'ios'}
       >
         <LinearGradient
           colors={['#02020A', '#16163C']}
@@ -1070,7 +1062,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             editable={true}
             selectTextOnFocus={false}
             clearButtonMode="while-editing"
-            autoFocus={true}
+            autoFocus={false}
             blurOnSubmit={true}
             onSubmitEditing={handleSendMessage}
             testID="chat-input"

@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, memo, useState, useCallback } from 'react';
+import React, { useRef, useEffect, memo, useState, useCallback, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Animated, Dimensions, Platform, Easing, Image, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SvgXml } from 'react-native-svg';
@@ -457,11 +457,13 @@ const InputComponent: React.FC<InputComponentProps> = ({
                 showsHorizontalScrollIndicator={false}
                 style={styles.attachmentGridInside}
                 contentContainerStyle={styles.attachmentGridContent}
+                removeClippedSubviews={true}
+                scrollEventThrottle={16}
               >
                 {/* Seçilen Fotoğraflar */}
                 {selectedImages.map((imageUri, index) => (
                   <View 
-                    key={`image-${index}`} 
+                    key={`image-${imageUri}-${index}`} 
                     style={styles.attachmentCard}
                   >
                     <TouchableOpacity 
@@ -470,16 +472,19 @@ const InputComponent: React.FC<InputComponentProps> = ({
                         // TODO: Büyük önizleme modalı aç
                         console.log('Fotoğraf önizleme:', imageUri);
                       }}
+                      activeOpacity={0.7}
                     >
                       <Image 
                         source={{ uri: imageUri }} 
                         style={styles.attachmentImage}
                         resizeMode="cover"
+                        cache="force-cache"
                       />
                     </TouchableOpacity>
                     <TouchableOpacity 
                       style={styles.removeAttachmentButton}
                       onPress={() => onRemoveImage?.(index)}
+                      activeOpacity={0.7}
                     >
                       <Text style={styles.removeAttachmentIcon}>×</Text>
                     </TouchableOpacity>
@@ -489,7 +494,7 @@ const InputComponent: React.FC<InputComponentProps> = ({
                 {/* Seçilen Dosyalar */}
                 {selectedFiles.map((file, index) => (
                   <View 
-                    key={`file-${index}`} 
+                    key={`file-${file.name || index}-${index}`} 
                     style={styles.attachmentCard}
                   >
                     <TouchableOpacity 
@@ -498,6 +503,7 @@ const InputComponent: React.FC<InputComponentProps> = ({
                         // TODO: Dosya önizleme modalı aç
                         console.log('Dosya önizleme:', file.name);
                       }}
+                      activeOpacity={0.7}
                     >
                       <View style={styles.attachmentFileIcon}>
                         <Text style={styles.attachmentFileIconText}>📄</Text>
@@ -514,6 +520,7 @@ const InputComponent: React.FC<InputComponentProps> = ({
                     <TouchableOpacity 
                       style={styles.removeAttachmentButton}
                       onPress={() => onRemoveFile?.(index)}
+                      activeOpacity={0.7}
                     >
                       <Text style={styles.removeAttachmentIcon}>×</Text>
                     </TouchableOpacity>
