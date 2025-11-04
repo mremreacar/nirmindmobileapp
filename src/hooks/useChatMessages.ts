@@ -30,11 +30,21 @@ export const useChatMessages = () => {
     }
 
     if (!messageText.trim() && selectedImages.length === 0 && selectedFiles.length === 0) {
-          console.log('⚠️ Mesaj gönderilemedi: içerik yok');
-          return;
-        }
+      console.log('⚠️ Mesaj gönderilemedi: içerik yok');
+      return;
+    }
 
-        console.log('📤 Mesaj backend\'e gönderiliyor:', { messageText, conversationId, isResearchMode });
+    // Conversation ID kontrolü - kritik!
+    if (!conversationId) {
+      console.error('❌ sendMessage: conversationId eksik, mesaj gönderilemedi:', {
+        messageText: messageText.substring(0, 50),
+        hasImages: selectedImages.length > 0,
+        hasFiles: selectedFiles.length > 0
+      });
+      return;
+    }
+
+    console.log('📤 Mesaj backend\'e gönderiliyor:', { messageText, conversationId, isResearchMode });
         
         setIsLoading(true);
         
@@ -278,7 +288,9 @@ export const useChatMessages = () => {
         }
       } else {
         // Hata durumunda optimistic mesajı kaldır
-        removeMessage(conversationId, tempUserMessageId);
+        if (conversationId) {
+          removeMessage(conversationId, tempUserMessageId);
+        }
         
         const errorMessage: ChatMessage = {
           id: Date.now().toString(),
@@ -286,16 +298,25 @@ export const useChatMessages = () => {
           isUser: false,
           timestamp: new Date()
         };
-        try {
-          await addMessage(conversationId, errorMessage);
-        } catch (addError) {
-          console.error('❌ Hata mesajı eklenirken hata:', addError);
-        }
+        
         console.error('❌ Backend mesaj hatası:', response.error || response.message || 'Bilinmeyen hata');
+        
+        // Conversation ID varsa hata mesajını ekle, yoksa sadece log yap
+        if (conversationId) {
+          try {
+            await addMessage(conversationId, errorMessage);
+          } catch (addError) {
+            console.error('❌ Hata mesajı eklenirken hata:', addError);
+          }
+        } else {
+          console.error('⚠️ Conversation ID eksik olduğu için hata mesajı eklenemedi:', errorMessage.text);
+        }
       }
     } catch (error: any) {
       // Hata durumunda optimistic mesajı kaldır
-      removeMessage(conversationId, tempUserMessageId);
+      if (conversationId) {
+        removeMessage(conversationId, tempUserMessageId);
+      }
       
       console.error('💥 Chat hatası:', error);
       const errorMessage: ChatMessage = {
@@ -304,10 +325,16 @@ export const useChatMessages = () => {
         isUser: false,
         timestamp: new Date()
       };
-      try {
-        await addMessage(conversationId, errorMessage);
-      } catch (addError) {
-        console.error('❌ Hata mesajı eklenirken hata:', addError);
+      
+      // Conversation ID varsa hata mesajını ekle, yoksa sadece log yap
+      if (conversationId) {
+        try {
+          await addMessage(conversationId, errorMessage);
+        } catch (addError) {
+          console.error('❌ Hata mesajı eklenirken hata:', addError);
+        }
+      } else {
+        console.error('⚠️ Conversation ID eksik olduğu için hata mesajı eklenemedi:', errorMessage.text);
       }
     } finally {
       setIsLoading(false);

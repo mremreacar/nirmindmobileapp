@@ -199,15 +199,45 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   // Auto-send initial message from HomeScreen - sadece bir kez çalışsın
   const initialMessageSentRef = useRef<string | null>(null); // conversationId'yi sakla
   const initialMessageContentRef = useRef<string | null>(null); // initialMessage içeriğini sakla
+  const isSendingRef = useRef<boolean>(false); // Mesaj gönderimi devam ediyor mu kontrolü
+  const useEffectRanRef = useRef<boolean | string>(false); // useEffect'in bir kez çalıştığını garanti etmek için
+  const conversationLoadedRef = useRef<string | null>(null); // Hangi conversation yüklendi
   
   useEffect(() => {
     // conversationId prop'u varsa onu kullan, yoksa currentConversation.id'yi kullan
     const targetConversationId = conversationId || currentConversation?.id;
     
     // Bu conversation için zaten gönderildi mi kontrol et (EN ERKEN KONTROL)
-    if (initialMessageSentRef.current === targetConversationId && initialMessageContentRef.current === initialMessage) {
+    const messageKey = `${targetConversationId}-${initialMessage}`;
+    if (initialMessageSentRef.current === messageKey) {
       console.log('⚠️ Bu conversation için bu mesaj zaten gönderildi (erken kontrol)');
       return;
+    }
+    
+    // Mesaj gönderimi devam ediyor mu kontrol et
+    if (isSendingRef.current) {
+      console.log('⚠️ Mesaj gönderimi devam ediyor, yeni gönderim engellendi');
+      return;
+    }
+    
+    // useEffect'in bu prop kombinasyonu için zaten çalıştığını kontrol et
+    const effectKey = `${targetConversationId}-${initialMessage}-${initialArastirmaModu}-${initialPromptType}`;
+    if (useEffectRanRef.current === effectKey) {
+      console.log('⚠️ Bu useEffect zaten çalıştı, tekrar çalıştırma engellendi');
+      return;
+    }
+    
+    // Conversation'da zaten mesaj varsa initial message gönderme
+    if (currentConversation?.messages && currentConversation.messages.length > 0) {
+      const hasSameMessage = currentConversation.messages.some(
+        msg => msg.isUser && msg.text === initialMessage
+      );
+      if (hasSameMessage) {
+        console.log('⚠️ Conversation\'da zaten bu mesaj var, initial message gönderilmedi');
+        initialMessageSentRef.current = messageKey;
+        useEffectRanRef.current = effectKey;
+        return;
+      }
     }
     
     console.log('🔍 Initial message check:', {
@@ -217,6 +247,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
       targetConversationId,
       alreadySent: initialMessageSentRef.current,
       hasCurrentConversation: !!currentConversation,
+      hasMessages: currentConversation?.messages?.length || 0,
       previousMessage: initialMessageContentRef.current,
       conversationResearchMode: currentConversation?.isResearchMode,
       initialArastirmaModu,
@@ -243,8 +274,10 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     }
     
     // Mesaj gönderildi flag'ini set et (async fonksiyon çağrılmadan önce)
-    initialMessageSentRef.current = targetConversationId;
+    initialMessageSentRef.current = messageKey;
     initialMessageContentRef.current = initialMessage;
+    isSendingRef.current = true; // Gönderim başladı flag'i
+    useEffectRanRef.current = effectKey; // useEffect çalıştı flag'i
     
     console.log('📤 Initial message gönderiliyor:', {
       message: initialMessage,
@@ -305,6 +338,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
           // Input'u temizle
           setInputText("");
           console.log('✅ Initial message başarıyla gönderildi');
+          isSendingRef.current = false; // Gönderim tamamlandı
           return; // Başarılı oldu, çık
         } catch (error: any) {
           retryCount++;
@@ -319,6 +353,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
           // Retry hakkı bitti veya farklı bir hata
           initialMessageSentRef.current = null; // Retry için flag'i reset et
           initialMessageContentRef.current = null;
+          isSendingRef.current = false; // Gönderim hatası ile sonlandı
+          useEffectRanRef.current = false; // Hata durumunda flag'i reset et
           return;
         }
       }
@@ -331,10 +367,12 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   // Initialize conversation when component mounts - NON-BLOCKING
   // Bu useEffect initialMessage'dan bağımsız çalışmalı
   useEffect(() => {
-    if (conversationId) {
+    if (conversationId && conversationLoadedRef.current !== conversationId) {
       // Conversation yüklemesini paralel yap, mesaj gönderimini bloklamasın
+      conversationLoadedRef.current = conversationId; // Flag'i set et
       selectConversation(conversationId).catch((error: any) => {
         console.error('❌ Conversation seçilirken hata:', error);
+        conversationLoadedRef.current = null; // Hata durumunda flag'i reset et
       });
     }
   }, [conversationId, selectConversation]);

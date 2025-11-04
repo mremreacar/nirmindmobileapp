@@ -60,6 +60,16 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   const addMessage = useCallback(async (conversationId: string, message: ChatMessage) => {
     console.log('📝 addMessage çağrıldı:', { conversationId, messageId: message.id, isUser: message.isUser, text: message.text.substring(0, 50) });
     
+    // Conversation ID kontrolü
+    if (!conversationId) {
+      console.error('❌ addMessage: conversationId eksik, mesaj eklenemedi:', {
+        messageId: message.id,
+        messageText: message.text?.substring(0, 50),
+        isUser: message.isUser
+      });
+      return;
+    }
+    
     // Duplicate kontrolü - aynı ID'ye sahip mesaj varsa ekleme
     let messageAdded = false;
     

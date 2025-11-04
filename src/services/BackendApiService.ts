@@ -1,8 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Backend API URL - Nircore backend
-// Gerçek domain üzerinde test ediliyor
-const API_BASE_URL = 'https://nirpax.com/api';
+// LOCAL TEST: Local backend'e bağlan
+// PRODUCTION: Production backend'e bağlan
+// iOS Simulator için localhost yerine Mac IP kullanılmalı (örn: 192.168.x.x)
+const API_BASE_URL = __DEV__ 
+  ? 'http://192.168.0.141:3000/api'  // Local development (Mac IP'nizi güncelleyin)
+  : 'https://nirpax.com/api';          // Production
 
 interface ApiResponse<T = any> {
   success: boolean;
@@ -132,29 +136,99 @@ class BackendApiService {
         console.log('📤 Request Body Size:', typeof options.body === 'string' ? options.body.length : JSON.stringify(options.body).length, 'bytes');
       }
       
-      // Fetch options - Cloudflare için optimize edilmiş
+      // Fetch options - Network timeout ve retry için optimize edilmiş
       const fetchOptions: RequestInit = {
         method: options.method || 'GET',
         headers: headers as HeadersInit,
         ...options,
-        // Cloudflare için HTTP/1.1 kullan (HTTP/2 bazı durumlarda sorun yaratabilir)
         cache: 'no-cache',
         credentials: 'omit', // CORS için
       };
       
+      // Network timeout için AbortController kullan
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 saniye timeout
+      fetchOptions.signal = controller.signal;
+      
       let response: Response;
-      try {
-        response = await fetch(fullUrl, fetchOptions);
-      } catch (fetchError: any) {
-        console.error('❌ Fetch error:', fetchError);
-        // Network hatası - retry yapabiliriz
-        if (fetchError.message?.includes('Network') || fetchError.message?.includes('Failed to fetch')) {
-          console.log('🔄 Retrying request after network error...');
-          await new Promise(resolve => setTimeout(resolve, 1000)); // 1 saniye bekle
-          response = await fetch(fullUrl, fetchOptions);
-        } else {
-          throw fetchError;
+      let lastError: any = null;
+      const maxRetries = 2; // Toplam 3 deneme (1 ilk + 2 retry)
+      
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          if (attempt > 0) {
+            // Retry için bekleme süresi (exponential backoff)
+            const delay = Math.min(1000 * Math.pow(2, attempt - 1), 3000); // 1s, 2s, max 3s
+            console.log(`🔄 Retry attempt ${attempt}/${maxRetries} after ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            
+            // Yeni timeout için yeni controller oluştur
+            const retryController = new AbortController();
+            const retryTimeoutId = setTimeout(() => retryController.abort(), 15000);
+            fetchOptions.signal = retryController.signal;
+            
+            // Cleanup function
+            const cleanup = () => {
+              clearTimeout(retryTimeoutId);
+            };
+            
+            try {
+              response = await fetch(fullUrl, fetchOptions);
+              cleanup();
+            } catch (err) {
+              cleanup();
+              throw err;
+            }
+          } else {
+            // İlk deneme
+            response = await fetch(fullUrl, fetchOptions);
+          }
+          
+          clearTimeout(timeoutId);
+          break; // Başarılı, loop'tan çık
+        } catch (fetchError: any) {
+          clearTimeout(timeoutId);
+          lastError = fetchError;
+          
+          // AbortError (timeout) veya Network hatası
+          const isNetworkError = fetchError.name === 'AbortError' || 
+                                fetchError.message?.includes('Network') || 
+                                fetchError.message?.includes('Failed to fetch') ||
+                                fetchError.message?.includes('Network request failed');
+          
+          if (isNetworkError && attempt < maxRetries) {
+            console.error(`❌ Network error (attempt ${attempt + 1}/${maxRetries + 1}):`, fetchError.message || fetchError.name);
+            continue; // Retry yap
+          } else {
+            // Son deneme veya network hatası değil
+            console.error('❌ Fetch error:', fetchError);
+            console.error('❌ Error details:', {
+              name: fetchError.name,
+              message: fetchError.message,
+              code: fetchError.code,
+              stack: fetchError.stack
+            });
+            
+            // Network hatası için daha açıklayıcı mesaj
+            if (isNetworkError) {
+              return {
+                success: false,
+                error: 'Bağlantı hatası',
+                message: `Sunucuya bağlanılamıyor. Lütfen internet bağlantınızı kontrol edin ve backend'in çalıştığından emin olun. (${API_BASE_URL})`,
+              };
+            }
+            
+            throw fetchError;
+          }
         }
+      }
+      
+      if (!response!) {
+        return {
+          success: false,
+          error: 'Bağlantı hatası',
+          message: `Sunucuya bağlanılamadı. Tüm denemeler tükendi. (${API_BASE_URL})`,
+        };
       }
       
       console.log('📥 Response Status:', response.status, response.statusText);
