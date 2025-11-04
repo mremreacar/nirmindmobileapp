@@ -207,8 +207,14 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     // conversationId prop'u varsa onu kullan, yoksa currentConversation.id'yi kullan
     const targetConversationId = conversationId || currentConversation?.id;
     
+    // Initial message kontrolü - boş string'leri filtrele
+    const trimmedInitialMessage = initialMessage?.trim() || '';
+    if (!trimmedInitialMessage || !targetConversationId) {
+      return;
+    }
+    
     // Bu conversation için zaten gönderildi mi kontrol et (EN ERKEN KONTROL)
-    const messageKey = `${targetConversationId}-${initialMessage}`;
+    const messageKey = `${targetConversationId}-${trimmedInitialMessage}`;
     if (initialMessageSentRef.current === messageKey) {
       console.log('⚠️ Bu conversation için bu mesaj zaten gönderildi (erken kontrol)');
       return;
@@ -221,7 +227,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     }
     
     // useEffect'in bu prop kombinasyonu için zaten çalıştığını kontrol et
-    const effectKey = `${targetConversationId}-${initialMessage}-${initialArastirmaModu}-${initialPromptType}`;
+    const effectKey = `${targetConversationId}-${trimmedInitialMessage}-${initialArastirmaModu}-${initialPromptType}`;
     if (useEffectRanRef.current === effectKey) {
       console.log('⚠️ Bu useEffect zaten çalıştı, tekrar çalıştırma engellendi');
       return;
@@ -230,7 +236,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     // Conversation'da zaten mesaj varsa initial message gönderme
     if (currentConversation?.messages && currentConversation.messages.length > 0) {
       const hasSameMessage = currentConversation.messages.some(
-        msg => msg.isUser && msg.text === initialMessage
+        msg => msg.isUser && msg.text.trim() === trimmedInitialMessage
       );
       if (hasSameMessage) {
         console.log('⚠️ Conversation\'da zaten bu mesaj var, initial message gönderilmedi');
@@ -241,7 +247,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     }
     
     console.log('🔍 Initial message check:', {
-      initialMessage,
+      initialMessage: trimmedInitialMessage,
       conversationId,
       currentConversationId: currentConversation?.id,
       targetConversationId,
@@ -255,11 +261,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         ? currentConversation.isResearchMode 
         : initialArastirmaModu
     });
-    
-    // Sadece gerçekten initial message varsa ve henüz gönderilmediyse çalış
-    if (!initialMessage || !targetConversationId) {
-      return;
-    }
     
     // Conversation henüz yüklenmemişse bekle, ama initialArastirmaModu varsa bekleme
     // Çünkü initialArastirmaModu prop'u zaten geçerli (Home ekranından geldiğinde)
@@ -275,12 +276,12 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     
     // Mesaj gönderildi flag'ini set et (async fonksiyon çağrılmadan önce)
     initialMessageSentRef.current = messageKey;
-    initialMessageContentRef.current = initialMessage;
+    initialMessageContentRef.current = trimmedInitialMessage;
     isSendingRef.current = true; // Gönderim başladı flag'i
     useEffectRanRef.current = effectKey; // useEffect çalıştı flag'i
     
     console.log('📤 Initial message gönderiliyor:', {
-      message: initialMessage,
+      message: trimmedInitialMessage,
       conversationId: targetConversationId,
       researchMode: initialArastirmaModu,
       conversationResearchMode: currentConversation?.isResearchMode,
@@ -328,7 +329,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
           });
           
           await sendMessage(
-            initialMessage,
+            trimmedInitialMessage,
             targetConversationId,
             researchMode,
             initialImages,
