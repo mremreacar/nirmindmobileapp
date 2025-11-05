@@ -3,7 +3,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 // OpenAI API yapılandırması
 const openai = new OpenAI({
-  apiKey: process.env.EXPO_PUBLIC_OPENAI_API_KEY,
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
 export interface ChatResponse {

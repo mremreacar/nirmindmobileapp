@@ -45,16 +45,30 @@ export const useChatMessages = () => {
     }
 
     console.log('📤 Mesaj backend\'e gönderiliyor:', { messageText, conversationId, isResearchMode });
+    
+    // currentConversation kontrolü - eğer conversation seçili değilse seç
+    if (!currentConversation || currentConversation.id !== conversationId) {
+      console.log('⚠️ currentConversation farklı veya undefined, conversation seçiliyor...');
+      try {
+        await selectConversation(conversationId);
+        console.log('✅ Conversation seçildi:', conversationId);
+      } catch (selectError) {
+        console.error('❌ Conversation seçilirken hata:', selectError);
+        // Devam et, belki conversation zaten var
+      }
+    }
         
-        setIsLoading(true);
-        
-        try {
-          // Mesajı hazırla (boş bırakılabilir, sadece görsel/dosya gönderilebilir)
-          const finalMessage = messageText.trim();
+    setIsLoading(true);
+    
+    // tempUserMessageId'yi try bloğunun dışına taşı (catch bloğunda kullanılabilmesi için)
+    const tempUserMessageId = `temp-${Date.now()}`;
+    
+    try {
+      // Mesajı hazırla (boş bırakılabilir, sadece görsel/dosya gönderilebilir)
+      const finalMessage = messageText.trim();
       
       // OPTIMISTIC UPDATE: Kullanıcı mesajını hemen ekle (backend'e göndermeden önce)
       // Bu sayede kullanıcı mesajı ekranda hemen görünür
-      const tempUserMessageId = `temp-${Date.now()}`;
       const optimisticUserMessage: ChatMessage = {
         id: tempUserMessageId,
         text: finalMessage || (selectedImages.length > 0 || selectedFiles.length > 0 ? '' : 'Mesaj gönderiliyor...'),
@@ -340,22 +354,33 @@ export const useChatMessages = () => {
       setIsLoading(false);
       console.log('🏁 Mesaj işlemi tamamlandı, isLoading false yapıldı');
     }
-  }, [currentConversation, addMessage, removeMessage, isLoading]);
+  }, [currentConversation, addMessage, removeMessage, isLoading, selectConversation]);
 
   const sendQuickSuggestion = useCallback(async (suggestion: {question: string, promptType: string}): Promise<string | undefined> => {
     try {
       if (!currentConversation) {
         const title = suggestion.question.length > 30 ? suggestion.question.substring(0, 30) + '...' : suggestion.question;
         const conversationId = await createNewConversation(title, suggestion.question);
-        selectConversation(conversationId);
+        
+        // Conversation ID kontrolü - kritik!
+        if (!conversationId) {
+          console.error('❌ sendQuickSuggestion: conversationId oluşturulamadı');
+          return undefined;
+        }
+        
+        // Conversation'ı seç ve await et
+        await selectConversation(conversationId);
+        
+        // Mesajı gönder
         await sendMessage(suggestion.question, conversationId, false, [], [], suggestion.promptType);
         return conversationId;
       } else {
+        // Mevcut conversation varsa direkt gönder
         await sendMessage(suggestion.question, currentConversation.id, false, [], [], suggestion.promptType);
         return currentConversation.id;
       }
     } catch (error) {
-      console.error('Quick suggestion error:', error);
+      console.error('❌ Quick suggestion error:', error);
       return undefined;
     }
   }, [currentConversation, createNewConversation, selectConversation, sendMessage]);

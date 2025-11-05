@@ -52,3 +52,4 @@ dist
 # Large files (now handled by Git LFS)
 
 /generated/prisma
+.env

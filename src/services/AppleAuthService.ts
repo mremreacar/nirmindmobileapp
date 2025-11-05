@@ -10,6 +10,10 @@ interface AppleAuthResult {
   token?: any;
   message?: string;
   error?: string;
+  errorName?: string;
+  errorCode?: string;
+  errorDetails?: any;
+  errorStack?: string;
 }
 
 class AppleAuthService {

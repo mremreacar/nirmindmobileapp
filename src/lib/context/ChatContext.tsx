@@ -298,6 +298,8 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         }
         
         // Mevcut mesajlarla birleştir ve duplicate'leri kaldır
+        let updatedConversation: ChatConversation | null = null;
+        
         setConversations(prev => {
           const currentConv = prev.find(c => c.id === conversationId);
           const existingMessages: ChatMessage[] = currentConv?.messages || conversation.messages || [];
@@ -311,10 +313,15 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
               : conv
           );
           
-          setCurrentConversation(updated.find(c => c.id === conversationId) || conversation);
+          updatedConversation = updated.find(c => c.id === conversationId) || conversation;
           
           return updated;
         });
+        
+        // currentConversation'ı güncelle (setConversations callback'i dışında)
+        if (updatedConversation) {
+          setCurrentConversation(updatedConversation);
+        }
       } else {
         setCurrentConversation(conversation);
       }
@@ -325,16 +332,35 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   }, [backendApiService]);
 
   const selectConversation = useCallback(async (conversationId: string) => {
-    // Conversation'ı güncel state'den al
-    let conversation: ChatConversation | undefined;
+    console.log('🔍 selectConversation çağrıldı:', conversationId);
+    
+    // Conversation'ı güncel state'den al (callback pattern ile)
+    let foundConversation: ChatConversation | undefined;
     
     setConversations(prev => {
-      conversation = prev.find(conv => conv.id === conversationId);
+      foundConversation = prev.find(conv => conv.id === conversationId);
       return prev;
     });
     
+    // Eğer conversation bulunduysa currentConversation olarak set et (callback dışında)
+    if (foundConversation) {
+      console.log('✅ Conversation state\'de bulundu, currentConversation set ediliyor:', conversationId);
+      setCurrentConversation(foundConversation);
+      
+      // Mesajları kontrol et ve yükle
+      if (!foundConversation.messages || foundConversation.messages.length === 0) {
+        console.log('⚠️ Conversation\'da mesaj yok, backend\'den yükleniyor...');
+        // Mesajları paralel yükle (non-blocking)
+        loadConversationMessages(conversationId, foundConversation).catch(error => {
+          console.error('❌ Mesajlar yüklenirken hata:', error);
+        });
+      }
+      return; // Conversation bulundu, işlem tamamlandı
+    }
+    
     // Eğer conversation local state'de yoksa backend'den yükle
-    if (!conversation) {
+    if (!foundConversation) {
+      console.log('⚠️ Conversation state\'de bulunamadı, backend\'den yükleniyor...');
       try {
         const convResponse = await backendApiService.getConversation(conversationId);
         if (convResponse.success && convResponse.data) {
@@ -357,35 +383,24 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
             return prevConvs;
           });
           
-          // Mesajları paralel yükle (non-blocking)
-          // Conversation önce state'e eklendi, mesajlar sonra yüklenecek
+          // currentConversation'ı set et (setConversations callback'i dışında)
           setCurrentConversation(newConversation);
           
-          // Mesajları arka planda yükle (await etme)
+          // Mesajları paralel yükle (non-blocking)
           loadConversationMessages(conversationId, newConversation).catch(error => {
             console.error('❌ Mesajlar yüklenirken hata:', error);
           });
           
-          conversation = newConversation;
+          console.log('✅ Conversation backend\'den yüklendi ve currentConversation set edildi:', conversationId);
+          return;
+        } else {
+          console.error('❌ Conversation backend\'den yüklenemedi:', convResponse.error);
+          throw new Error('Conversation bulunamadı');
         }
       } catch (error) {
         console.error('❌ Conversation yüklenirken hata:', error);
         throw error;
       }
-    } else {
-      // Conversation var, mesajları kontrol et ve yükle
-      setCurrentConversation(conversation);
-      
-      if (!conversation.messages || conversation.messages.length === 0) {
-        // Mesajları paralel yükle (non-blocking)
-        loadConversationMessages(conversationId, conversation).catch(error => {
-          console.error('❌ Mesajlar yüklenirken hata:', error);
-        });
-      }
-    }
-    
-    if (conversation) {
-      setCurrentConversation(conversation);
     }
   }, [backendApiService, loadConversationMessages]);
 

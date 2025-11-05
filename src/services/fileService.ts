@@ -13,7 +13,7 @@ class FileService {
   private apiKey: string;
 
   constructor() {
-    this.apiKey = process.env.EXPO_PUBLIC_OPENAI_API_KEY || '';
+    this.apiKey = process.env.OPENAI_API_KEY || '';
     console.log('🔑 API Key check:', {
       hasApiKey: !!this.apiKey,
       keyLength: this.apiKey.length,

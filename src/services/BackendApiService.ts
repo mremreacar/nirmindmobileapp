@@ -1,12 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Backend API URL - Nircore backend
-// LOCAL TEST: Local backend'e bağlan
-// PRODUCTION: Production backend'e bağlan
-// iOS Simulator için localhost yerine Mac IP kullanılmalı (örn: 192.168.x.x)
-const API_BASE_URL = __DEV__ 
-  ? 'http://192.168.0.141:3000/api'  // Local development (Mac IP'nizi güncelleyin)
-  : 'https://nirpax.com/api';          // Production
+const API_BASE_URL = 'https://nirpax.com/api';
 
 interface ApiResponse<T = any> {
   success: boolean;
@@ -147,24 +142,24 @@ class BackendApiService {
       
       // Network timeout için AbortController kullan
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 saniye timeout
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 saniye timeout (artırıldı)
       fetchOptions.signal = controller.signal;
       
       let response: Response;
       let lastError: any = null;
-      const maxRetries = 2; // Toplam 3 deneme (1 ilk + 2 retry)
+      const maxRetries = 3; // Toplam 4 deneme (1 ilk + 3 retry)
       
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
           if (attempt > 0) {
             // Retry için bekleme süresi (exponential backoff)
-            const delay = Math.min(1000 * Math.pow(2, attempt - 1), 3000); // 1s, 2s, max 3s
+            const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000); // 1s, 2s, 4s, max 5s
             console.log(`🔄 Retry attempt ${attempt}/${maxRetries} after ${delay}ms...`);
             await new Promise(resolve => setTimeout(resolve, delay));
             
             // Yeni timeout için yeni controller oluştur
             const retryController = new AbortController();
-            const retryTimeoutId = setTimeout(() => retryController.abort(), 15000);
+            const retryTimeoutId = setTimeout(() => retryController.abort(), 30000);
             fetchOptions.signal = retryController.signal;
             
             // Cleanup function
@@ -190,11 +185,28 @@ class BackendApiService {
           clearTimeout(timeoutId);
           lastError = fetchError;
           
+          // Rate limit hatası için retry yapma (mesaj içinde kontrol)
+          const isRateLimitError = fetchError.message?.includes('Too many requests') ||
+                                  fetchError.message?.includes('rate limit') ||
+                                  fetchError.message?.includes('429');
+          
+          if (isRateLimitError) {
+            return {
+              success: false,
+              error: 'Çok fazla istek',
+              message: 'Çok fazla istek gönderildi. Lütfen birkaç dakika sonra tekrar deneyin.',
+            };
+          }
+          
           // AbortError (timeout) veya Network hatası
           const isNetworkError = fetchError.name === 'AbortError' || 
                                 fetchError.message?.includes('Network') || 
                                 fetchError.message?.includes('Failed to fetch') ||
-                                fetchError.message?.includes('Network request failed');
+                                fetchError.message?.includes('Network request failed') ||
+                                fetchError.message?.includes('timeout') ||
+                                fetchError.message?.includes('ECONNREFUSED') ||
+                                fetchError.message?.includes('ENOTFOUND') ||
+                                fetchError.message?.includes('ETIMEDOUT');
           
           if (isNetworkError && attempt < maxRetries) {
             console.error(`❌ Network error (attempt ${attempt + 1}/${maxRetries + 1}):`, fetchError.message || fetchError.name);
@@ -211,10 +223,14 @@ class BackendApiService {
             
             // Network hatası için daha açıklayıcı mesaj
             if (isNetworkError) {
+              const errorMessage = fetchError.name === 'AbortError' 
+                ? 'Sunucu yanıt vermiyor. Lütfen internet bağlantınızı kontrol edin.'
+                : `Sunucuya bağlanılamıyor. Lütfen internet bağlantınızı kontrol edin ve backend'in çalıştığından emin olun. (${API_BASE_URL})`;
+              
               return {
                 success: false,
                 error: 'Bağlantı hatası',
-                message: `Sunucuya bağlanılamıyor. Lütfen internet bağlantınızı kontrol edin ve backend'in çalıştığından emin olun. (${API_BASE_URL})`,
+                message: errorMessage,
               };
             }
             
@@ -238,6 +254,31 @@ class BackendApiService {
       });
       console.log('📥 Response Headers:', JSON.stringify(responseHeaders, null, 2));
 
+      // Handle 429 Too Many Requests (Rate Limit)
+      if (response.status === 429) {
+        const retryAfter = response.headers.get('retry-after') || response.headers.get('ratelimit-reset');
+        const retryAfterSeconds = retryAfter ? parseInt(retryAfter, 10) : null;
+        const retryAfterMinutes = retryAfterSeconds ? Math.ceil(retryAfterSeconds / 60) : null;
+        
+        let errorMessage = 'Çok fazla istek gönderildi. Lütfen birkaç dakika sonra tekrar deneyin.';
+        if (retryAfterMinutes) {
+          errorMessage = `Çok fazla istek gönderildi. Lütfen ${retryAfterMinutes} dakika sonra tekrar deneyin.`;
+        }
+        
+        console.error('⚠️ Rate limit hatası (429):', {
+          retryAfter,
+          retryAfterSeconds,
+          retryAfterMinutes,
+          headers: responseHeaders
+        });
+        
+        return {
+          success: false,
+          error: 'Çok fazla istek',
+          message: errorMessage,
+        };
+      }
+
       // Handle 401 Unauthorized
       if (response.status === 401 && this.onUnauthorizedCallback) {
         this.onUnauthorizedCallback();
@@ -257,6 +298,25 @@ class BackendApiService {
       } else {
         // HTML veya başka bir format döndüyse
         const text = await response.text();
+        
+        // Rate limit hatası HTML olarak dönebilir
+        if (response.status === 429 || text.includes('Too many requests') || text.includes('rate limit')) {
+          const retryAfter = response.headers.get('retry-after') || response.headers.get('ratelimit-reset');
+          const retryAfterSeconds = retryAfter ? parseInt(retryAfter, 10) : null;
+          const retryAfterMinutes = retryAfterSeconds ? Math.ceil(retryAfterSeconds / 60) : null;
+          
+          let errorMessage = 'Çok fazla istek gönderildi. Lütfen birkaç dakika sonra tekrar deneyin.';
+          if (retryAfterMinutes) {
+            errorMessage = `Çok fazla istek gönderildi. Lütfen ${retryAfterMinutes} dakika sonra tekrar deneyin.`;
+          }
+          
+          return {
+            success: false,
+            error: 'Çok fazla istek',
+            message: errorMessage,
+          };
+        }
+        
         console.error('❌ Backend HTML/Text Response:', {
           status: response.status,
           statusText: response.statusText,
@@ -276,6 +336,28 @@ class BackendApiService {
           statusText: response.statusText,
           data: data
         });
+        
+        // Rate limit hatası kontrolü (JSON response içinde de olabilir)
+        if (response.status === 429 || 
+            (data && (data.message?.includes('Too many requests') || 
+                     data.error?.includes('Too many requests') ||
+                     data.message?.includes('rate limit') ||
+                     data.error?.includes('rate limit')))) {
+          const retryAfter = response.headers.get('retry-after') || response.headers.get('ratelimit-reset');
+          const retryAfterSeconds = retryAfter ? parseInt(retryAfter, 10) : null;
+          const retryAfterMinutes = retryAfterSeconds ? Math.ceil(retryAfterSeconds / 60) : null;
+          
+          let errorMessage = data?.message || data?.error || 'Çok fazla istek gönderildi. Lütfen birkaç dakika sonra tekrar deneyin.';
+          if (retryAfterMinutes && !errorMessage.includes('dakika')) {
+            errorMessage = `Çok fazla istek gönderildi. Lütfen ${retryAfterMinutes} dakika sonra tekrar deneyin.`;
+          }
+          
+          return {
+            success: false,
+            error: 'Çok fazla istek',
+            message: errorMessage,
+          };
+        }
         
         return {
           success: false,
