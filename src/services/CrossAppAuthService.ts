@@ -1,7 +1,7 @@
 import { Linking, Platform } from 'react-native';
 
 // Gerçek domain üzerinde test ediliyor
-const API_BASE_URL = 'https://nirpax.com/api';
+const API_BASE_URL = 'https://nircore.io/api';
 
 class CrossAppAuthService {
   private static instance: CrossAppAuthService;

@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Backend API URL - Nircore backend
-const API_BASE_URL = 'https://nirpax.com/api';
+const API_BASE_URL = 'https://nircore.io/api';
 
 interface ApiResponse<T = any> {
   success: boolean;
@@ -749,7 +749,7 @@ class BackendApiService {
 
   async verifyNirpaxToken(token: string): Promise<ApiResponse<any>> {
     // Nirpax token'ını doğrulamak için Nirpax backend'ini kullan
-    const response = await fetch('https://nirpax.com/api/nirpax/auth/verify', {
+    const response = await fetch('https://nircore.io/api/nirpax/auth/verify', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

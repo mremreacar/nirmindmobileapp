@@ -206,7 +206,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       console.log('🔍 Nirmind\'ten profil bilgileri çekiliyor...');
       
       // Gerçek domain üzerinde test ediliyor
-      const backendUrl = 'https://nirpax.com/api/nirmind/auth/verify';
+      const backendUrl = 'https://nircore.io/api/nirmind/auth/verify';
       
       const response = await fetch(backendUrl, {
         method: 'POST',
