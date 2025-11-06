@@ -151,16 +151,17 @@ const LoginMethodScreen = ({
         // Kullanıcı iptal etmediyse uyarı göster
         if (result.error !== 'CANCELLED' && result.error !== 'USER_CANCELLED') {
           console.log(`❌ ${provider} login başarısız:`, result.error || result.message);
-          const errorMessage = result.error || result.message || 'Giriş işlemi tamamlanamadı.';
+          const errorMessage = result.message || result.error || 'Giriş işlemi tamamlanamadı.';
           
           // Rate limit hatası kontrolü - tekrar deneme yapma
-          if (errorMessage.includes('Çok fazla istek') || 
+          if (result.error === 'RATE_LIMIT' ||
+              errorMessage.includes('Çok fazla istek') || 
               errorMessage.includes('rate limit') || 
-              errorMessage.includes('429') ||
-              result.error === 'RATE_LIMIT') {
+              errorMessage.includes('429')) {
+            const alertMessage = result.message || errorMessage || 'Çok fazla istek gönderildi. Lütfen birkaç dakika sonra tekrar deneyin.';
             Alert.alert(
               "Çok Fazla İstek",
-              errorMessage,
+              alertMessage,
               [{ text: "Tamam" }]
             );
             return; // Rate limit hatasında işlemi durdur
