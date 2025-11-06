@@ -138,14 +138,14 @@ class SpeechService {
           if (status.isRecording) {
             await this.recording.stopAndUnloadAsync();
           } else if (status.canRecord) {
-            // Prepare edilmiş ama henüz başlatılmamış
-            await this.recording.unloadAsync();
+            // Prepare edilmiş ama henüz başlatılmamış - stopAndUnloadAsync kullan
+            await this.recording.stopAndUnloadAsync();
           }
         } catch (cleanupError) {
           console.warn('⚠️ Recording temizleme hatası (devam ediliyor):', cleanupError);
           // Temizleme başarısız olsa bile null yap
           try {
-            await this.recording.unloadAsync();
+            await this.recording.stopAndUnloadAsync();
           } catch (unloadError) {
             console.warn('⚠️ Recording zorla unload ediliyor:', unloadError);
           }
@@ -194,7 +194,8 @@ class SpeechService {
             try {
               await this.recording.stopAndUnloadAsync();
             } catch (stopError) {
-              await this.recording.unloadAsync();
+              // stopAndUnloadAsync başarısız olursa, recording'i null yap
+              console.warn('⚠️ stopAndUnloadAsync başarısız:', stopError);
             }
           }
         } catch (cleanupError) {
@@ -268,17 +269,17 @@ class SpeechService {
               this.onErrorCallback?.('Recording URI could not be retrieved');
             }
           } else if (status.canRecord) {
-            // Prepare edilmiş ama henüz başlatılmamış, sadece unload et
-            console.log('Recording prepare edilmiş ama başlatılmamış, unload ediliyor...');
-            await this.recording.unloadAsync();
+            // Prepare edilmiş ama henüz başlatılmamış, stopAndUnloadAsync kullan
+            console.log('Recording prepare edilmiş ama başlatılmamış, stopAndUnloadAsync çağrılıyor...');
+            await this.recording.stopAndUnloadAsync();
           }
         } catch (statusError) {
-          console.warn('⚠️ Recording status kontrolü hatası, unload denenecek:', statusError);
-          // Status kontrolü başarısız olduysa, doğrudan unload etmeyi dene
+          console.warn('⚠️ Recording status kontrolü hatası, stopAndUnloadAsync denenecek:', statusError);
+          // Status kontrolü başarısız olduysa, doğrudan stopAndUnloadAsync dene
           try {
-            await this.recording.unloadAsync();
+            await this.recording.stopAndUnloadAsync();
           } catch (unloadError) {
-            console.error('⚠️ Recording unload hatası:', unloadError);
+            console.error('⚠️ Recording stopAndUnloadAsync hatası:', unloadError);
           }
         }
         
