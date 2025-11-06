@@ -160,6 +160,19 @@ class GoogleAuthService {
             errorCode: response.errorCode,
             errorDetails: response.errorDetails
           });
+          
+          // Rate limit hatası kontrolü - tekrar deneme yapma
+          if (response.error?.includes('Çok fazla istek') || 
+              response.error?.includes('rate limit') || 
+              response.message?.includes('Çok fazla istek')) {
+            return {
+              success: false,
+              error: 'RATE_LIMIT',
+              message: response.message || response.error || 'Çok fazla istek gönderildi. Lütfen birkaç dakika sonra tekrar deneyin.',
+              details: response.errorDetails
+            };
+          }
+          
           return {
             success: false,
             error: response.error || 'Google authentication failed',

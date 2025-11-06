@@ -22,6 +22,7 @@
         "NSPhotoLibraryAddUsageDescription": "Bu uygulama fotoğraflarınızı kaydetmek için izin gerektirir.",
         "NSDocumentsFolderUsageDescription": "Bu uygulama dosyalarınıza erişmek için izin gerektirir.",
         "NSDownloadsFolderUsageDescription": "Bu uygulama indirilen dosyalarınıza erişmek için izin gerektirir.",
+        "NSMicrophoneUsageDescription": "Bu uygulama, dikte özelliğini kullanabilmeniz için mikrofon erişimine ihtiyaç duyar.",
         "NSSpeechRecognitionUsageDescription": "Bu uygulama, sesle komut veya dikte özelliğini kullanabilmeniz için ses tanıma erişimine ihtiyaç duyar.",
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true,

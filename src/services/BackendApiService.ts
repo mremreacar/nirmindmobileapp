@@ -148,10 +148,17 @@ class BackendApiService {
       let response: Response;
       let lastError: any = null;
       const maxRetries = 3; // Toplam 4 deneme (1 ilk + 3 retry)
+      let rateLimitDetected = false; // Rate limit hatası tespit edildi mi?
       
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
           if (attempt > 0) {
+            // Rate limit hatası varsa retry yapma
+            if (rateLimitDetected) {
+              console.log('⚠️ Rate limit hatası tespit edildi, retry yapılmayacak');
+              break;
+            }
+            
             // Retry için bekleme süresi (exponential backoff)
             const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000); // 1s, 2s, 4s, max 5s
             console.log(`🔄 Retry attempt ${attempt}/${maxRetries} after ${delay}ms...`);
@@ -180,6 +187,34 @@ class BackendApiService {
           }
           
           clearTimeout(timeoutId);
+          
+          // Rate limit hatası kontrolü - response başarılı geldi ama status 429 olabilir
+          if (response.status === 429) {
+            rateLimitDetected = true;
+            const retryAfter = response.headers.get('retry-after') || response.headers.get('ratelimit-reset');
+            const retryAfterSeconds = retryAfter ? parseInt(retryAfter, 10) : null;
+            const retryAfterMinutes = retryAfterSeconds ? Math.ceil(retryAfterSeconds / 60) : null;
+            
+            let errorMessage = 'Çok fazla istek gönderildi. Lütfen birkaç dakika sonra tekrar deneyin.';
+            if (retryAfterMinutes) {
+              errorMessage = `Çok fazla istek gönderildi. Lütfen ${retryAfterMinutes} dakika sonra tekrar deneyin.`;
+            } else if (retryAfterSeconds) {
+              errorMessage = `Çok fazla istek gönderildi. Lütfen ${retryAfterSeconds} saniye sonra tekrar deneyin.`;
+            }
+            
+            console.error('⚠️ Rate limit hatası (429) - retry yapılmayacak:', {
+              retryAfter,
+              retryAfterSeconds,
+              retryAfterMinutes
+            });
+            
+            return {
+              success: false,
+              error: 'Çok fazla istek',
+              message: errorMessage,
+            };
+          }
+          
           break; // Başarılı, loop'tan çık
         } catch (fetchError: any) {
           clearTimeout(timeoutId);
@@ -359,10 +394,25 @@ class BackendApiService {
           };
         }
         
+        // Permission denied hatası için özel mesaj
+        const errorMessage = data?.message || data?.error || 'Bir hata oluştu';
+        const errorDetails = data?.error || errorMessage;
+        
+        let userFriendlyMessage = errorMessage;
+        if (errorDetails?.includes('EACCES') || errorDetails?.includes('permission denied')) {
+          userFriendlyMessage = 'Sunucu izin hatası. Lütfen daha sonra tekrar deneyin veya destek ekibiyle iletişime geçin.';
+        } else if (errorDetails?.includes('ENOENT') || errorDetails?.includes('no such file')) {
+          userFriendlyMessage = 'Dosya bulunamadı. Lütfen tekrar deneyin.';
+        } else if (errorDetails?.includes('timeout') || errorDetails?.includes('ETIMEDOUT')) {
+          userFriendlyMessage = 'İstek zaman aşımına uğradı. Lütfen tekrar deneyin.';
+        } else if (response.status === 500) {
+          userFriendlyMessage = 'Sunucu hatası oluştu. Lütfen daha sonra tekrar deneyin.';
+        }
+        
         return {
           success: false,
-          error: data.message || data.error || 'Bir hata oluştu',
-          message: data.message,
+          error: userFriendlyMessage,
+          message: userFriendlyMessage,
           errorName: data.errorName,
           errorCode: data.errorCode,
           errorDetails: data.errorDetails,
@@ -439,6 +489,12 @@ class BackendApiService {
   }
 
   async updateResearchMode(conversationId: string, isResearchMode: boolean): Promise<ApiResponse<any>> {
+    console.log('📤 updateResearchMode request:', {
+      conversationId,
+      isResearchMode,
+      isResearchModeType: typeof isResearchMode
+    });
+    
     return this.makeRequest(`/nirmind/conversations/${conversationId}/research-mode`, {
       method: 'PUT',
       body: JSON.stringify({ isResearchMode }),

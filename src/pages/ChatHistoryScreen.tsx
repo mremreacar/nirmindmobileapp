@@ -71,8 +71,10 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
   onOpenProfile,
 }) => {
   const { user } = useAuth();
-  const { conversations, deleteConversation, loadConversations } = useChat();
+  const { conversations, deleteConversation, loadConversations, updateConversationMessages } = useChat();
   const [searchText, setSearchText] = useState('');
+  const [expandedConversations, setExpandedConversations] = useState<Set<string>>(new Set());
+  const [loadingFullMessages, setLoadingFullMessages] = useState<Set<string>>(new Set());
   
   // Kullanıcı adının baş harflerini al
   const getInitials = () => {
@@ -97,6 +99,44 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
   useEffect(() => {
     loadConversations();
   }, [loadConversations]);
+
+  const handleLoadAllMessages = async (conversationId: string) => {
+    setLoadingFullMessages(prev => new Set(prev).add(conversationId));
+    try {
+      const BackendApiService = require('../services/BackendApiService').default;
+      const backendApiService = BackendApiService.getInstance();
+      const response = await backendApiService.getMessages(conversationId, 1, 1000);
+      
+      if (response.success && response.data && 'messages' in response.data) {
+        const allMessages = (response.data as any).messages.map((msg: any) => ({
+          id: msg.id,
+          text: msg.text || '',
+          isUser: msg.isUser,
+          timestamp: new Date(msg.timestamp || msg.createdAt),
+          images: msg.attachments?.filter((a: any) => a.type === 'IMAGE' || a.type === 'image').map((a: any) => a.url),
+          files: msg.attachments?.filter((a: any) => a.type === 'FILE' || a.type === 'file').map((a: any) => ({
+            name: a.filename,
+            uri: a.url,
+            size: a.size,
+            mimeType: a.mimeType
+          }))
+        }));
+        
+        // Conversation'ı güncelle
+        updateConversationMessages(conversationId, allMessages);
+        
+        setExpandedConversations(prev => new Set(prev).add(conversationId));
+      }
+    } catch (error) {
+      console.error('❌ Tüm mesajlar yüklenirken hata:', error);
+    } finally {
+      setLoadingFullMessages(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(conversationId);
+        return newSet;
+      });
+    }
+  };
 
   const handleConversationSelect = (conversationId: string) => {
     // Klavyeyi kapat
@@ -204,30 +244,64 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
                 const title = conv.title || '';
                 const search = searchText || '';
                 return title.toLowerCase().includes(search.toLowerCase());
-                // Mesaj kontrolü kaldırıldı - tüm conversation'lar gösterilecek
-                // Mesajlar conversation seçildiğinde lazy load ile yüklenecek
               })
-              .map((conversation) => (
-                <TouchableOpacity 
-                  key={conversation.id} 
-                  style={styles.chatItem}
-                  activeOpacity={1}
-                  onPress={() => handleConversationSelect(conversation.id)}
-                  onLongPress={() => handleDeleteConversation(conversation.id, conversation.title || 'Sohbet')}
-                >
-                  <View style={styles.chatItemContent}>
-                    <Text allowFontScaling={false} style={styles.chatText}>{conversation.title || 'Sohbet'}</Text>
-                    <Text allowFontScaling={false} style={styles.chatDate}>
-                      {new Date(conversation.updatedAt).toLocaleDateString('tr-TR', {
-                        day: 'numeric',
-                        month: 'short',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
-                    </Text>
+              .map((conversation) => {
+                const isExpanded = expandedConversations.has(conversation.id);
+                const isLoading = loadingFullMessages.has(conversation.id);
+                const totalMessageCount = conversation.totalMessageCount || conversation.messages.length;
+                const displayedMessages = isExpanded ? conversation.messages : conversation.messages.slice(0, 10);
+                const hasMoreMessages = totalMessageCount > 10 && !isExpanded;
+                
+                return (
+                  <View key={conversation.id} style={styles.conversationItem}>
+                    <TouchableOpacity 
+                      style={styles.chatItem}
+                      activeOpacity={1}
+                      onPress={() => handleConversationSelect(conversation.id)}
+                      onLongPress={() => handleDeleteConversation(conversation.id, conversation.title || 'Sohbet')}
+                    >
+                      <View style={styles.chatItemContent}>
+                        <Text allowFontScaling={false} style={styles.chatText}>{conversation.title || 'Sohbet'}</Text>
+                        <Text allowFontScaling={false} style={styles.chatDate}>
+                          {new Date(conversation.updatedAt).toLocaleDateString('tr-TR', {
+                            day: 'numeric',
+                            month: 'short',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                    
+                    {/* Mesajlar */}
+                    {displayedMessages.length > 0 && (
+                      <View style={styles.messagesContainer}>
+                        {displayedMessages.map((message, index) => (
+                          <View key={message.id || index} style={styles.messageItem}>
+                            <Text allowFontScaling={false} style={styles.messageText} numberOfLines={2}>
+                              {message.isUser ? '👤 ' : '🤖 '}
+                              {message.text || '(Mesaj içeriği yok)'}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                    
+                    {/* Tümünü Göster Butonu */}
+                    {hasMoreMessages && (
+                      <TouchableOpacity
+                        style={styles.showAllButton}
+                        onPress={() => handleLoadAllMessages(conversation.id)}
+                        disabled={isLoading}
+                      >
+                        <Text allowFontScaling={false} style={styles.showAllButtonText}>
+                          {isLoading ? 'Yükleniyor...' : `Tümünü göster (${totalMessageCount - displayedMessages.length} mesaj daha)`}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
-                </TouchableOpacity>
-              ))}
+                );
+              })}
           </View>
         </ScrollView>
 
@@ -326,12 +400,41 @@ const styles = StyleSheet.create({
   chatList: {
     gap: 8,
   },
+  conversationItem: {
+    marginBottom: 16,
+  },
   chatItem: {
     paddingVertical: 12,
     paddingHorizontal: 0,
   },
   chatItemContent: {
     paddingLeft: 33, // İkon genişliği (21) + gap (12) = 33px
+  },
+  messagesContainer: {
+    paddingLeft: 33,
+    paddingTop: 8,
+    gap: 6,
+  },
+  messageItem: {
+    paddingVertical: 4,
+  },
+  messageText: {
+    fontFamily: 'Poppins-Regular',
+    fontSize: 12,
+    fontWeight: '400',
+    color: '#9CA3AF',
+    lineHeight: 16,
+  },
+  showAllButton: {
+    paddingLeft: 33,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  showAllButtonText: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#7E7AE9',
   },
   chatText: {
     fontFamily: 'Poppins-Regular',

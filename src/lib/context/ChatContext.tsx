@@ -14,6 +14,7 @@ interface ChatContextType {
   updateConversationTitle: (conversationId: string, title: string) => void;
   updateResearchMode: (conversationId: string, isResearchMode: boolean) => Promise<void>;
   loadConversations: () => Promise<void>;
+  updateConversationMessages: (conversationId: string, messages: ChatMessage[]) => void;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -548,7 +549,19 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
 
   const updateResearchMode = useCallback(async (conversationId: string, isResearchMode: boolean) => {
     try {
+      console.log('📝 updateResearchMode çağrıldı:', {
+        conversationId,
+        isResearchMode
+      });
+      
       const response = await backendApiService.updateResearchMode(conversationId, isResearchMode);
+      
+      console.log('📥 updateResearchMode response:', {
+        success: response.success,
+        error: response.error,
+        message: response.message,
+        errorDetails: response.errorDetails
+      });
       
       if (response.success && response.data) {
         // Local state'i güncelle
@@ -560,16 +573,30 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
           )
         );
         
+        // Current conversation'ı da güncelle
         if (currentConversation?.id === conversationId) {
           setCurrentConversation(prev => 
             prev ? { ...prev, isResearchMode, updatedAt: new Date() } : null
           );
         }
+        
+        console.log('✅ updateResearchMode: Local state güncellendi');
       } else {
-        console.error('❌ Araştırma modu güncellenemedi:', response.error || response.message);
+        console.error('❌ Araştırma modu güncellenemedi:', {
+          error: response.error,
+          message: response.message,
+          errorDetails: response.errorDetails,
+          conversationId,
+          isResearchMode
+        });
       }
-    } catch (error) {
-      console.error('❌ Araştırma modu güncelleme hatası:', error);
+    } catch (error: any) {
+      console.error('❌ Araştırma modu güncelleme hatası:', {
+        message: error.message,
+        stack: error.stack,
+        conversationId,
+        isResearchMode
+      });
     }
   }, [backendApiService, currentConversation]);
 
@@ -582,12 +609,12 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         const conversationsData: any[] = Array.isArray(response.data) ? response.data : (response.data as any).conversations || [];
         console.log('✅ Backend\'den konuşmalar yüklendi:', conversationsData.length);
         
-        // Performans için: Sadece ilk konuşmaları mesajlarıyla yükle, diğerlerini lazy load yap
+        // Her konuşma için ilk 10 mesajı yükle
         const conversationsWithMessages: ChatConversation[] = await Promise.all(
-          conversationsData.slice(0, 10).map(async (conv: any) => {
+          conversationsData.map(async (conv: any) => {
             try {
-              const messagesResponse = await backendApiService.getMessages(conv.id);
-              const messages: ChatMessage[] = messagesResponse.success && messagesResponse.data && 'messages' in messagesResponse.data
+              const messagesResponse = await backendApiService.getMessages(conv.id, 1, 10);
+              const allMessages: ChatMessage[] = messagesResponse.success && messagesResponse.data && 'messages' in messagesResponse.data
                 ? (messagesResponse.data as any).messages.map((msg: any) => ({
                     id: msg.id,
                     text: msg.text || '', // text undefined olabilir, boş string olarak set et
@@ -602,6 +629,20 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
                     }))
                   }))
                 : [];
+              
+              // İlk 10 mesajı al
+              const messages = allMessages.slice(0, 10);
+              
+              // Toplam mesaj sayısını backend'den almak için tekrar sorgu yap (pagination bilgisi varsa)
+              let totalMessageCount = allMessages.length;
+              if (messagesResponse.data && 'pagination' in messagesResponse.data) {
+                totalMessageCount = (messagesResponse.data as any).pagination?.total || allMessages.length;
+              } else if (allMessages.length === 10) {
+                // Eğer tam 10 mesaj geldiyse, muhtemelen daha fazla var
+                // Backend'den toplam sayıyı almak için tekrar sorgu yapabiliriz ama şimdilik 10 olarak bırakalım
+                // Kullanıcı "tümünü göster" dediğinde gerçek sayıyı öğreneceğiz
+                totalMessageCount = 10;
+              }
               
               // Eğer başlık varsayılan ise ve ilk kullanıcı mesajı varsa başlık oluştur
               let finalTitle = conv.title || '';
@@ -622,6 +663,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
                 title: finalTitle,
                 isResearchMode: conv.isResearchMode || false,
                 messages,
+                totalMessageCount: allMessages.length, // Toplam mesaj sayısını sakla
                 createdAt: new Date(conv.createdAt),
                 updatedAt: new Date(conv.updatedAt)
               };
@@ -632,6 +674,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
                 title: conv.title,
                 isResearchMode: conv.isResearchMode || false,
                 messages: [],
+                totalMessageCount: 0,
                 createdAt: new Date(conv.createdAt),
                 updatedAt: new Date(conv.updatedAt)
               };
@@ -639,17 +682,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
           })
         );
         
-        // Diğer konuşmaları mesajları olmadan ekle (lazy load için)
-        const remainingConversations: ChatConversation[] = conversationsData.slice(10).map((conv: any) => ({
-          id: conv.id,
-          title: conv.title,
-          isResearchMode: conv.isResearchMode || false,
-          messages: [] as ChatMessage[],
-          createdAt: new Date(conv.createdAt),
-          updatedAt: new Date(conv.updatedAt)
-        }));
-        
-        const allConversations: ChatConversation[] = [...conversationsWithMessages, ...remainingConversations];
+        const allConversations: ChatConversation[] = conversationsWithMessages;
         
         // Conversation'ları updatedAt'e göre sırala (en yeni en üstte)
         allConversations.sort((a, b) => {
@@ -672,6 +705,23 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     }
   }, [backendApiService]);
 
+  const updateConversationMessages = useCallback((conversationId: string, messages: ChatMessage[]) => {
+    setConversations(prev => 
+      prev.map(conv => 
+        conv.id === conversationId 
+          ? { ...conv, messages, totalMessageCount: messages.length }
+          : conv
+      )
+    );
+    
+    // Eğer current conversation ise, onu da güncelle
+    if (currentConversation?.id === conversationId) {
+      setCurrentConversation(prev => 
+        prev ? { ...prev, messages, totalMessageCount: messages.length } : null
+      );
+    }
+  }, [currentConversation]);
+
   const value: ChatContextType = {
     conversations,
     currentConversation,
@@ -684,6 +734,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     updateConversationTitle,
     updateResearchMode,
     loadConversations,
+    updateConversationMessages,
   };
 
   return (

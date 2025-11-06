@@ -153,6 +153,19 @@ const LoginMethodScreen = ({
           console.log(`❌ ${provider} login başarısız:`, result.error || result.message);
           const errorMessage = result.error || result.message || 'Giriş işlemi tamamlanamadı.';
           
+          // Rate limit hatası kontrolü - tekrar deneme yapma
+          if (errorMessage.includes('Çok fazla istek') || 
+              errorMessage.includes('rate limit') || 
+              errorMessage.includes('429') ||
+              result.error === 'RATE_LIMIT') {
+            Alert.alert(
+              "Çok Fazla İstek",
+              errorMessage,
+              [{ text: "Tamam" }]
+            );
+            return; // Rate limit hatasında işlemi durdur
+          }
+          
           // Network hatası kontrolü
           if (errorMessage.includes('Network') || errorMessage.includes('502') || errorMessage.includes('Sunucu hatası')) {
             Alert.alert(
@@ -176,6 +189,19 @@ const LoginMethodScreen = ({
       setLoading(false);
       
       const errorMessage = error.message || 'Giriş işlemi tamamlanamadı.';
+      
+      // Rate limit hatası kontrolü
+      if (errorMessage.includes('Çok fazla istek') || 
+          errorMessage.includes('rate limit') || 
+          errorMessage.includes('429') ||
+          error.code === 'RATE_LIMIT') {
+        Alert.alert(
+          "Çok Fazla İstek",
+          "Çok fazla istek gönderildi. Lütfen birkaç dakika sonra tekrar deneyin.",
+          [{ text: "Tamam" }]
+        );
+        return; // Rate limit hatasında işlemi durdur
+      }
       
       // Özel hata mesajları
       if (errorMessage.includes('Network') || errorMessage.includes('502') || errorMessage.includes('Sunucu hatası')) {
