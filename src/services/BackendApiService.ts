@@ -545,7 +545,13 @@ class BackendApiService {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        onError(errorData.message || `HTTP error! status: ${response.status}`);
+        const errorMessage = errorData.message || `HTTP error! status: ${response.status}`;
+        // 404 hatası için özel mesaj
+        if (response.status === 404) {
+          onError(`Route not found: ${response.status}`);
+        } else {
+          onError(errorMessage);
+        }
         return;
       }
 

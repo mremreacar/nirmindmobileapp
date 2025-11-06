@@ -239,114 +239,235 @@ export const useChatMessages = () => {
       });
 
       // Streaming endpoint kullan - ChatGPT gibi gerçek zamanlı yazma efekti
+      // Eğer streaming endpoint bulunamazsa normal endpoint'e fallback yap
       let streamingAIMessageId: string | null = null;
       let streamingAIMessageText = '';
+      let streamingFailed = false;
       
-      await backendApiService.sendMessageStream(
-        conversationId,
-        finalMessage,
-        attachments,
-        finalPromptType,
-        // onUserMessage
-        (userMessage: any) => {
-          // Backend'den gelen gerçek userMessage ile optimistic mesajı değiştir
-          const backendImages = userMessage.attachments
-            ?.filter((att: any) => att.type === 'IMAGE')
-            .map((att: any) => att.url) || [];
-          
-          const backendFiles = userMessage.attachments
-            ?.filter((att: any) => att.type === 'FILE' || att.type === 'AUDIO' || att.type === 'VIDEO')
-            .map((att: any) => ({
-              name: att.filename || '',
-              uri: att.url
-            })) || [];
+      try {
+        await backendApiService.sendMessageStream(
+          conversationId,
+          finalMessage,
+          attachments,
+          finalPromptType,
+          // onUserMessage
+          (userMessage: any) => {
+            // Backend'den gelen gerçek userMessage ile optimistic mesajı değiştir
+            const backendImages = userMessage.attachments
+              ?.filter((att: any) => att.type === 'IMAGE')
+              .map((att: any) => att.url) || [];
+            
+            const backendFiles = userMessage.attachments
+              ?.filter((att: any) => att.type === 'FILE' || att.type === 'AUDIO' || att.type === 'VIDEO')
+              .map((att: any) => ({
+                name: att.filename || '',
+                uri: att.url
+              })) || [];
 
-          const finalImages = backendImages.length > 0 ? backendImages : (uploadedImageUrls.length > 0 ? uploadedImageUrls : undefined);
-          const finalFiles = backendFiles.length > 0 ? backendFiles : (uploadedFileUrls.length > 0 ? uploadedFileUrls.map(url => ({ name: '', uri: url })) : undefined);
+            const finalImages = backendImages.length > 0 ? backendImages : (uploadedImageUrls.length > 0 ? uploadedImageUrls : undefined);
+            const finalFiles = backendFiles.length > 0 ? backendFiles : (uploadedFileUrls.length > 0 ? uploadedFileUrls.map(url => ({ name: '', uri: url })) : undefined);
 
-          const userChatMessage: ChatMessage = {
-            id: userMessage.id,
-            text: userMessage.text,
-            isUser: true,
-            timestamp: new Date(userMessage.timestamp || userMessage.createdAt),
-            images: finalImages,
-            files: finalFiles
-          };
-          
-          // Optimistic mesajı kaldır ve gerçek mesajı ekle
-          removeMessage(conversationId, tempUserMessageId);
-          addMessage(conversationId, userChatMessage).catch(err => {
-            console.error('❌ Kullanıcı mesajı eklenirken hata:', err);
-          });
-        },
-        // onAIStart
-        () => {
-          // AI cevabı başladı - placeholder mesaj oluştur
-          streamingAIMessageId = `ai-streaming-${Date.now()}`;
-          streamingAIMessageText = '';
-          const aiPlaceholderMessage: ChatMessage = {
-            id: streamingAIMessageId,
-            text: '',
-            isUser: false,
-            timestamp: new Date()
-          };
-          addMessage(conversationId, aiPlaceholderMessage).catch(err => {
-            console.error('❌ AI placeholder mesajı eklenirken hata:', err);
-          });
-        },
-        // onAIChunk - ChatGPT gibi gerçek zamanlı yazma efekti
-        (chunk: string, fullContent: string) => {
-          streamingAIMessageText = fullContent;
-          // Mevcut AI mesajını güncelle
-          if (streamingAIMessageId) {
-            const updatedAIMessage: ChatMessage = {
+            const userChatMessage: ChatMessage = {
+              id: userMessage.id,
+              text: userMessage.text,
+              isUser: true,
+              timestamp: new Date(userMessage.timestamp || userMessage.createdAt),
+              images: finalImages,
+              files: finalFiles
+            };
+            
+            // Optimistic mesajı kaldır ve gerçek mesajı ekle
+            removeMessage(conversationId, tempUserMessageId);
+            addMessage(conversationId, userChatMessage).catch(err => {
+              console.error('❌ Kullanıcı mesajı eklenirken hata:', err);
+            });
+          },
+          // onAIStart
+          () => {
+            // AI cevabı başladı - placeholder mesaj oluştur
+            streamingAIMessageId = `ai-streaming-${Date.now()}`;
+            streamingAIMessageText = '';
+            const aiPlaceholderMessage: ChatMessage = {
               id: streamingAIMessageId,
-              text: fullContent,
+              text: '',
               isUser: false,
               timestamp: new Date()
             };
-            // Mesajı güncelle (remove + add yerine direkt update)
-            removeMessage(conversationId, streamingAIMessageId);
-            addMessage(conversationId, updatedAIMessage).catch(err => {
-              console.error('❌ AI chunk mesajı güncellenirken hata:', err);
+            addMessage(conversationId, aiPlaceholderMessage).catch(err => {
+              console.error('❌ AI placeholder mesajı eklenirken hata:', err);
             });
-          }
-        },
-        // onAIComplete
-        (aiMessage: any) => {
-          // AI cevabı tamamlandı - backend'den gelen gerçek mesajı kullan
-          if (streamingAIMessageId) {
-            removeMessage(conversationId, streamingAIMessageId);
-          }
-          const aiChatMessage: ChatMessage = {
-            id: aiMessage.id,
-            text: aiMessage.text,
-            isUser: false,
-            timestamp: new Date(aiMessage.timestamp || aiMessage.createdAt)
-          };
-          addMessage(conversationId, aiChatMessage).catch(err => {
-            console.error('❌ AI cevabı eklenirken hata:', err);
-          });
-          streamingAIMessageId = null;
-        },
-        // onError
-        (error: string) => {
-          // Hata durumunda optimistic mesajı ve streaming mesajını kaldır
-          if (conversationId) {
-            removeMessage(conversationId, tempUserMessageId);
+          },
+          // onAIChunk - ChatGPT gibi gerçek zamanlı yazma efekti
+          (chunk: string, fullContent: string) => {
+            streamingAIMessageText = fullContent;
+            // Mevcut AI mesajını güncelle
+            if (streamingAIMessageId) {
+              const updatedAIMessage: ChatMessage = {
+                id: streamingAIMessageId,
+                text: fullContent,
+                isUser: false,
+                timestamp: new Date()
+              };
+              // Mesajı güncelle (remove + add yerine direkt update)
+              removeMessage(conversationId, streamingAIMessageId);
+              addMessage(conversationId, updatedAIMessage).catch(err => {
+                console.error('❌ AI chunk mesajı güncellenirken hata:', err);
+              });
+            }
+          },
+          // onAIComplete
+          (aiMessage: any) => {
+            // AI cevabı tamamlandı - backend'den gelen gerçek mesajı kullan
             if (streamingAIMessageId) {
               removeMessage(conversationId, streamingAIMessageId);
             }
+            const aiChatMessage: ChatMessage = {
+              id: aiMessage.id,
+              text: aiMessage.text,
+              isUser: false,
+              timestamp: new Date(aiMessage.timestamp || aiMessage.createdAt)
+            };
+            addMessage(conversationId, aiChatMessage).catch(err => {
+              console.error('❌ AI cevabı eklenirken hata:', err);
+            });
+            streamingAIMessageId = null;
+          },
+          // onError
+          (error: string) => {
+            streamingFailed = true;
+            
+            // Route not found hatası - normal endpoint'e fallback yap
+            if (error.includes('not found') || error.includes('404') || error.includes('Route')) {
+              console.warn('⚠️ Streaming endpoint bulunamadı, normal endpoint kullanılıyor...');
+              // Fallback normal endpoint'e yapılacak (catch bloğunda)
+              return;
+            }
+            
+            // Hata durumunda optimistic mesajı ve streaming mesajını kaldır
+            if (conversationId) {
+              removeMessage(conversationId, tempUserMessageId);
+              if (streamingAIMessageId) {
+                removeMessage(conversationId, streamingAIMessageId);
+              }
+            }
+            
+            // Rate limit hatası kontrolü
+            if (error.includes('Çok fazla istek') || 
+                error.includes('rate limit') || 
+                error.includes('429')) {
+              console.error('❌ Rate limit hatası - mesaj gönderilemedi:', error);
+              Alert.alert(
+                "Çok Fazla İstek",
+                error.includes('dakika') ? error : 'Çok fazla istek gönderildi. Lütfen birkaç dakika sonra tekrar deneyin.',
+                [{ text: "Tamam" }]
+              );
+              return;
+            }
+            
+            const errorMessage: ChatMessage = {
+              id: Date.now().toString(),
+              text: `⚠️ ${error}`,
+              isUser: false,
+              timestamp: new Date()
+            };
+            
+            console.error('❌ Streaming hatası:', error);
+            
+            if (conversationId) {
+              addMessage(conversationId, errorMessage).catch(err => {
+                console.error('❌ Hata mesajı eklenirken hata:', err);
+              });
+            }
+          }
+        );
+      } catch (streamingError: any) {
+        streamingFailed = true;
+        console.warn('⚠️ Streaming endpoint hatası, normal endpoint kullanılıyor:', streamingError.message);
+      }
+      
+      // Streaming başarısız olduysa normal endpoint kullan (fallback)
+      if (streamingFailed) {
+        console.log('📤 Normal endpoint kullanılıyor (streaming fallback)...');
+        
+        // Streaming mesajını kaldır (eğer oluşturulduysa)
+        if (streamingAIMessageId) {
+          removeMessage(conversationId, streamingAIMessageId);
+        }
+        
+        // Normal endpoint'i kullan
+        const response = await backendApiService.sendMessage(conversationId, finalMessage, attachments, finalPromptType);
+        
+        console.log('📥 Backend response:', JSON.stringify(response, null, 2));
+        
+        if (response.success && response.data) {
+          const { userMessage, aiMessage } = response.data;
+          
+          // Backend'den dönen gerçek userMessage ile optimistic mesajı değiştir
+          if (userMessage) {
+            const backendImages = userMessage.attachments
+              ?.filter((att: any) => att.type === 'IMAGE')
+              .map((att: any) => att.url) || [];
+            
+            const backendFiles = userMessage.attachments
+              ?.filter((att: any) => att.type === 'FILE' || att.type === 'AUDIO' || att.type === 'VIDEO')
+              .map((att: any) => ({
+                name: att.filename || '',
+                uri: att.url
+              })) || [];
+
+            const finalImages = backendImages.length > 0 ? backendImages : (uploadedImageUrls.length > 0 ? uploadedImageUrls : undefined);
+            const finalFiles = backendFiles.length > 0 ? backendFiles : (uploadedFileUrls.length > 0 ? uploadedFileUrls.map(url => ({ name: '', uri: url })) : undefined);
+
+            const userChatMessage: ChatMessage = {
+              id: userMessage.id,
+              text: userMessage.text,
+              isUser: true,
+              timestamp: new Date(userMessage.timestamp || userMessage.createdAt),
+              images: finalImages,
+              files: finalFiles
+            };
+            
+            removeMessage(conversationId, tempUserMessageId);
+            try {
+              await addMessage(conversationId, userChatMessage);
+              console.log('✅ Kullanıcı mesajı backend\'den güncellendi');
+            } catch (addError) {
+              console.error('❌ Kullanıcı mesajı eklenirken hata:', addError);
+            }
           }
           
+          // AI cevabını ekle
+          if (aiMessage) {
+            const aiChatMessage: ChatMessage = {
+              id: aiMessage.id,
+              text: aiMessage.text,
+              isUser: false,
+              timestamp: new Date(aiMessage.timestamp || aiMessage.createdAt)
+            };
+            try {
+              await addMessage(conversationId, aiChatMessage);
+              console.log('✅ AI cevabı başarıyla eklendi');
+            } catch (addError) {
+              console.error('❌ AI cevabı eklenirken hata:', addError);
+            }
+          }
+        } else {
+          // Hata durumunda optimistic mesajı kaldır
+          if (conversationId) {
+            removeMessage(conversationId, tempUserMessageId);
+          }
+          
+          const errorText = response.error || response.message || 'Bir hata oluştu. Lütfen tekrar deneyin.';
+          
           // Rate limit hatası kontrolü
-          if (error.includes('Çok fazla istek') || 
-              error.includes('rate limit') || 
-              error.includes('429')) {
-            console.error('❌ Rate limit hatası - mesaj gönderilemedi:', error);
+          if (errorText.includes('Çok fazla istek') || 
+              errorText.includes('rate limit') || 
+              errorText.includes('429') ||
+              response.error === 'Çok fazla istek') {
+            console.error('❌ Rate limit hatası - mesaj gönderilemedi:', errorText);
             Alert.alert(
               "Çok Fazla İstek",
-              error.includes('dakika') ? error : 'Çok fazla istek gönderildi. Lütfen birkaç dakika sonra tekrar deneyin.',
+              errorText.includes('dakika') ? errorText : 'Çok fazla istek gönderildi. Lütfen birkaç dakika sonra tekrar deneyin.',
               [{ text: "Tamam" }]
             );
             return;
@@ -354,20 +475,22 @@ export const useChatMessages = () => {
           
           const errorMessage: ChatMessage = {
             id: Date.now().toString(),
-            text: `⚠️ ${error}`,
+            text: errorText,
             isUser: false,
             timestamp: new Date()
           };
           
-          console.error('❌ Streaming hatası:', error);
+          console.error('❌ Backend mesaj hatası:', errorText);
           
           if (conversationId) {
-            addMessage(conversationId, errorMessage).catch(err => {
-              console.error('❌ Hata mesajı eklenirken hata:', err);
-            });
+            try {
+              await addMessage(conversationId, errorMessage);
+            } catch (addError) {
+              console.error('❌ Hata mesajı eklenirken hata:', addError);
+            }
           }
         }
-      );
+      }
     } catch (error: any) {
       // Hata durumunda optimistic mesajı kaldır
       if (conversationId) {
