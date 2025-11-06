@@ -70,6 +70,58 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       return;
     }
     
+    // Eğer currentConversation undefined ise veya farklı conversation'a işaret ediyorsa,
+    // önce conversation'ı kontrol et ve gerekirse yükle
+    let conversationExists = false;
+    let foundConversation: ChatConversation | undefined;
+    
+    setConversations(prev => {
+      foundConversation = prev.find(conv => conv.id === conversationId);
+      conversationExists = !!foundConversation;
+      return prev;
+    });
+    
+    // Eğer conversation yoksa backend'den yükle
+    if (!conversationExists) {
+      console.log('⚠️ Conversation henüz yüklenmemiş, backend\'den yükleniyor...', conversationId);
+      try {
+        const convResponse = await backendApiService.getConversation(conversationId);
+        if (convResponse.success && convResponse.data) {
+          const convData = convResponse.data;
+          const newConversation: ChatConversation = {
+            id: convData.id,
+            title: convData.title,
+            isResearchMode: convData.isResearchMode || false,
+            messages: [],
+            createdAt: new Date(convData.createdAt),
+            updatedAt: new Date(convData.updatedAt)
+          };
+          
+          setConversations(prevConvs => {
+            const exists = prevConvs.find(c => c.id === conversationId);
+            if (!exists) {
+              return [newConversation, ...prevConvs];
+            }
+            return prevConvs;
+          });
+          
+          setCurrentConversation(newConversation);
+          foundConversation = newConversation;
+          console.log('✅ Conversation backend\'den yüklendi ve seçildi:', conversationId);
+        }
+      } catch (error) {
+        console.error('❌ Conversation yüklenirken hata:', error);
+        // Devam et, fallback olarak geçici conversation oluşturulacak
+      }
+    } else if (!currentConversation || currentConversation.id !== conversationId) {
+      // Conversation var ama currentConversation farklı veya undefined
+      console.log('⚠️ Conversation var ama seçili değil, seçiliyor...', conversationId);
+      if (foundConversation) {
+        setCurrentConversation(foundConversation);
+        console.log('✅ Conversation seçildi:', conversationId);
+      }
+    }
+    
     // Duplicate kontrolü - aynı ID'ye sahip mesaj varsa ekleme
     let messageAdded = false;
     
@@ -94,12 +146,27 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
           : conv
       );
       
+      // Eğer conversation yoksa oluştur (fallback)
+      if (!conversation) {
+        console.log('⚠️ Conversation bulunamadı, geçici olarak oluşturuluyor:', conversationId);
+        const tempConversation: ChatConversation = {
+          id: conversationId,
+          title: 'Yeni Sohbet',
+          isResearchMode: false,
+          messages: [message],
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+        updated.push(tempConversation);
+      }
+      
       // currentConversation'ı da güncelle (eğer bu conversation ise)
       const updatedConversation = updated.find(conv => conv.id === conversationId);
       if (updatedConversation) {
         // setCurrentConversation'ı hemen çağır (callback pattern ile güncel state'i al)
         setCurrentConversation(prevConv => {
           if (prevConv?.id === conversationId) {
+            // Aynı conversation'a mesaj ekleniyor
             const messageExists = prevConv.messages.some(msg => msg.id === message.id);
             if (!messageExists) {
               console.log('✅ currentConversation güncellendi:', { conversationId, messageId: message.id });
@@ -110,11 +177,17 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
               };
             } else {
               console.log('⚠️ currentConversation\'da mesaj zaten var:', message.id);
+              return prevConv;
             }
           } else {
-            console.log('⚠️ currentConversation farklı conversation:', { currentId: prevConv?.id, targetId: conversationId });
+            // Farklı conversation veya currentConversation undefined
+            // Mesaj eklenen conversation'ı currentConversation olarak ayarla
+            console.log('✅ currentConversation otomatik seçildi:', { 
+              previousId: prevConv?.id, 
+              newId: conversationId 
+            });
+            return updatedConversation;
           }
-          return prevConv;
         });
       }
       
@@ -306,6 +379,13 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
           const existingIds = new Set(existingMessages.map((m: ChatMessage) => m.id));
           const newMessages = backendMessages.filter((m: ChatMessage) => !existingIds.has(m.id));
           const mergedMessages: ChatMessage[] = [...existingMessages, ...newMessages];
+          
+          // Mesajları timestamp'e göre sırala (en eski en başta)
+          mergedMessages.sort((a, b) => {
+            const timeA = a.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp).getTime();
+            const timeB = b.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp).getTime();
+            return timeA - timeB; // En eski en başta
+          });
           
           const updated = prev.map(conv => 
             conv.id === conversationId 
@@ -571,14 +651,18 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         
         const allConversations: ChatConversation[] = [...conversationsWithMessages, ...remainingConversations];
         
-        // Sadece mesajı olan konuşmaları göster
-        const filteredConversations = allConversations.filter(conv => 
-          conv.messages && conv.messages.length > 0
-        );
+        // Conversation'ları updatedAt'e göre sırala (en yeni en üstte)
+        allConversations.sort((a, b) => {
+          const timeA = a.updatedAt instanceof Date ? a.updatedAt.getTime() : new Date(a.updatedAt).getTime();
+          const timeB = b.updatedAt instanceof Date ? b.updatedAt.getTime() : new Date(b.updatedAt).getTime();
+          return timeB - timeA; // En yeni en üstte
+        });
         
-        console.log(`📊 Toplam konuşma: ${allConversations.length}, Mesajlı konuşma: ${filteredConversations.length}`);
+        // Tüm conversation'ları göster (mesajlar lazy load ile yüklenecek)
+        // Mesajsız conversation'lar da gösterilmeli çünkü mesajlar conversation seçildiğinde yüklenecek
+        console.log(`📊 Toplam konuşma: ${allConversations.length}`);
         
-        setConversations(filteredConversations);
+        setConversations(allConversations);
         console.log('✅ Konuşmalar başarıyla yüklendi');
       } else {
         console.log('📭 Backend\'de konuşma bulunamadı');

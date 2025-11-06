@@ -203,10 +203,9 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
               .filter(conv => {
                 const title = conv.title || '';
                 const search = searchText || '';
-                return (
-                  title.toLowerCase().includes(search.toLowerCase()) &&
-                  conv.messages && conv.messages.length > 0 // Sadece mesajı olan konuşmaları göster
-                );
+                return title.toLowerCase().includes(search.toLowerCase());
+                // Mesaj kontrolü kaldırıldı - tüm conversation'lar gösterilecek
+                // Mesajlar conversation seçildiğinde lazy load ile yüklenecek
               })
               .map((conversation) => (
                 <TouchableOpacity 
