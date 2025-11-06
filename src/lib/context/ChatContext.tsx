@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect, useRef } from 'react';
 import { ChatConversation, ChatMessage } from '../mock/types';
 import BackendApiService from '../../services/BackendApiService';
 
@@ -57,6 +57,9 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [currentConversation, setCurrentConversation] = useState<ChatConversation | null>(null);
   const backendApiService = BackendApiService.getInstance();
+  
+  // Conversation yükleme durumunu takip et (duplicate istekleri önlemek için)
+  const loadingConversationsRef = useRef<Set<string>>(new Set());
 
   const addMessage = useCallback(async (conversationId: string, message: ChatMessage) => {
     console.log('📝 addMessage çağrıldı:', { conversationId, messageId: message.id, isUser: message.isUser, text: message.text.substring(0, 50) });
@@ -84,52 +87,86 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     
     // Eğer conversation yoksa backend'den yükle
     if (!conversationExists) {
-      console.log('⚠️ Conversation henüz yüklenmemiş, backend\'den yükleniyor...', conversationId);
-      try {
-        const convResponse = await backendApiService.getConversation(conversationId);
+      // Eğer zaten yükleniyorsa tekrar yükleme
+      if (loadingConversationsRef.current.has(conversationId)) {
+        console.log('⚠️ Conversation zaten yükleniyor, bekleniyor...', conversationId);
+        // Bekle ve tekrar kontrol et
+        await new Promise(resolve => setTimeout(resolve, 500));
+        setConversations(prev => {
+          const retryFound = prev.find(conv => conv.id === conversationId);
+          if (retryFound) {
+            foundConversation = retryFound;
+            conversationExists = true;
+          }
+          return prev;
+        });
         
-        // Rate limit hatası kontrolü - sessizce atla
-        if (!convResponse.success && 
-            (convResponse.error === 'Çok fazla istek' || 
-             convResponse.message?.includes('Çok fazla istek') ||
-             convResponse.message?.includes('rate limit'))) {
-          console.warn('⚠️ Rate limit hatası - conversation yüklenemedi, geçici conversation oluşturulacak');
-          // Rate limit hatasında sessizce devam et, geçici conversation oluşturulacak
-        } else if (convResponse.success && convResponse.data) {
-          const convData = convResponse.data;
-          const newConversation: ChatConversation = {
-            id: convData.id,
-            title: convData.title,
-            isResearchMode: convData.isResearchMode || false,
-            messages: [],
-            createdAt: new Date(convData.createdAt),
-            updatedAt: new Date(convData.updatedAt)
-          };
-          
-          setConversations(prevConvs => {
-            const exists = prevConvs.find(c => c.id === conversationId);
-            if (!exists) {
-              return [newConversation, ...prevConvs];
-            }
-            return prevConvs;
-          });
-          
-          setCurrentConversation(newConversation);
-          foundConversation = newConversation;
-          console.log('✅ Conversation backend\'den yüklendi ve seçildi:', conversationId);
-        }
-      } catch (error: any) {
-        // Rate limit hatası kontrolü
-        const errorMessage = error.message || '';
-        if (errorMessage.includes('Çok fazla istek') || 
-            errorMessage.includes('rate limit') || 
-            errorMessage.includes('429')) {
-          console.warn('⚠️ Rate limit hatası - conversation yüklenemedi, geçici conversation oluşturulacak');
-          // Rate limit hatasında sessizce devam et
+        if (conversationExists && foundConversation) {
+          // Conversation yüklendi, devam et
+          if (!currentConversation || currentConversation.id !== conversationId) {
+            setCurrentConversation(foundConversation);
+          }
         } else {
-          console.error('❌ Conversation yüklenirken hata:', error);
+          // Hala yükleniyor, devam et ama tekrar yükleme
+          console.log('⚠️ Conversation hala yükleniyor, mesaj ekleniyor ama conversation yüklenene kadar bekleniyor');
+          return; // Mesaj ekleme işlemini iptal et
         }
-        // Devam et, fallback olarak geçici conversation oluşturulacak
+      } else {
+        // Yükleme işlemini başlat
+        loadingConversationsRef.current.add(conversationId);
+        console.log('⚠️ Conversation henüz yüklenmemiş, backend\'den yükleniyor...', conversationId);
+        try {
+          const convResponse = await backendApiService.getConversation(conversationId);
+          
+          // Rate limit hatası kontrolü - sessizce atla
+          if (!convResponse.success && 
+              (convResponse.error === 'Çok fazla istek' || 
+               convResponse.message?.includes('Çok fazla istek') ||
+               convResponse.message?.includes('rate limit'))) {
+            console.warn('⚠️ Rate limit hatası - conversation yüklenemedi, geçici conversation oluşturulacak');
+            loadingConversationsRef.current.delete(conversationId);
+            // Rate limit hatasında sessizce devam et, geçici conversation oluşturulacak
+          } else if (convResponse.success && convResponse.data) {
+            const convData = convResponse.data;
+            const newConversation: ChatConversation = {
+              id: convData.id,
+              title: convData.title,
+              isResearchMode: convData.isResearchMode || false,
+              messages: [],
+              createdAt: new Date(convData.createdAt),
+              updatedAt: new Date(convData.updatedAt)
+            };
+            
+            setConversations(prevConvs => {
+              const exists = prevConvs.find(c => c.id === conversationId);
+              if (!exists) {
+                return [newConversation, ...prevConvs];
+              }
+              return prevConvs;
+            });
+            
+            setCurrentConversation(newConversation);
+            foundConversation = newConversation;
+            conversationExists = true;
+            loadingConversationsRef.current.delete(conversationId);
+            console.log('✅ Conversation backend\'den yüklendi ve seçildi:', conversationId);
+          } else {
+            loadingConversationsRef.current.delete(conversationId);
+          }
+        } catch (error: any) {
+          loadingConversationsRef.current.delete(conversationId);
+          // Rate limit hatası kontrolü
+          const errorMessage = error.message || '';
+          if (errorMessage.includes('Çok fazla istek') || 
+              errorMessage.includes('rate limit') || 
+              errorMessage.includes('429')) {
+            console.warn('⚠️ Rate limit hatası - conversation yüklenemedi, geçici conversation oluşturulacak');
+            // Rate limit hatasında sessizce devam et
+          } else {
+            console.error('❌ Conversation yüklenirken hata:', error);
+          }
+          // Devam et, fallback olarak geçici conversation oluşturulacak
+        }
       }
     } else if (!currentConversation || currentConversation.id !== conversationId) {
       // Conversation var ama currentConversation farklı veya undefined
@@ -357,8 +394,28 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
 
   // Helper function to load conversation messages - MUST be defined before selectConversation
   const loadConversationMessages = useCallback(async (conversationId: string, conversation: ChatConversation) => {
+    // Eğer zaten yükleniyorsa tekrar yükleme
+    if (loadingConversationsRef.current.has(conversationId)) {
+      console.log('⚠️ Conversation mesajları zaten yükleniyor, atlanıyor...', conversationId);
+      return;
+    }
+    
+    // Yükleme işlemini başlat
+    loadingConversationsRef.current.add(conversationId);
+    
     try {
       const messagesResponse = await backendApiService.getMessages(conversationId);
+      
+      // Rate limit hatası kontrolü
+      if (!messagesResponse.success && 
+          (messagesResponse.error === 'Çok fazla istek' || 
+           messagesResponse.message?.includes('Çok fazla istek') ||
+           messagesResponse.message?.includes('rate limit'))) {
+        console.warn('⚠️ Rate limit hatası - mesajlar yüklenemedi');
+        loadingConversationsRef.current.delete(conversationId);
+        return;
+      }
+      
       if (messagesResponse.success && messagesResponse.data && 'messages' in messagesResponse.data) {
         const backendMessages: ChatMessage[] = (messagesResponse.data as any).messages.map((msg: any) => ({
           id: msg.id,
@@ -420,12 +477,12 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         if (updatedConversation) {
           setCurrentConversation(updatedConversation);
         }
-      } else {
-        setCurrentConversation(conversation);
       }
     } catch (error) {
       console.error('❌ Mesajlar yüklenirken hata:', error);
-      setCurrentConversation(conversation);
+    } finally {
+      // Yükleme işlemi tamamlandı (başarılı veya başarısız)
+      loadingConversationsRef.current.delete(conversationId);
     }
   }, [backendApiService]);
 
