@@ -238,17 +238,18 @@ export const useChatMessages = () => {
         }))
       });
 
-      // Backend'e mesajı gönder (backend hem kullanıcı mesajını hem AI cevabını döndürür)
-      const response = await backendApiService.sendMessage(conversationId, finalMessage, attachments, finalPromptType);
+      // Streaming endpoint kullan - ChatGPT gibi gerçek zamanlı yazma efekti
+      let streamingAIMessageId: string | null = null;
+      let streamingAIMessageText = '';
       
-      console.log('📥 Backend response:', JSON.stringify(response, null, 2));
-      
-      if (response.success && response.data) {
-        const { userMessage, aiMessage } = response.data;
-        
-        // Backend'den dönen gerçek userMessage ile optimistic mesajı değiştir
-        if (userMessage) {
-          // Backend'den gelen attachments'ları images ve files'a çevir
+      await backendApiService.sendMessageStream(
+        conversationId,
+        finalMessage,
+        attachments,
+        finalPromptType,
+        // onUserMessage
+        (userMessage: any) => {
+          // Backend'den gelen gerçek userMessage ile optimistic mesajı değiştir
           const backendImages = userMessage.attachments
             ?.filter((att: any) => att.type === 'IMAGE')
             .map((att: any) => att.url) || [];
@@ -260,7 +261,6 @@ export const useChatMessages = () => {
               uri: att.url
             })) || [];
 
-          // Backend'den gelen attachments varsa onları kullan, yoksa frontend'deki uploadedImageUrls'i kullan
           const finalImages = backendImages.length > 0 ? backendImages : (uploadedImageUrls.length > 0 ? uploadedImageUrls : undefined);
           const finalFiles = backendFiles.length > 0 ? backendFiles : (uploadedFileUrls.length > 0 ? uploadedFileUrls.map(url => ({ name: '', uri: url })) : undefined);
 
@@ -274,75 +274,100 @@ export const useChatMessages = () => {
           };
           
           // Optimistic mesajı kaldır ve gerçek mesajı ekle
-          // Önce optimistic mesajı kaldır
           removeMessage(conversationId, tempUserMessageId);
-          
-          // Sonra gerçek mesajı ekle
-          try {
-            await addMessage(conversationId, userChatMessage);
-            console.log('✅ Kullanıcı mesajı backend\'den güncellendi');
-          } catch (addError) {
-            console.error('❌ Kullanıcı mesajı eklenirken hata:', addError);
+          addMessage(conversationId, userChatMessage).catch(err => {
+            console.error('❌ Kullanıcı mesajı eklenirken hata:', err);
+          });
+        },
+        // onAIStart
+        () => {
+          // AI cevabı başladı - placeholder mesaj oluştur
+          streamingAIMessageId = `ai-streaming-${Date.now()}`;
+          streamingAIMessageText = '';
+          const aiPlaceholderMessage: ChatMessage = {
+            id: streamingAIMessageId,
+            text: '',
+            isUser: false,
+            timestamp: new Date()
+          };
+          addMessage(conversationId, aiPlaceholderMessage).catch(err => {
+            console.error('❌ AI placeholder mesajı eklenirken hata:', err);
+          });
+        },
+        // onAIChunk - ChatGPT gibi gerçek zamanlı yazma efekti
+        (chunk: string, fullContent: string) => {
+          streamingAIMessageText = fullContent;
+          // Mevcut AI mesajını güncelle
+          if (streamingAIMessageId) {
+            const updatedAIMessage: ChatMessage = {
+              id: streamingAIMessageId,
+              text: fullContent,
+              isUser: false,
+              timestamp: new Date()
+            };
+            // Mesajı güncelle (remove + add yerine direkt update)
+            removeMessage(conversationId, streamingAIMessageId);
+            addMessage(conversationId, updatedAIMessage).catch(err => {
+              console.error('❌ AI chunk mesajı güncellenirken hata:', err);
+            });
           }
-        }
-        
-        // AI cevabını ekle
-        if (aiMessage) {
+        },
+        // onAIComplete
+        (aiMessage: any) => {
+          // AI cevabı tamamlandı - backend'den gelen gerçek mesajı kullan
+          if (streamingAIMessageId) {
+            removeMessage(conversationId, streamingAIMessageId);
+          }
           const aiChatMessage: ChatMessage = {
             id: aiMessage.id,
             text: aiMessage.text,
             isUser: false,
             timestamp: new Date(aiMessage.timestamp || aiMessage.createdAt)
           };
-          try {
-            await addMessage(conversationId, aiChatMessage);
-            console.log('✅ AI cevabı başarıyla eklendi');
-          } catch (addError) {
-            console.error('❌ AI cevabı eklenirken hata:', addError);
+          addMessage(conversationId, aiChatMessage).catch(err => {
+            console.error('❌ AI cevabı eklenirken hata:', err);
+          });
+          streamingAIMessageId = null;
+        },
+        // onError
+        (error: string) => {
+          // Hata durumunda optimistic mesajı ve streaming mesajını kaldır
+          if (conversationId) {
+            removeMessage(conversationId, tempUserMessageId);
+            if (streamingAIMessageId) {
+              removeMessage(conversationId, streamingAIMessageId);
+            }
+          }
+          
+          // Rate limit hatası kontrolü
+          if (error.includes('Çok fazla istek') || 
+              error.includes('rate limit') || 
+              error.includes('429')) {
+            console.error('❌ Rate limit hatası - mesaj gönderilemedi:', error);
+            Alert.alert(
+              "Çok Fazla İstek",
+              error.includes('dakika') ? error : 'Çok fazla istek gönderildi. Lütfen birkaç dakika sonra tekrar deneyin.',
+              [{ text: "Tamam" }]
+            );
+            return;
+          }
+          
+          const errorMessage: ChatMessage = {
+            id: Date.now().toString(),
+            text: `⚠️ ${error}`,
+            isUser: false,
+            timestamp: new Date()
+          };
+          
+          console.error('❌ Streaming hatası:', error);
+          
+          if (conversationId) {
+            addMessage(conversationId, errorMessage).catch(err => {
+              console.error('❌ Hata mesajı eklenirken hata:', err);
+            });
           }
         }
-      } else {
-        // Hata durumunda optimistic mesajı kaldır
-        if (conversationId) {
-          removeMessage(conversationId, tempUserMessageId);
-        }
-        
-        const errorText = response.error || response.message || 'Bir hata oluştu. Lütfen tekrar deneyin.';
-        
-        // Rate limit hatası kontrolü - Alert göster ve mesajı chat'e ekleme
-        if (errorText.includes('Çok fazla istek') || 
-            errorText.includes('rate limit') || 
-            errorText.includes('429') ||
-            response.error === 'Çok fazla istek') {
-          console.error('❌ Rate limit hatası - mesaj gönderilemedi:', errorText);
-          Alert.alert(
-            "Çok Fazla İstek",
-            errorText.includes('dakika') ? errorText : 'Çok fazla istek gönderildi. Lütfen birkaç dakika sonra tekrar deneyin.',
-            [{ text: "Tamam" }]
-          );
-          return; // Rate limit hatasında mesajı chat'e ekleme
-        }
-        
-        const errorMessage: ChatMessage = {
-          id: Date.now().toString(),
-          text: errorText,
-          isUser: false,
-          timestamp: new Date()
-        };
-        
-        console.error('❌ Backend mesaj hatası:', errorText);
-        
-        // Conversation ID varsa hata mesajını ekle, yoksa sadece log yap
-        if (conversationId) {
-          try {
-            await addMessage(conversationId, errorMessage);
-          } catch (addError) {
-            console.error('❌ Hata mesajı eklenirken hata:', addError);
-          }
-        } else {
-          console.error('⚠️ Conversation ID eksik olduğu için hata mesajı eklenemedi:', errorMessage.text);
-        }
-      }
+      );
     } catch (error: any) {
       // Hata durumunda optimistic mesajı kaldır
       if (conversationId) {

@@ -515,6 +515,114 @@ class BackendApiService {
     });
   }
 
+  // Send Message with Streaming (SSE) - ChatGPT gibi gerçek zamanlı yazma efekti
+  async sendMessageStream(
+    conversationId: string,
+    message: string,
+    attachments: any[],
+    promptType: string | undefined,
+    onUserMessage: (userMessage: any) => void,
+    onAIStart: () => void,
+    onAIChunk: (chunk: string, fullContent: string) => void,
+    onAIComplete: (aiMessage: any) => void,
+    onError: (error: string) => void
+  ): Promise<void> {
+    const token = await this.getAuthToken();
+    if (!token) {
+      onError('Authentication token not found');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/nirmind/messages/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ conversationId, message, attachments, promptType }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        onError(errorData.message || `HTTP error! status: ${response.status}`);
+        return;
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      if (!reader) {
+        onError('Response body reader not available');
+        return;
+      }
+
+      while (true) {
+        const { done, value } = await reader.read();
+        
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() || '';
+
+        for (const eventBlock of events) {
+          if (!eventBlock.trim()) continue;
+          
+          let eventType = '';
+          let eventData = '';
+          
+          const lines = eventBlock.split('\n');
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              eventType = line.substring(7).trim();
+            } else if (line.startsWith('data: ')) {
+              eventData = line.substring(6).trim();
+            }
+          }
+          
+          if (eventType && eventData) {
+            try {
+              const data = JSON.parse(eventData);
+              
+              switch (eventType) {
+                case 'user_message':
+                  if (data.success && data.data?.userMessage) {
+                    onUserMessage(data.data.userMessage);
+                  }
+                  break;
+                case 'ai_start':
+                  onAIStart();
+                  break;
+                case 'ai_chunk':
+                  if (data.content && data.fullContent) {
+                    onAIChunk(data.content, data.fullContent);
+                  }
+                  break;
+                case 'ai_complete':
+                  if (data.success && data.data?.aiMessage) {
+                    onAIComplete(data.data.aiMessage);
+                  }
+                  break;
+                case 'error':
+                  onError(data.message || data.error || 'An error occurred');
+                  return;
+              }
+            } catch (parseError) {
+              console.error('❌ SSE data parse error:', parseError, 'Event:', eventType, 'Data:', eventData);
+            }
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error('❌ Streaming error:', error);
+      onError(error.message || 'Streaming connection failed');
+    }
+  }
+
   async getMessages(conversationId: string, page: number = 1, limit: number = 50): Promise<ApiResponse<MessageData[]>> {
     return this.makeRequest(`/nirmind/conversations/${conversationId}/messages?page=${page}&limit=${limit}`);
   }
