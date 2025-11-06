@@ -361,14 +361,36 @@ class SpeechService {
         }
       } else {
         // Transcription başarısız oldu
-        const errorMessage = response.error || 'Desifre başarısız';
+        let errorMessage = response.error || response.message || 'Desifre başarısız';
+        
+        // Permission denied gibi teknik hataları kullanıcı dostu mesajlara çevir
+        if (errorMessage.includes('EACCES') || errorMessage.includes('permission denied')) {
+          errorMessage = 'Sunucu izin hatası. Lütfen daha sonra tekrar deneyin.';
+        } else if (errorMessage.includes('Failed to transcribe audio')) {
+          errorMessage = 'Ses dosyası işlenirken bir hata oluştu. Lütfen tekrar deneyin.';
+        }
+        
         console.error('❌ Audio transcription başarısız:', errorMessage);
         this.onErrorCallback?.(errorMessage);
       }
 
     } catch (error) {
       console.error('❌ Audio transcription error:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Desifre başarısız';
+      let errorMessage = 'Desifre başarısız';
+      
+      if (error instanceof Error) {
+        errorMessage = error.message;
+        
+        // Permission denied gibi teknik hataları kullanıcı dostu mesajlara çevir
+        if (errorMessage.includes('EACCES') || errorMessage.includes('permission denied')) {
+          errorMessage = 'Sunucu izin hatası. Lütfen daha sonra tekrar deneyin.';
+        } else if (errorMessage.includes('Failed to transcribe audio')) {
+          errorMessage = 'Ses dosyası işlenirken bir hata oluştu. Lütfen tekrar deneyin.';
+        } else if (errorMessage.includes('Network') || errorMessage.includes('fetch')) {
+          errorMessage = 'Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edin.';
+        }
+      }
+      
       this.onErrorCallback?.(errorMessage);
     }
   }
