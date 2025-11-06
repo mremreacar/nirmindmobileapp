@@ -683,78 +683,138 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         const conversationsData: any[] = Array.isArray(response.data) ? response.data : (response.data as any).conversations || [];
         console.log('✅ Backend\'den konuşmalar yüklendi:', conversationsData.length);
         
-        // Her konuşma için ilk 10 mesajı yükle
-        const conversationsWithMessages: ChatConversation[] = await Promise.all(
-          conversationsData.map(async (conv: any) => {
-            try {
-              const messagesResponse = await backendApiService.getMessages(conv.id, 1, 10);
-              const allMessages: ChatMessage[] = messagesResponse.success && messagesResponse.data && 'messages' in messagesResponse.data
-                ? (messagesResponse.data as any).messages.map((msg: any) => ({
-                    id: msg.id,
-                    text: msg.text || '', // text undefined olabilir, boş string olarak set et
-                    isUser: msg.isUser,
-                    timestamp: new Date(msg.timestamp || msg.createdAt),
-                    images: msg.attachments?.filter((a: any) => a.type === 'IMAGE' || a.type === 'image').map((a: any) => a.url),
-                    files: msg.attachments?.filter((a: any) => a.type === 'FILE' || a.type === 'file').map((a: any) => ({
-                      name: a.filename,
-                      uri: a.url,
-                      size: a.size,
-                      mimeType: a.mimeType
-                    }))
-                  }))
-                : [];
-              
-              // İlk 10 mesajı al
-              const messages = allMessages.slice(0, 10);
-              
-              // Toplam mesaj sayısını backend'den almak için tekrar sorgu yap (pagination bilgisi varsa)
-              let totalMessageCount = allMessages.length;
-              if (messagesResponse.data && 'pagination' in messagesResponse.data) {
-                totalMessageCount = (messagesResponse.data as any).pagination?.total || allMessages.length;
-              } else if (allMessages.length === 10) {
-                // Eğer tam 10 mesaj geldiyse, muhtemelen daha fazla var
-                // Backend'den toplam sayıyı almak için tekrar sorgu yapabiliriz ama şimdilik 10 olarak bırakalım
-                // Kullanıcı "tümünü göster" dediğinde gerçek sayıyı öğreneceğiz
-                totalMessageCount = 10;
-              }
-              
-              // Eğer başlık varsayılan ise ve ilk kullanıcı mesajı varsa başlık oluştur
-              let finalTitle = conv.title || '';
-              if ((conv.title === 'New Conversation' || conv.title === 'Yeni Sohbet' || !(conv.title || '').trim()) && messages.length > 0) {
-                const firstUserMessage = messages.find((msg: ChatMessage) => msg.isUser && msg.text && msg.text.trim());
-                if (firstUserMessage) {
-                  finalTitle = generateConversationTitle(firstUserMessage.text);
-                  
-                  // Backend'e başlık güncellemesi gönder
-                  backendApiService.updateConversation(conv.id, finalTitle).catch(error => {
-                    console.error('❌ Backend başlık güncelleme hatası:', error);
-                  });
+        // Her konuşma için ilk 10 mesajı yükle - BATCH'ler halinde (rate limit'i önlemek için)
+        // Önce conversation'ları oluştur (mesajlar olmadan)
+        const conversationsWithoutMessages: ChatConversation[] = conversationsData.map((conv: any) => ({
+          id: conv.id,
+          title: conv.title || 'Yeni Sohbet',
+          isResearchMode: conv.isResearchMode || false,
+          messages: [], // Mesajlar sonra yüklenecek
+          totalMessageCount: 0,
+          createdAt: new Date(conv.createdAt),
+          updatedAt: new Date(conv.updatedAt)
+        }));
+        
+        // Conversation'ları önce set et (mesajlar olmadan)
+        setConversations(conversationsWithoutMessages);
+        
+        // Mesajları batch'ler halinde yükle (3'er 3'er - rate limit'i önlemek için)
+        const BATCH_SIZE = 3;
+        const conversationsWithMessages: ChatConversation[] = [];
+        
+        for (let i = 0; i < conversationsData.length; i += BATCH_SIZE) {
+          const batch = conversationsData.slice(i, i + BATCH_SIZE);
+          
+          // Batch'i paralel yükle
+          const batchResults = await Promise.all(
+            batch.map(async (conv: any) => {
+              try {
+                // Rate limit kontrolü - eğer loadingConversationsRef'te varsa atla
+                if (loadingConversationsRef.current.has(conv.id)) {
+                  console.log(`⚠️ Conversation ${conv.id} zaten yükleniyor, atlanıyor...`);
+                  return conversationsWithoutMessages.find(c => c.id === conv.id) || {
+                    id: conv.id,
+                    title: conv.title || 'Yeni Sohbet',
+                    isResearchMode: conv.isResearchMode || false,
+                    messages: [],
+                    totalMessageCount: 0,
+                    createdAt: new Date(conv.createdAt),
+                    updatedAt: new Date(conv.updatedAt)
+                  };
                 }
+                
+                loadingConversationsRef.current.add(conv.id);
+                
+                const messagesResponse = await backendApiService.getMessages(conv.id, 1, 10);
+                
+                // Rate limit hatası kontrolü
+                if (!messagesResponse.success && 
+                    (messagesResponse.error === 'Çok fazla istek' || 
+                     messagesResponse.message?.includes('Çok fazla istek') ||
+                     messagesResponse.message?.includes('rate limit'))) {
+                  console.warn(`⚠️ Rate limit hatası - conversation ${conv.id} mesajları yüklenemedi`);
+                  loadingConversationsRef.current.delete(conv.id);
+                  return conversationsWithoutMessages.find(c => c.id === conv.id) || {
+                    id: conv.id,
+                    title: conv.title || 'Yeni Sohbet',
+                    isResearchMode: conv.isResearchMode || false,
+                    messages: [],
+                    totalMessageCount: 0,
+                    createdAt: new Date(conv.createdAt),
+                    updatedAt: new Date(conv.updatedAt)
+                  };
+                }
+                
+                const allMessages: ChatMessage[] = messagesResponse.success && messagesResponse.data && 'messages' in messagesResponse.data
+                  ? (messagesResponse.data as any).messages.map((msg: any) => ({
+                      id: msg.id,
+                      text: msg.text || '',
+                      isUser: msg.isUser,
+                      timestamp: new Date(msg.timestamp || msg.createdAt),
+                      images: msg.attachments?.filter((a: any) => a.type === 'IMAGE' || a.type === 'image').map((a: any) => a.url),
+                      files: msg.attachments?.filter((a: any) => a.type === 'FILE' || a.type === 'file').map((a: any) => ({
+                        name: a.filename,
+                        uri: a.url,
+                        size: a.size,
+                        mimeType: a.mimeType
+                      }))
+                    }))
+                  : [];
+                
+                loadingConversationsRef.current.delete(conv.id);
+                
+                const messages = allMessages.slice(0, 10);
+                
+                let totalMessageCount = allMessages.length;
+                if (messagesResponse.data && 'pagination' in messagesResponse.data) {
+                  totalMessageCount = (messagesResponse.data as any).pagination?.total || allMessages.length;
+                } else if (allMessages.length === 10) {
+                  totalMessageCount = 10;
+                }
+                
+                let finalTitle = conv.title || '';
+                if ((conv.title === 'New Conversation' || conv.title === 'Yeni Sohbet' || !(conv.title || '').trim()) && messages.length > 0) {
+                  const firstUserMessage = messages.find((msg: ChatMessage) => msg.isUser && msg.text && msg.text.trim());
+                  if (firstUserMessage) {
+                    finalTitle = generateConversationTitle(firstUserMessage.text);
+                    backendApiService.updateConversation(conv.id, finalTitle).catch(error => {
+                      console.error('❌ Backend başlık güncelleme hatası:', error);
+                    });
+                  }
+                }
+                
+                return {
+                  id: conv.id,
+                  title: finalTitle,
+                  isResearchMode: conv.isResearchMode || false,
+                  messages,
+                  totalMessageCount,
+                  createdAt: new Date(conv.createdAt),
+                  updatedAt: new Date(conv.updatedAt)
+                };
+              } catch (error) {
+                loadingConversationsRef.current.delete(conv.id);
+                console.error(`❌ Konuşma ${conv.id} mesajları yüklenirken hata:`, error);
+                return conversationsWithoutMessages.find(c => c.id === conv.id) || {
+                  id: conv.id,
+                  title: conv.title || 'Yeni Sohbet',
+                  isResearchMode: conv.isResearchMode || false,
+                  messages: [],
+                  totalMessageCount: 0,
+                  createdAt: new Date(conv.createdAt),
+                  updatedAt: new Date(conv.updatedAt)
+                };
               }
-              
-              return {
-                id: conv.id,
-                title: finalTitle,
-                isResearchMode: conv.isResearchMode || false,
-                messages,
-                totalMessageCount: allMessages.length, // Toplam mesaj sayısını sakla
-                createdAt: new Date(conv.createdAt),
-                updatedAt: new Date(conv.updatedAt)
-              };
-            } catch (error) {
-              console.error(`❌ Konuşma ${conv.id} mesajları yüklenirken hata:`, error);
-              return {
-                id: conv.id,
-                title: conv.title,
-                isResearchMode: conv.isResearchMode || false,
-                messages: [],
-                totalMessageCount: 0,
-                createdAt: new Date(conv.createdAt),
-                updatedAt: new Date(conv.updatedAt)
-              };
-            }
-          })
-        );
+            })
+          );
+          
+          conversationsWithMessages.push(...batchResults);
+          
+          // Batch'ler arasında kısa bir delay ekle (rate limit'i önlemek için)
+          if (i + BATCH_SIZE < conversationsData.length) {
+            await new Promise(resolve => setTimeout(resolve, 500)); // 500ms bekle
+          }
+        }
         
         const allConversations: ChatConversation[] = conversationsWithMessages;
         
