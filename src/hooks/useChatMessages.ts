@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { Alert } from 'react-native';
 import { useChat } from '@/src/lib/context/ChatContext';
 import { ChatMessage } from '@/src/lib/mock/types';
 import BackendApiService from '../services/BackendApiService';
@@ -306,14 +307,30 @@ export const useChatMessages = () => {
           removeMessage(conversationId, tempUserMessageId);
         }
         
+        const errorText = response.error || response.message || 'Bir hata oluştu. Lütfen tekrar deneyin.';
+        
+        // Rate limit hatası kontrolü - Alert göster ve mesajı chat'e ekleme
+        if (errorText.includes('Çok fazla istek') || 
+            errorText.includes('rate limit') || 
+            errorText.includes('429') ||
+            response.error === 'Çok fazla istek') {
+          console.error('❌ Rate limit hatası - mesaj gönderilemedi:', errorText);
+          Alert.alert(
+            "Çok Fazla İstek",
+            errorText.includes('dakika') ? errorText : 'Çok fazla istek gönderildi. Lütfen birkaç dakika sonra tekrar deneyin.',
+            [{ text: "Tamam" }]
+          );
+          return; // Rate limit hatasında mesajı chat'e ekleme
+        }
+        
         const errorMessage: ChatMessage = {
           id: Date.now().toString(),
-          text: response.error || response.message || 'Bir hata oluştu. Lütfen tekrar deneyin.',
+          text: errorText,
           isUser: false,
           timestamp: new Date()
         };
         
-        console.error('❌ Backend mesaj hatası:', response.error || response.message || 'Bilinmeyen hata');
+        console.error('❌ Backend mesaj hatası:', errorText);
         
         // Conversation ID varsa hata mesajını ekle, yoksa sadece log yap
         if (conversationId) {
@@ -333,9 +350,26 @@ export const useChatMessages = () => {
       }
       
       console.error('💥 Chat hatası:', error);
+      
+      const errorText = error.message || 'Bağlantı hatası. Lütfen internet bağlantınızı kontrol edin.';
+      
+      // Rate limit hatası kontrolü - Alert göster ve mesajı chat'e ekleme
+      if (errorText.includes('Çok fazla istek') || 
+          errorText.includes('rate limit') || 
+          errorText.includes('429') ||
+          error.code === 'RATE_LIMIT') {
+        console.error('❌ Rate limit hatası - mesaj gönderilemedi:', errorText);
+        Alert.alert(
+          "Çok Fazla İstek",
+          "Çok fazla istek gönderildi. Lütfen birkaç dakika sonra tekrar deneyin.",
+          [{ text: "Tamam" }]
+        );
+        return; // Rate limit hatasında mesajı chat'e ekleme
+      }
+      
       const errorMessage: ChatMessage = {
         id: Date.now().toString(),
-        text: error.message || 'Bağlantı hatası. Lütfen internet bağlantınızı kontrol edin.',
+        text: errorText,
         isUser: false,
         timestamp: new Date()
       };

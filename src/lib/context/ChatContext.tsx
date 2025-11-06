@@ -87,7 +87,15 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       console.log('⚠️ Conversation henüz yüklenmemiş, backend\'den yükleniyor...', conversationId);
       try {
         const convResponse = await backendApiService.getConversation(conversationId);
-        if (convResponse.success && convResponse.data) {
+        
+        // Rate limit hatası kontrolü - sessizce atla
+        if (!convResponse.success && 
+            (convResponse.error === 'Çok fazla istek' || 
+             convResponse.message?.includes('Çok fazla istek') ||
+             convResponse.message?.includes('rate limit'))) {
+          console.warn('⚠️ Rate limit hatası - conversation yüklenemedi, geçici conversation oluşturulacak');
+          // Rate limit hatasında sessizce devam et, geçici conversation oluşturulacak
+        } else if (convResponse.success && convResponse.data) {
           const convData = convResponse.data;
           const newConversation: ChatConversation = {
             id: convData.id,
@@ -110,8 +118,17 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
           foundConversation = newConversation;
           console.log('✅ Conversation backend\'den yüklendi ve seçildi:', conversationId);
         }
-      } catch (error) {
-        console.error('❌ Conversation yüklenirken hata:', error);
+      } catch (error: any) {
+        // Rate limit hatası kontrolü
+        const errorMessage = error.message || '';
+        if (errorMessage.includes('Çok fazla istek') || 
+            errorMessage.includes('rate limit') || 
+            errorMessage.includes('429')) {
+          console.warn('⚠️ Rate limit hatası - conversation yüklenemedi, geçici conversation oluşturulacak');
+          // Rate limit hatasında sessizce devam et
+        } else {
+          console.error('❌ Conversation yüklenirken hata:', error);
+        }
         // Devam et, fallback olarak geçici conversation oluşturulacak
       }
     } else if (!currentConversation || currentConversation.id !== conversationId) {
