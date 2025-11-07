@@ -294,8 +294,8 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
   const handleRefresh = async () => {
     try {
       setIsRefreshing(true);
-      await loadConversations({ reset: true, limit: MAX_CONVERSATIONS_DISPLAY });
       setVisibleConversationCount(MAX_CONVERSATIONS_DISPLAY);
+      await loadConversations({ reset: true, limit: MAX_CONVERSATIONS_DISPLAY });
     } catch (error) {
       console.error('❌ Konuşmalar yenilenirken hata:', error);
     } finally {
@@ -377,7 +377,7 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
         >
           {isRefreshing && (
             <View style={styles.refreshIndicatorContainer}>
-              <ActivityIndicator size="small" color="#00DDA5" />
+              <ActivityIndicator size="large" color="#00DDA5" />
               <Text allowFontScaling={false} style={styles.refreshIndicatorText}>Güncelleniyor...</Text>
             </View>
           )}
@@ -554,12 +554,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    paddingVertical: 12,
+    paddingVertical: 24,
+    backgroundColor: 'rgba(0, 221, 165, 0.08)',
   },
   refreshIndicatorText: {
     fontFamily: 'Poppins-Regular',
     fontSize: 14,
     color: '#9CA3AF',
+    fontWeight: '500',
   },
   historySection: {
     marginBottom: 20,
