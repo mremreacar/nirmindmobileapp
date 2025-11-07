@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -89,6 +89,7 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const autoLoadingRef = useRef(false);
   
   // Kullanıcı adının baş harflerini al
   const getInitials = () => {
@@ -202,6 +203,44 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
 
   const hasMoreLocalConversations = visibleConversationCount < conversationsForDisplay.length;
   const shouldShowLoadMoreButton = conversationsForDisplay.length > 0 && (hasMoreLocalConversations || hasMoreConversations);
+
+  useEffect(() => {
+    if (isInitialLoading || isLoadingConversations || isLoadingMore) {
+      return;
+    }
+
+    if (autoLoadingRef.current) {
+      return;
+    }
+
+    const desiredCount = visibleConversationCount;
+    const eligibleCount = messageEligibleConversations.length;
+
+    if (eligibleCount >= desiredCount) {
+      return;
+    }
+
+    if (!hasMoreConversations) {
+      return;
+    }
+
+    autoLoadingRef.current = true;
+    loadConversations({ limit: MAX_CONVERSATIONS_DISPLAY })
+      .catch(error => {
+        console.error('❌ Otomatik konuşma yükleme hatası:', error);
+      })
+      .finally(() => {
+        autoLoadingRef.current = false;
+      });
+  }, [
+    isInitialLoading,
+    isLoadingConversations,
+    isLoadingMore,
+    visibleConversationCount,
+    messageEligibleConversations,
+    hasMoreConversations,
+    loadConversations,
+  ]);
 
   const handleConversationSelect = async (conversationId: string) => {
     // Klavyeyi kapat
