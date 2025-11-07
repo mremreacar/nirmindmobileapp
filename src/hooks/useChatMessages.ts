@@ -906,9 +906,13 @@ export const useChatMessages = () => {
       
       // messageStartTime'a state objesi üzerinden erişim
       try {
-        if (state && typeof state.messageStartTime === 'number') {
+        if (typeof state !== 'undefined' && state && typeof state.messageStartTime === 'number') {
           const finalTime = Date.now();
           finalDuration = finalTime - state.messageStartTime;
+        } else {
+          // state objesi yoksa messageStartTime değişkenini kullan
+          const finalTime = Date.now();
+          finalDuration = finalTime - messageStartTime;
         }
       } catch (durationError: any) {
         // messageStartTime'a erişirken hata oluşursa (çok nadir)
@@ -917,7 +921,7 @@ export const useChatMessages = () => {
       
       // abortStream'i state objesi üzerinden kontrol et ve temizle
       try {
-        if (state && state.abortStream && typeof state.abortStream === 'function') {
+        if (typeof state !== 'undefined' && state && state.abortStream && typeof state.abortStream === 'function') {
           try {
             state.abortStream();
           } catch (abortCallError) {
@@ -925,6 +929,14 @@ export const useChatMessages = () => {
             console.warn('⚠️ abortStream çağrılırken hata (non-critical):', abortCallError);
           }
           state.abortStream = null;
+        } else if (abortStream && typeof abortStream === 'function') {
+          // Fallback: state objesi yoksa direkt abortStream'i kullan
+          try {
+            abortStream();
+          } catch (abortCallError) {
+            console.warn('⚠️ abortStream çağrılırken hata (non-critical):', abortCallError);
+          }
+          abortStream = null;
         }
       } catch (abortError: any) {
         // abortStream'e erişirken hata oluşursa (çok nadir)
