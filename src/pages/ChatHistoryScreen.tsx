@@ -10,6 +10,7 @@ import {
   Alert,
   Image,
   Keyboard,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFonts } from 'expo-font';
@@ -71,11 +72,10 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
   onOpenProfile,
 }) => {
   const { user } = useAuth();
-  const { conversations, deleteConversation, loadConversations, updateConversationMessages, selectConversation } = useChat();
+  const { conversations, deleteConversation, loadConversations, selectConversation } = useChat();
   const [searchText, setSearchText] = useState('');
-  const [expandedConversations, setExpandedConversations] = useState<Set<string>>(new Set());
-  const [loadingFullMessages, setLoadingFullMessages] = useState<Set<string>>(new Set());
   const [showAllConversations, setShowAllConversations] = useState(false);
+  const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
   
   // Maksimum gösterilecek konuşma sayısı
   const MAX_CONVERSATIONS_DISPLAY = 10;
@@ -116,73 +116,42 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
     return title.toLowerCase().includes(search.toLowerCase());
   });
 
+  // Mesajı olmayan konuşmaları gösterme
+  const conversationsWithMessages = filteredConversations.filter(conv => {
+    const messageCount = conv.totalMessageCount ?? conv.messages?.length ?? 0;
+    return messageCount > 0;
+  });
+
   // Gösterilecek konuşmalar
   const displayedConversations = showAllConversations 
-    ? filteredConversations 
-    : filteredConversations.slice(0, MAX_CONVERSATIONS_DISPLAY);
+    ? conversationsWithMessages 
+    : conversationsWithMessages.slice(0, MAX_CONVERSATIONS_DISPLAY);
   
   // 10'dan fazla konuşma var mı?
-  const hasMoreConversations = filteredConversations.length > MAX_CONVERSATIONS_DISPLAY;
-
-  const handleLoadAllMessages = async (conversationId: string) => {
-    setLoadingFullMessages(prev => new Set(prev).add(conversationId));
-    try {
-      const BackendApiService = require('../services/BackendApiService').default;
-      const backendApiService = BackendApiService.getInstance();
-      const response = await backendApiService.getMessages(conversationId, 1, 1000);
-      
-      if (response.success && response.data && 'messages' in response.data) {
-        const allMessages = (response.data as any).messages.map((msg: any) => ({
-          id: msg.id,
-          text: msg.text || '',
-          isUser: msg.isUser,
-          timestamp: new Date(msg.timestamp || msg.createdAt),
-          images: msg.attachments?.filter((a: any) => a.type === 'IMAGE' || a.type === 'image').map((a: any) => a.url),
-          files: msg.attachments?.filter((a: any) => a.type === 'FILE' || a.type === 'file').map((a: any) => ({
-            name: a.filename,
-            uri: a.url,
-            size: a.size,
-            mimeType: a.mimeType
-          }))
-        }));
-        
-        // Conversation'ı güncelle
-        updateConversationMessages(conversationId, allMessages);
-        
-        setExpandedConversations(prev => new Set(prev).add(conversationId));
-      }
-    } catch (error) {
-      console.error('❌ Tüm mesajlar yüklenirken hata:', error);
-    } finally {
-      setLoadingFullMessages(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(conversationId);
-        return newSet;
-      });
-    }
-  };
+  const hasMoreConversations = conversationsWithMessages.length > MAX_CONVERSATIONS_DISPLAY;
 
   const handleConversationSelect = async (conversationId: string) => {
     // Klavyeyi kapat
     Keyboard.dismiss();
     
     console.log('📥 Geçmiş sohbetten conversation seçiliyor:', conversationId);
+    setLoadingConversationId(conversationId);
     
-    // Conversation'ı ChatContext'te seç - bu conversation'ı yükler
     try {
       await selectConversation(conversationId);
-      console.log('✅ Conversation ChatContext\'te seçildi:', conversationId);
-    } catch (error) {
+      console.log("✅ Conversation ChatContext'te seçildi:", conversationId);
+
+      if (onSelectConversation) {
+        onSelectConversation(conversationId);
+      }
+
+      onBack();
+    } catch (error: any) {
       console.error('❌ Conversation seçilirken hata:', error);
+      Alert.alert('Sohbet açılamadı', error?.message || 'Sohbet açılırken bir hata oluştu. Lütfen tekrar deneyin.');
+    } finally {
+      setLoadingConversationId(null);
     }
-    
-    // Parent component'e bildir
-    if (onSelectConversation) {
-      onSelectConversation(conversationId);
-    }
-    
-    // ChatHistoryScreen'i kapat ve Home'a dön
-    onBack();
   };
 
   const handleBackPress = () => {
@@ -219,6 +188,14 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
         start={{ x: 0, y: 0 }}
         end={{ x: 0, y: 1 }}
       >
+        {loadingConversationId && (
+          <View style={styles.loadingOverlay} pointerEvents="auto">
+            <View style={styles.loadingContent}>
+              <ActivityIndicator size="large" color="#00DDA5" />
+              <Text allowFontScaling={false} style={styles.loadingText}>Sohbet yükleniyor...</Text>
+            </View>
+          </View>
+        )}
         {/* Chat History Header */}
         <View style={styles.chatHistoryHeader}>
           <View style={styles.searchSection}>
@@ -278,17 +255,11 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
           {/* Chat List */}
           <View style={styles.chatList}>
             {displayedConversations.map((conversation) => {
-                const isExpanded = expandedConversations.has(conversation.id);
-                const isLoading = loadingFullMessages.has(conversation.id);
-                const totalMessageCount = conversation.totalMessageCount || conversation.messages.length;
-                const displayedMessages = isExpanded ? conversation.messages : conversation.messages.slice(0, 10);
-                const hasMoreMessages = totalMessageCount > 10 && !isExpanded;
-                
                 return (
                   <View key={conversation.id} style={styles.conversationItem}>
                     <TouchableOpacity 
                       style={styles.chatItem}
-                      activeOpacity={1}
+                      activeOpacity={0.7}
                       onPress={() => handleConversationSelect(conversation.id)}
                       onLongPress={() => handleDeleteConversation(conversation.id, conversation.title || 'Sohbet')}
                     >
@@ -304,33 +275,6 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
                         </Text>
                       </View>
                     </TouchableOpacity>
-                    
-                    {/* Mesajlar */}
-                    {displayedMessages.length > 0 && (
-                      <View style={styles.messagesContainer}>
-                        {displayedMessages.map((message, index) => (
-                          <View key={message.id || index} style={styles.messageItem}>
-                            <Text allowFontScaling={false} style={styles.messageText} numberOfLines={2}>
-                              {message.isUser ? '👤 ' : '🤖 '}
-                              {message.text || '(Mesaj içeriği yok)'}
-                            </Text>
-                          </View>
-                        ))}
-                      </View>
-                    )}
-                    
-                    {/* Tümünü Göster Butonu */}
-                    {hasMoreMessages && (
-                      <TouchableOpacity
-                        style={styles.showAllButton}
-                        onPress={() => handleLoadAllMessages(conversation.id)}
-                        disabled={isLoading}
-                      >
-                        <Text allowFontScaling={false} style={styles.showAllButtonText}>
-                          {isLoading ? 'Yükleniyor...' : `Tümünü göster (${totalMessageCount - displayedMessages.length} mesaj daha)`}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
                   </View>
                 );
               })}
@@ -344,7 +288,7 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
               activeOpacity={0.7}
             >
               <Text allowFontScaling={false} style={styles.viewAllButtonText}>
-                Tümünü Gör ({filteredConversations.length - MAX_CONVERSATIONS_DISPLAY} sohbet daha)
+                Tümünü Gör ({conversationsWithMessages.length - MAX_CONVERSATIONS_DISPLAY} sohbet daha)
               </Text>
             </TouchableOpacity>
           )}
@@ -388,6 +332,7 @@ const styles = StyleSheet.create({
   },
   chatHistoryGradient: {
     flex: 1,
+    position: 'relative',
   },
   chatHistoryHeader: {
     paddingTop: 70,
@@ -454,32 +399,6 @@ const styles = StyleSheet.create({
   },
   chatItemContent: {
     paddingLeft: 33, // İkon genişliği (21) + gap (12) = 33px
-  },
-  messagesContainer: {
-    paddingLeft: 33,
-    paddingTop: 8,
-    gap: 6,
-  },
-  messageItem: {
-    paddingVertical: 4,
-  },
-  messageText: {
-    fontFamily: 'Poppins-Regular',
-    fontSize: 12,
-    fontWeight: '400',
-    color: '#9CA3AF',
-    lineHeight: 16,
-  },
-  showAllButton: {
-    paddingLeft: 33,
-    paddingTop: 8,
-    paddingBottom: 4,
-  },
-  showAllButtonText: {
-    fontFamily: 'Poppins-Medium',
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#7E7AE9',
   },
   viewAllButton: {
     marginTop: 16,
@@ -594,6 +513,32 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
     color: '#FFFFFF',
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 50,
+  },
+  loadingContent: {
+    backgroundColor: 'rgba(22, 22, 60, 0.85)',
+    paddingHorizontal: 24,
+    paddingVertical: 20,
+    borderRadius: 16,
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  loadingText: {
+    color: '#FFFFFF',
+    fontFamily: 'Poppins-Medium',
+    fontSize: 14,
   },
 });
 
