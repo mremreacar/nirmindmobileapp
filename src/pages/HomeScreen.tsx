@@ -668,18 +668,18 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
                 pointerEvents="none"
                 style={[styles.chatBackdrop, { opacity: chatBackdropOpacity }]}
               />
-              <ChatScreen
-                translateX={translateXChat}
-                onClose={closeChatScreen}
-                onOpenChatHistory={onOpenChatHistory}
-                conversationId={selectedConversationId || createdConversationId}
-                initialArastirmaModu={arastirmaModu}
-                initialUploadModalOpen={plusButtonPressed}
-                initialMessage={pendingInitialMessage} // Sadece pendingInitialMessage kullan, inputText kullanma
-                initialPromptType={pendingPromptType} // Quick suggestion'dan gelen promptType
-                initialImages={selectedImages}
-                initialFiles={selectedFiles}
-              />
+            <ChatScreen
+              translateX={translateXChat}
+              onClose={closeChatScreen}
+              onOpenChatHistory={onOpenChatHistory}
+              conversationId={selectedConversationId || createdConversationId}
+              initialArastirmaModu={arastirmaModu}
+              initialUploadModalOpen={plusButtonPressed}
+              initialMessage={pendingInitialMessage} // Sadece pendingInitialMessage kullan, inputText kullanma
+              initialPromptType={pendingPromptType} // Quick suggestion'dan gelen promptType
+              initialImages={selectedImages}
+              initialFiles={selectedFiles}
+            />
             </View>
           </Modal>
 

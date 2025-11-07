@@ -611,44 +611,44 @@ const InputComponent: React.FC<InputComponentProps> = ({
                   onScroll={handleScroll}
                   scrollEventThrottle={16}
                 >
-                  <TextInput
-                    ref={textInputRef}
-                    style={[
-                      styles.textInput, 
-                      textInputStyle,
-                      {
+              <TextInput
+                ref={textInputRef}
+                style={[
+                  styles.textInput, 
+                  textInputStyle,
+                  {
                         minHeight: MIN_INPUT_HEIGHT,
                         paddingRight: isScrollable ? 12 : 8,
                         opacity: isProcessing ? 0.6 : 1,
-                      },
-                      isDictating && {
-                        color: '#7E7AE9',
-                        fontWeight: '600',
-                      },
-                    ]}
-                    placeholder={placeholder}
-                    placeholderTextColor="#9CA3AF"
-                    value={inputText}
-                    onChangeText={handleTextChange}
-                    onContentSizeChange={handleContentSizeChange}
-                    onKeyPress={handleKeyPress}
-                    onFocus={handleFocus}
-                    onBlur={handleBlur}
-                    editable={editable && !isDictating}
-                    multiline={true}
-                    maxLength={maxLength}
-                    returnKeyType="default"
-                    autoCorrect={autoCorrect}
-                    autoCapitalize={autoCapitalize}
-                    onSubmitEditing={handleSubmitEditing}
-                    underlineColorAndroid="transparent"
-                    selectionColor="#7E7AE9"
-                    cursorColor="#7E7AE9"
-                    textAlignVertical="top"
-                    keyboardType="default"
-                    blurOnSubmit={false}
-                    enablesReturnKeyAutomatically={false}
-                  />
+                  },
+                  isDictating && {
+                    color: '#7E7AE9',
+                    fontWeight: '600',
+                  },
+                ]}
+                placeholder={placeholder}
+                placeholderTextColor="#9CA3AF"
+                value={inputText}
+                onChangeText={handleTextChange}
+                onContentSizeChange={handleContentSizeChange}
+                onKeyPress={handleKeyPress}
+                onFocus={handleFocus}
+                onBlur={handleBlur}
+                editable={editable && !isDictating}
+                multiline={true}
+                maxLength={maxLength}
+                returnKeyType="default"
+                autoCorrect={autoCorrect}
+                autoCapitalize={autoCapitalize}
+                onSubmitEditing={handleSubmitEditing}
+                underlineColorAndroid="transparent"
+                selectionColor="#7E7AE9"
+                cursorColor="#7E7AE9"
+                textAlignVertical="top"
+                keyboardType="default"
+                blurOnSubmit={false}
+                enablesReturnKeyAutomatically={false}
+              />
                 </ScrollView>
 
                 {isScrollable && canScrollUp && (

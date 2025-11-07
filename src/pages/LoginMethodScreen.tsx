@@ -262,7 +262,15 @@ const LoginMethodScreen = ({
       setIsNirpaxLoading(true);
       console.log("🔵 Nirpax login başlatılıyor...");
 
-      const url = crossAppAuthService.getWebViewLoginUrl();
+      const loginResult = await crossAppAuthService.initiateNirpaxLogin();
+
+      if (loginResult.type === 'deep-link') {
+        console.log('🔁 Cross-app login başlatıldı, Nirpax uygulamasına geçiliyor');
+        setIsNirpaxLoading(false);
+        return;
+      }
+
+      const url = loginResult.url || crossAppAuthService.getWebViewLoginUrl();
       console.log("🌐 WebView URL hazırlanıyor:", url);
       setWebViewUrl(url);
       setWebViewLoading(true);
@@ -281,8 +289,11 @@ const LoginMethodScreen = ({
       setWebViewUrl(null);
       Alert.alert(
         "Giriş Başarısız",
-        "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
-        [{ text: "Tamam" }]
+        "Giriş işlemi tamamlanamadı. Lütfen Nirpax uygulamasının yüklü olduğundan emin olun veya tekrar deneyin.",
+        [
+          { text: "Tekrar dene", onPress: handleNirpaxLogin },
+          { text: "İptal", style: 'cancel' }
+        ]
       );
     }
   };
@@ -388,20 +399,20 @@ const LoginMethodScreen = ({
       
         if (token) {
           console.log("✅ Token bulundu:", token.substring(0, 20) + '...');
-          setShowWebView(false);
-          
-          try {
+        setShowWebView(false);
+        
+        try {
             await handleAuthCallback(token);
-            onLoginSuccess();
-          } catch (error: any) {
-            console.error("❌ Auth callback hatası:", error);
-            Alert.alert(
-              "Giriş Başarısız",
-              error.message || "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
-              [{ text: "Tamam" }]
-            );
-          }
-          return;
+          onLoginSuccess();
+        } catch (error: any) {
+          console.error("❌ Auth callback hatası:", error);
+          Alert.alert(
+            "Giriş Başarısız",
+            error.message || "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+            [{ text: "Tamam" }]
+          );
+        }
+        return;
         }
       } catch (error) {
         console.warn("⚠️ URL parse hatası:", error);
@@ -610,10 +621,10 @@ const LoginMethodScreen = ({
           </View>
           {webViewLoading && (
              <View style={styles.loadingContainer} pointerEvents="none">
-               <ActivityIndicator size="large" color="#00DDA5" />
-               <Text style={styles.loadingText}>Sayfa yükleniyor...</Text>
-             </View>
-           )}
+              <ActivityIndicator size="large" color="#00DDA5" />
+              <Text style={styles.loadingText}>Sayfa yükleniyor...</Text>
+            </View>
+          )}
           {webViewUrl ? (
           <WebView
             ref={webViewRef}
@@ -671,7 +682,7 @@ const LoginMethodScreen = ({
                   { 
                     text: 'Yeniden Dene', 
                     onPress: () => {
-                      const url = crossAppAuthService.getWebViewLoginUrl();
+                        const url = crossAppAuthService.getWebViewLoginUrl();
                       console.log("🔄 WebView yeniden yükleniyor:", url);
                       setWebViewLoading(true);
                       if (webViewSpinnerTimerRef.current) {

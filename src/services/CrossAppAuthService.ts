@@ -145,7 +145,7 @@ class CrossAppAuthService {
         }
       }
 
-      return { error: 'Invalid callback URL' };
+        return { error: 'Invalid callback URL' };
     } catch (error) {
       console.error('❌ Auth callback parse hatası:', error);
       return { error: 'Invalid callback URL' };
