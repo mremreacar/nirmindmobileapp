@@ -9,6 +9,8 @@ class CrossAppAuthService {
   private readonly NIRPAX_PACKAGE_NAME = 'com.nireya.nirpax'; // Android package name
   private readonly NIRPAX_BUNDLE_ID = 'com.nireya.nirpax'; // iOS bundle ID
   private readonly BACKEND_LOGIN_URL = `${API_BASE_URL}/nirpax/auth/cross-app-login-page`;
+  private readonly WEB_CALLBACK_URL = 'https://nircore.io/api/nirpax/auth/google/callback';
+  private readonly APP_CALLBACK_URL = 'nirmind://auth';
 
   private constructor() {}
 
@@ -39,7 +41,7 @@ class CrossAppAuthService {
    */
   async openNirpaxApp(): Promise<boolean> {
     try {
-      const deepLinkUrl = `${this.NIRPAX_DEEP_LINK}?source=nirmind&callback=nirmind://auth`;
+      const deepLinkUrl = `${this.NIRPAX_DEEP_LINK}?source=nirmind&callback=${encodeURIComponent(this.APP_CALLBACK_URL)}`;
       console.log('🚀 Nirpax uygulaması açılıyor:', deepLinkUrl);
       
       const canOpen = await Linking.canOpenURL(deepLinkUrl);
@@ -60,8 +62,9 @@ class CrossAppAuthService {
    * WebView için backend login URL'ini döner
    */
   getWebViewLoginUrl(): string {
-    const redirectUrl = encodeURIComponent('nirmind://auth');
-    return `${this.BACKEND_LOGIN_URL}?source=nirmind&redirect=${redirectUrl}`;
+    const redirectUrl = encodeURIComponent(this.WEB_CALLBACK_URL);
+    const callbackUrl = encodeURIComponent(this.APP_CALLBACK_URL);
+    return `${this.BACKEND_LOGIN_URL}?source=nirmind&redirect=${redirectUrl}&callback=${callbackUrl}`;
   }
 
   /**
@@ -130,9 +133,19 @@ class CrossAppAuthService {
         return { token };
       } else if (error) {
         return { error };
-      } else {
-        return { error: 'Invalid callback URL' };
+      } else if (parsed.hash) {
+        const hashParams = new URLSearchParams(parsed.hash.replace(/^#/, ''));
+        const hashToken = hashParams.get('token');
+        const hashError = hashParams.get('error');
+        if (hashToken) {
+          return { token: hashToken };
+        }
+        if (hashError) {
+          return { error: hashError };
+        }
       }
+
+      return { error: 'Invalid callback URL' };
     } catch (error) {
       console.error('❌ Auth callback parse hatası:', error);
       return { error: 'Invalid callback URL' };

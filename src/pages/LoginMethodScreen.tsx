@@ -43,6 +43,8 @@ const nirpaxLogoIcon = `<svg width="24" height="16" viewBox="0 0 24 16" fill="no
 <path d="M23.2522 9.9284C23.264 9.97305 23.4327 10.1321 23.5162 10.1274C23.724 9.97305 23.7146 6.07676 23.5162 5.8754C23.4311 5.86522 23.2522 6.05169 23.2522 6.07441C23.2522 6.9433 23.0851 9.27105 23.2522 9.9284Z" fill="white"/>
 </svg>`;
 
+const NIRPAX_WEB_CALLBACK_URL = 'https://nircore.io/api/nirpax/auth/google/callback';
+
 interface LoginMethodScreenProps {
   onBack: () => void;
   onLoginSuccess: () => void;
@@ -310,28 +312,71 @@ const LoginMethodScreen = ({
       return;
     }
 
+    const isCallbackUrl =
+      url &&
+      (url.includes('nirmind://auth') ||
+        url.startsWith('nirmind://') ||
+        url.startsWith(NIRPAX_WEB_CALLBACK_URL));
+
+    if (isCallbackUrl) {
+      try {
+        const parsed = parseTokenFromUrl(url);
+
+        if (parsed.token) {
+          console.log("✅ Token bulundu:", parsed.token.substring(0, 20) + '...');
+          setShowWebView(false);
+
+          try {
+            await handleAuthCallback(parsed.token);
+            onLoginSuccess();
+          } catch (error: any) {
+            console.error("❌ Auth callback hatası:", error);
+            Alert.alert(
+              "Giriş Başarısız",
+              error.message || "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+              [{ text: "Tamam" }]
+            );
+          }
+          return;
+        } else if (parsed.error) {
+          console.error("❌ Redirect URL'den hata:", parsed.error);
+          Alert.alert(
+            "Giriş Başarısız",
+            parsed.error || "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+            [{ text: "Tamam", onPress: () => setShowWebView(false) }]
+          );
+          return;
+        }
+      } catch (error) {
+        console.warn("⚠️ URL parse hatası:", error);
+      }
+    }
+
     // Check if URL contains token parameter (Nirpay implementasyonu gibi)
-    if (url && (url.includes('token=') || url.includes('nirmind://auth'))) {
+    if (
+      url &&
+      (url.includes('token=') || url.includes('nirmind://auth') || url.startsWith(NIRPAX_WEB_CALLBACK_URL))
+    ) {
       try {
         const urlObj = new URL(url);
         const token = urlObj.searchParams.get('token') || urlObj.hash.split('token=')[1]?.split('&')[0];
       
         if (token) {
           console.log("✅ Token bulundu:", token.substring(0, 20) + '...');
-        setShowWebView(false);
-        
-        try {
+          setShowWebView(false);
+          
+          try {
             await handleAuthCallback(token);
-          onLoginSuccess();
-        } catch (error: any) {
-          console.error("❌ Auth callback hatası:", error);
-          Alert.alert(
-            "Giriş Başarısız",
-            error.message || "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
-            [{ text: "Tamam" }]
-          );
-        }
-        return;
+            onLoginSuccess();
+          } catch (error: any) {
+            console.error("❌ Auth callback hatası:", error);
+            Alert.alert(
+              "Giriş Başarısız",
+              error.message || "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+              [{ text: "Tamam" }]
+            );
+          }
+          return;
         }
       } catch (error) {
         console.warn("⚠️ URL parse hatası:", error);
@@ -377,7 +422,12 @@ const LoginMethodScreen = ({
     console.log("🔍 Should start load:", url);
 
     // If it's our callback URL, intercept it
-    if (url && (url.includes("nirmind://auth") || url.startsWith("nirmind://"))) {
+    if (
+      url &&
+      (url.includes("nirmind://auth") ||
+        url.startsWith("nirmind://") ||
+        url.startsWith(NIRPAX_WEB_CALLBACK_URL))
+    ) {
       console.log("🚫 Blocking navigation, handling callback");
       handleWebViewNavigationStateChange({ url, loading: false });
       return false; // Block the navigation

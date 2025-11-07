@@ -1485,7 +1485,7 @@ const nirpaxLogin = async () => {
 # Google OAuth
 GOOGLE_CLIENT_ID=your_google_client_id
 GOOGLE_CLIENT_SECRET=your_google_client_secret
-GOOGLE_REDIRECT_URI=your_redirect_uri
+GOOGLE_REDIRECT_URI=https://nircore.io/api/nirpax/auth/google/callback
 
 # Apple Sign-In
 APPLE_CLIENT_ID=your_apple_client_id
