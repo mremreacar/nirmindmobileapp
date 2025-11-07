@@ -11,6 +11,7 @@ import {
   Image,
   Keyboard,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFonts } from 'expo-font';
@@ -77,6 +78,7 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
   const [showAllConversations, setShowAllConversations] = useState(false);
   const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
   const [isConversationsLoading, setIsConversationsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // Maksimum gösterilecek konuşma sayısı
   const MAX_CONVERSATIONS_DISPLAY = 10;
@@ -201,6 +203,17 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
     );
   };
 
+  const handleRefresh = async () => {
+    try {
+      setIsRefreshing(true);
+      await loadConversations();
+    } catch (error) {
+      console.error('❌ Konuşmalar yenilenirken hata:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   return (
     <View style={styles.chatHistoryContainer}>
       <LinearGradient
@@ -250,7 +263,23 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
         </View>
 
         {/* Chat History Content */}
-        <ScrollView style={styles.chatHistoryContent}>
+        <ScrollView
+          style={styles.chatHistoryContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={handleRefresh}
+              tintColor="#00DDA5"
+              colors={['#00DDA5']}
+            />
+          }
+        >
+          {isRefreshing && (
+            <View style={styles.refreshIndicatorContainer}>
+              <ActivityIndicator size="small" color="#00DDA5" />
+              <Text allowFontScaling={false} style={styles.refreshIndicatorText}>Güncelleniyor...</Text>
+            </View>
+          )}
           {/* NirMind Section */}
           <View style={styles.historySection}>
             <View style={styles.sectionItem}>
@@ -402,6 +431,18 @@ const styles = StyleSheet.create({
   chatHistoryContent: {
     flex: 1,
     paddingHorizontal: 20,
+  },
+  refreshIndicatorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+  },
+  refreshIndicatorText: {
+    fontFamily: 'Poppins-Regular',
+    fontSize: 14,
+    color: '#9CA3AF',
   },
   historySection: {
     marginBottom: 20,

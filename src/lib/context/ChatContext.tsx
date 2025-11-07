@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect, useRef } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ChatConversation, ChatMessage } from '../mock/types';
 import BackendApiService from '../../services/BackendApiService';
 
@@ -19,6 +20,8 @@ interface ChatContextType {
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
+
+const SOFT_DELETED_CONVERSATIONS_KEY = 'softDeletedConversations';
 
 interface ChatProviderProps {
   children: ReactNode;
@@ -57,10 +60,56 @@ const generateConversationTitle = (messageText: string): string => {
 export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [currentConversation, setCurrentConversation] = useState<ChatConversation | null>(null);
+  const [softDeletedConversationIds, setSoftDeletedConversationIds] = useState<string[]>([]);
   const backendApiService = BackendApiService.getInstance();
   
   // Conversation yükleme durumunu takip et (duplicate istekleri önlemek için)
   const loadingConversationsRef = useRef<Set<string>>(new Set());
+  const softDeletedConversationsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const loadSoftDeletedConversations = async () => {
+      try {
+        const storedIds = await AsyncStorage.getItem(SOFT_DELETED_CONVERSATIONS_KEY);
+        if (storedIds) {
+          const parsed: unknown = JSON.parse(storedIds);
+          if (Array.isArray(parsed)) {
+            const validIds = parsed.filter(id => typeof id === 'string');
+            setSoftDeletedConversationIds(validIds);
+          }
+        }
+      } catch (error) {
+        console.error('❌ Soft delete edilmiş konuşmalar yüklenemedi:', error);
+      }
+    };
+
+    loadSoftDeletedConversations();
+  }, []);
+
+  useEffect(() => {
+    softDeletedConversationsRef.current = new Set(softDeletedConversationIds);
+  }, [softDeletedConversationIds]);
+
+  useEffect(() => {
+    AsyncStorage.setItem(SOFT_DELETED_CONVERSATIONS_KEY, JSON.stringify(softDeletedConversationIds)).catch(error => {
+      console.error('❌ Soft delete edilmiş konuşmalar kaydedilemedi:', error);
+    });
+  }, [softDeletedConversationIds]);
+
+  useEffect(() => {
+    if (softDeletedConversationIds.length === 0) {
+      return;
+    }
+
+    setConversations(prev => prev.filter(conv => !softDeletedConversationsRef.current.has(conv.id)));
+
+    setCurrentConversation(prev => {
+      if (prev && softDeletedConversationsRef.current.has(prev.id)) {
+        return null;
+      }
+      return prev;
+    });
+  }, [softDeletedConversationIds]);
 
   const addMessage = useCallback(async (conversationId: string, message: ChatMessage) => {
     console.log('📝 addMessage çağrıldı:', { conversationId, messageId: message.id, isUser: message.isUser, text: message.text.substring(0, 50) });
@@ -72,6 +121,11 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         messageText: message.text?.substring(0, 50),
         isUser: message.isUser
       });
+      return;
+    }
+
+    if (softDeletedConversationsRef.current.has(conversationId)) {
+      console.warn('⚠️ Soft delete edilmiş conversation\'a mesaj eklenemez:', conversationId);
       return;
     }
     
@@ -133,7 +187,8 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
               id: convData.id,
               title: convData.title,
               isResearchMode: convData.isResearchMode || false,
-              messages: [],
+              isSoftDeleted: false,
+              messages: [] as ChatMessage[],
               createdAt: new Date(convData.createdAt),
               updatedAt: new Date(convData.updatedAt)
             };
@@ -209,6 +264,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
           id: conversationId,
           title: 'Yeni Sohbet',
           isResearchMode: false,
+          isSoftDeleted: false,
           messages: [message],
           createdAt: new Date(),
           updatedAt: new Date()
@@ -315,6 +371,11 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   // Update message in conversation (for streaming updates)
   // Bu fonksiyon duplicate kontrolü yapmaz, sadece günceller veya ekler
   const updateMessage = useCallback((conversationId: string, message: ChatMessage) => {
+    if (softDeletedConversationsRef.current.has(conversationId)) {
+      console.warn('⚠️ Soft delete edilmiş conversation\'daki mesaj güncellenemez:', conversationId);
+      return;
+    }
+
     setConversations(prev => {
       const conversation = prev.find(conv => conv.id === conversationId);
       if (!conversation) {
@@ -323,6 +384,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
           id: conversationId,
           title: 'Yeni Sohbet',
           isResearchMode: false,
+          isSoftDeleted: false,
           messages: [message],
           createdAt: new Date(),
           updatedAt: new Date()
@@ -366,6 +428,11 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
 
   // Remove message from conversation (for optimistic updates)
   const removeMessage = useCallback((conversationId: string, messageId: string) => {
+    if (softDeletedConversationsRef.current.has(conversationId)) {
+      console.warn('⚠️ Soft delete edilmiş conversation\'daki mesaj kaldırılamaz:', conversationId);
+      return;
+    }
+
     setConversations(prev => 
       prev.map(conv => 
         conv.id === conversationId 
@@ -403,6 +470,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
           id: backendId,
           title,
           isResearchMode: false,
+          isSoftDeleted: false,
           messages: initialMessage ? [{
             id: `msg-${Date.now()}`,
             text: initialMessage,
@@ -429,6 +497,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       id: localId,
       title,
       isResearchMode: false,
+      isSoftDeleted: false,
       messages: initialMessage ? [{
         id: `msg-${Date.now()}`,
         text: initialMessage,
@@ -447,6 +516,11 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
 
   // Helper function to load conversation messages - MUST be defined before selectConversation
   const loadConversationMessages = useCallback(async (conversationId: string, conversation: ChatConversation) => {
+    if (softDeletedConversationsRef.current.has(conversationId)) {
+      console.log('⚠️ Soft delete edilmiş conversation için mesaj yükleme atlandı:', conversationId);
+      return;
+    }
+
     // Eğer zaten yükleniyorsa tekrar yükleme
     if (loadingConversationsRef.current.has(conversationId)) {
       console.log('⚠️ Conversation mesajları zaten yükleniyor, atlanıyor...', conversationId);
@@ -500,10 +574,11 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         }
         
         // Mevcut mesajlarla birleştir ve duplicate'leri kaldır
-        let updatedConversation: ChatConversation | null = null;
-        
+        let mergedConversation: ChatConversation | undefined;
+
         setConversations(prev => {
           const currentConv = prev.find(c => c.id === conversationId);
+          const baseConversation: ChatConversation = currentConv ? { ...currentConv } : { ...conversation };
           const existingMessages: ChatMessage[] = currentConv?.messages || conversation.messages || [];
           const existingIds = new Set(existingMessages.map((m: ChatMessage) => m.id));
           const newMessages = backendMessages.filter((m: ChatMessage) => !existingIds.has(m.id));
@@ -515,35 +590,35 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
             const timeB = b.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp).getTime();
             return timeA - timeB; // En eski en başta
           });
-          
-          const updated = prev.map(conv => 
-            conv.id === conversationId 
-              ? { 
-                  ...conv, 
-                  messages: mergedMessages, 
-                  title: conversation.title,
-                  totalMessageCount: mergedMessages.length // totalMessageCount'u güncelle
-                }
-              : conv
-          );
-          
-          updatedConversation = updated.find(c => c.id === conversationId) || conversation;
-          if (updatedConversation) {
-            updatedConversation.totalMessageCount = mergedMessages.length;
+
+          const nextConversation: ChatConversation = {
+            ...baseConversation,
+            title: conversation.title,
+            messages: mergedMessages,
+            totalMessageCount: mergedMessages.length,
+            updatedAt: new Date()
+          };
+
+          mergedConversation = nextConversation;
+
+          if (currentConv) {
+            return prev.map(conv => (conv.id === conversationId ? nextConversation : conv));
           }
-          
-          return updated;
+
+          return [nextConversation, ...prev];
         });
-        
-        // currentConversation'ı güncelle (setConversations callback'i dışında)
-        if (updatedConversation) {
-          setCurrentConversation(updatedConversation);
-          console.log('✅ Conversation mesajları güncellendi:', {
-            conversationId,
-            messageCount: updatedConversation.messages.length,
-            totalMessageCount: updatedConversation.totalMessageCount
-          });
+
+        if (!mergedConversation) {
+          console.warn('⚠️ mergedConversation bulunamadı, mesaj güncelleme atlandı:', conversationId);
+          return;
         }
+
+        setCurrentConversation(mergedConversation);
+        console.log('✅ Conversation mesajları güncellendi:', {
+          conversationId,
+          messageCount: mergedConversation.messages.length,
+          totalMessageCount: mergedConversation.totalMessageCount
+        });
       }
     } catch (error) {
       console.error('❌ Mesajlar yüklenirken hata:', error);
@@ -554,6 +629,11 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   }, [backendApiService]);
 
   const selectConversation = useCallback(async (conversationId: string) => {
+    if (softDeletedConversationsRef.current.has(conversationId)) {
+      console.warn('⚠️ Soft delete edilmiş conversation seçilemez:', conversationId);
+      return;
+    }
+
     console.log('🔍 selectConversation çağrıldı:', conversationId);
     
     // Conversation'ı güncel state'den al (callback pattern ile)
@@ -621,7 +701,8 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
             id: convData.id,
             title: convData.title,
             isResearchMode: convData.isResearchMode || false,
-            messages: [],
+            isSoftDeleted: false,
+            messages: [] as ChatMessage[],
             createdAt: new Date(convData.createdAt),
             updatedAt: new Date(convData.updatedAt)
           };
@@ -657,15 +738,26 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   }, [backendApiService, loadConversationMessages]);
 
   const deleteConversation = useCallback((conversationId: string) => {
+    setSoftDeletedConversationIds(prev => {
+      if (prev.includes(conversationId)) {
+        return prev;
+      }
+      return [...prev, conversationId];
+    });
+
     setConversations(prev => prev.filter(conv => conv.id !== conversationId));
     
-    // Clear current conversation if it was deleted
     if (currentConversation?.id === conversationId) {
       setCurrentConversation(null);
     }
   }, [currentConversation]);
 
   const deleteMessage = useCallback(async (conversationId: string, messageId: string) => {
+    if (softDeletedConversationsRef.current.has(conversationId)) {
+      console.warn('⚠️ Soft delete edilmiş conversation\'daki mesaj backend\'de silinmeyecek:', conversationId);
+      return;
+    }
+
     try {
       const response = await backendApiService.deleteMessage(messageId);
       
@@ -702,6 +794,11 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   }, [backendApiService, currentConversation]);
 
   const updateConversationTitle = useCallback((conversationId: string, title: string) => {
+    if (softDeletedConversationsRef.current.has(conversationId)) {
+      console.warn('⚠️ Soft delete edilmiş conversation\'ın başlığı güncellenemez:', conversationId);
+      return;
+    }
+
     setConversations(prev => 
       prev.map(conv => 
         conv.id === conversationId 
@@ -719,6 +816,11 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   }, [currentConversation]);
 
   const updateResearchMode = useCallback(async (conversationId: string, isResearchMode: boolean) => {
+    if (softDeletedConversationsRef.current.has(conversationId)) {
+      console.warn('⚠️ Soft delete edilmiş conversation\'ın araştırma modu güncellenemez:', conversationId);
+      return;
+    }
+
     try {
       console.log('📝 updateResearchMode çağrıldı:', {
         conversationId,
@@ -778,15 +880,21 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       
       if (response.success && response.data) {
         const conversationsData: any[] = Array.isArray(response.data) ? response.data : (response.data as any).conversations || [];
-        console.log('✅ Backend\'den konuşmalar yüklendi:', conversationsData.length);
+        const activeConversationsData = conversationsData.filter((conv: any) => !softDeletedConversationsRef.current.has(conv.id));
+        console.log('✅ Backend\'den konuşmalar yüklendi:', {
+          toplam: conversationsData.length,
+          aktif: activeConversationsData.length,
+          softDelete: conversationsData.length - activeConversationsData.length,
+        });
         
         // Her konuşma için ilk 10 mesajı yükle - BATCH'ler halinde (rate limit'i önlemek için)
         // Önce conversation'ları oluştur (mesajlar olmadan)
-        const conversationsWithoutMessages: ChatConversation[] = conversationsData.map((conv: any) => ({
+        const conversationsWithoutMessages: ChatConversation[] = activeConversationsData.map((conv: any) => ({
           id: conv.id,
           title: conv.title || 'Yeni Sohbet',
           isResearchMode: conv.isResearchMode || false,
-          messages: [], // Mesajlar sonra yüklenecek
+          isSoftDeleted: false,
+          messages: [] as ChatMessage[], // Mesajlar sonra yüklenecek
           totalMessageCount: 0,
           createdAt: new Date(conv.createdAt),
           updatedAt: new Date(conv.updatedAt)
@@ -799,8 +907,8 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         const BATCH_SIZE = 3;
         const conversationsWithMessages: ChatConversation[] = [];
         
-        for (let i = 0; i < conversationsData.length; i += BATCH_SIZE) {
-          const batch = conversationsData.slice(i, i + BATCH_SIZE);
+        for (let i = 0; i < activeConversationsData.length; i += BATCH_SIZE) {
+          const batch = activeConversationsData.slice(i, i + BATCH_SIZE);
           
           // Batch'i paralel yükle
           const batchResults = await Promise.all(
@@ -813,7 +921,8 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
                     id: conv.id,
                     title: conv.title || 'Yeni Sohbet',
                     isResearchMode: conv.isResearchMode || false,
-                    messages: [],
+                    isSoftDeleted: false,
+                    messages: [] as ChatMessage[],
                     totalMessageCount: 0,
                     createdAt: new Date(conv.createdAt),
                     updatedAt: new Date(conv.updatedAt)
@@ -835,7 +944,8 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
                     id: conv.id,
                     title: conv.title || 'Yeni Sohbet',
                     isResearchMode: conv.isResearchMode || false,
-                    messages: [],
+                    isSoftDeleted: false,
+                    messages: [] as ChatMessage[],
                     totalMessageCount: 0,
                     createdAt: new Date(conv.createdAt),
                     updatedAt: new Date(conv.updatedAt)
@@ -884,6 +994,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
                   id: conv.id,
                   title: finalTitle,
                   isResearchMode: conv.isResearchMode || false,
+                  isSoftDeleted: false,
                   messages,
                   totalMessageCount,
                   createdAt: new Date(conv.createdAt),
@@ -896,7 +1007,8 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
                   id: conv.id,
                   title: conv.title || 'Yeni Sohbet',
                   isResearchMode: conv.isResearchMode || false,
-                  messages: [],
+                  isSoftDeleted: false,
+                  messages: [] as ChatMessage[],
                   totalMessageCount: 0,
                   createdAt: new Date(conv.createdAt),
                   updatedAt: new Date(conv.updatedAt)
@@ -908,7 +1020,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
           conversationsWithMessages.push(...batchResults);
           
           // Batch'ler arasında kısa bir delay ekle (rate limit'i önlemek için)
-          if (i + BATCH_SIZE < conversationsData.length) {
+          if (i + BATCH_SIZE < activeConversationsData.length) {
             await new Promise(resolve => setTimeout(resolve, 500)); // 500ms bekle
           }
         }
@@ -937,6 +1049,11 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   }, [backendApiService]);
 
   const updateConversationMessages = useCallback((conversationId: string, messages: ChatMessage[]) => {
+    if (softDeletedConversationsRef.current.has(conversationId)) {
+      console.warn('⚠️ Soft delete edilmiş conversation\'ın mesajları güncellenemez:', conversationId);
+      return;
+    }
+
     setConversations(prev => 
       prev.map(conv => 
         conv.id === conversationId 

@@ -716,18 +716,28 @@ class BackendApiService {
               if (!eventBlock.trim()) continue;
               
               let eventType = '';
-              let eventData = '';
+              const dataLines: string[] = [];
               
               const lines = eventBlock.split('\n');
               for (const line of lines) {
                 if (line.startsWith('event: ')) {
                   eventType = line.substring(7).trim();
                 } else if (line.startsWith('data: ')) {
-                  eventData = line.substring(6).trim();
+                  // SSE spesifikasyonuna göre: birden fazla data: satırı varsa birleştirilmeli
+                  const dataLine = line.substring(6); // trim yapmıyoruz, çünkü veri içinde boşluk önemli olabilir
+                  dataLines.push(dataLine);
                 }
               }
               
+              // Tüm data satırlarını birleştir (SSE spesifikasyonu)
+              const eventData = dataLines.join('\n').trim();
+              
               if (eventType && eventData) {
+                // JSON parse etmeden önce basit validasyon yap
+                if (!eventData.trim()) {
+                  continue; // Boş data, atla
+                }
+                
                 // Event key oluştur - event type + data hash (ilk 100 karakter)
                 const eventKey = `${eventType}:${eventData.substring(0, 100)}`;
                 
@@ -808,7 +818,20 @@ class BackendApiService {
                       return;
                   }
                 } catch (parseError) {
-                  console.error('❌ SSE data parse error:', parseError, 'Event:', eventType, 'Data:', eventData?.substring(0, 100) || 'N/A');
+                  // JSON parse hatası - data muhtemelen tamamlanmamış veya geçersiz
+                  // Sessizce atla, çünkü bir sonraki chunk ile düzelebilir
+                  if (eventCount <= 10) {
+                    // İlk 10 hata için detaylı log
+                    console.warn('⚠️ SSE data parse hatası (sessizce atlandı):', {
+                      event: eventType,
+                      error: parseError instanceof Error ? parseError.message : String(parseError),
+                      dataLength: eventData?.length || 0,
+                      dataPreview: eventData?.substring(0, 150) || 'N/A',
+                      dataEnd: eventData?.substring(Math.max(0, eventData.length - 50)) || 'N/A'
+                    });
+                  }
+                  // Parse hatası olsa bile devam et - bir sonraki chunk düzeltebilir
+                  continue;
                 }
               }
             }

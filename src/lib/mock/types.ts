@@ -19,6 +19,7 @@ export interface ChatConversation {
   title: string;
   messages: ChatMessage[];
   isResearchMode?: boolean;
+  isSoftDeleted?: boolean;
   createdAt: Date;
   updatedAt: Date;
   totalMessageCount?: number; // Toplam mesaj sayısı (ilk 10'dan fazla varsa)
