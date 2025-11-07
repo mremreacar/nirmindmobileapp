@@ -914,6 +914,8 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       };
       setHasMoreConversations(true);
       setLoadingMessagesConversationIds([]);
+      setConversations([]);
+      setCurrentConversation(prev => prev ? prev : null);
     }
 
     if (isConversationsLoadingRef.current) {
