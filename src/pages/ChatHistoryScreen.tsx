@@ -62,6 +62,7 @@ const nirmindLogoIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 17
 </svg>`;
 
 const MAX_CONVERSATIONS_DISPLAY = 10;
+const REFRESH_MIN_DURATION = 700;
 
 interface ChatHistoryScreenProps {
   onBack: () => void;
@@ -295,7 +296,12 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
     try {
       setIsRefreshing(true);
       setVisibleConversationCount(MAX_CONVERSATIONS_DISPLAY);
+      const refreshStart = Date.now();
       await loadConversations({ reset: true, limit: MAX_CONVERSATIONS_DISPLAY });
+      const elapsed = Date.now() - refreshStart;
+      if (elapsed < REFRESH_MIN_DURATION) {
+        await new Promise(resolve => setTimeout(resolve, REFRESH_MIN_DURATION - elapsed));
+      }
     } catch (error) {
       console.error('❌ Konuşmalar yenilenirken hata:', error);
     } finally {
@@ -379,6 +385,7 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
             <View style={styles.refreshIndicatorContainer}>
               <ActivityIndicator size="large" color="#00DDA5" />
               <Text allowFontScaling={false} style={styles.refreshIndicatorText}>Güncelleniyor...</Text>
+              <Text allowFontScaling={false} style={styles.refreshHintText}>Yeni sohbetler aranıyor</Text>
             </View>
           )}
           {/* NirMind Section */}
@@ -550,18 +557,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   refreshIndicatorContainer: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: 10,
     paddingVertical: 24,
     backgroundColor: 'rgba(0, 221, 165, 0.08)',
+    borderRadius: 20,
+    marginBottom: 16,
   },
   refreshIndicatorText: {
     fontFamily: 'Poppins-Regular',
     fontSize: 14,
     color: '#9CA3AF',
     fontWeight: '500',
+  },
+  refreshHintText: {
+    fontFamily: 'Poppins-Regular',
+    fontSize: 12,
+    color: '#7E7AE9',
+    opacity: 0.85,
   },
   historySection: {
     marginBottom: 20,
