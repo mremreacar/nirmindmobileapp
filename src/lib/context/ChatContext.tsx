@@ -15,13 +15,17 @@ interface ChatContextType {
   deleteMessage: (conversationId: string, messageId: string) => Promise<void>;
   updateConversationTitle: (conversationId: string, title: string) => void;
   updateResearchMode: (conversationId: string, isResearchMode: boolean) => Promise<void>;
-  loadConversations: () => Promise<void>;
+  loadConversations: (options?: { reset?: boolean; limit?: number }) => Promise<number>;
   updateConversationMessages: (conversationId: string, messages: ChatMessage[]) => void;
+  hasMoreConversations: boolean;
+  isLoadingConversations: boolean;
+  loadingMessagesConversationIds: string[];
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
 
 const SOFT_DELETED_CONVERSATIONS_KEY = 'softDeletedConversations';
+const DEFAULT_CONVERSATION_PAGE_SIZE = 10;
 
 interface ChatProviderProps {
   children: ReactNode;
@@ -61,11 +65,36 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [currentConversation, setCurrentConversation] = useState<ChatConversation | null>(null);
   const [softDeletedConversationIds, setSoftDeletedConversationIds] = useState<string[]>([]);
+  const [hasMoreConversations, setHasMoreConversations] = useState<boolean>(true);
+  const [isLoadingConversations, setIsLoadingConversations] = useState<boolean>(false);
+  const [loadingMessagesConversationIds, setLoadingMessagesConversationIds] = useState<string[]>([]);
   const backendApiService = BackendApiService.getInstance();
   
   // Conversation yükleme durumunu takip et (duplicate istekleri önlemek için)
   const loadingConversationsRef = useRef<Set<string>>(new Set());
   const softDeletedConversationsRef = useRef<Set<string>>(new Set());
+  const conversationsPaginationRef = useRef<{ page: number; limit: number; hasMore: boolean }>({
+    page: 1,
+    limit: DEFAULT_CONVERSATION_PAGE_SIZE,
+    hasMore: true,
+  });
+  const isConversationsLoadingRef = useRef<boolean>(false);
+
+  const setConversationMessagesLoading = useCallback((conversationId: string, isLoading: boolean) => {
+    setLoadingMessagesConversationIds(prev => {
+      const exists = prev.includes(conversationId);
+      if (isLoading) {
+        if (exists) {
+          return prev;
+        }
+        return [...prev, conversationId];
+      }
+      if (!exists) {
+        return prev;
+      }
+      return prev.filter(id => id !== conversationId);
+    });
+  }, []);
 
   useEffect(() => {
     const loadSoftDeletedConversations = async () => {
@@ -529,6 +558,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     
     // Yükleme işlemini başlat
     loadingConversationsRef.current.add(conversationId);
+    setConversationMessagesLoading(conversationId, true);
     
     try {
       // Tüm mesajları yüklemek için büyük bir limit kullan (1000 mesaj)
@@ -540,7 +570,6 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
            messagesResponse.message?.includes('Çok fazla istek') ||
            messagesResponse.message?.includes('rate limit'))) {
         console.warn('⚠️ Rate limit hatası - mesajlar yüklenemedi');
-        loadingConversationsRef.current.delete(conversationId);
         return;
       }
       
@@ -575,7 +604,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         
         // Mevcut mesajlarla birleştir ve duplicate'leri kaldır
         let mergedConversation: ChatConversation | undefined;
-
+        
         setConversations(prev => {
           const currentConv = prev.find(c => c.id === conversationId);
           const baseConversation: ChatConversation = currentConv ? { ...currentConv } : { ...conversation };
@@ -590,10 +619,10 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
             const timeB = b.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp).getTime();
             return timeA - timeB; // En eski en başta
           });
-
+          
           const nextConversation: ChatConversation = {
             ...baseConversation,
-            title: conversation.title,
+                  title: conversation.title,
             messages: mergedMessages,
             totalMessageCount: mergedMessages.length,
             updatedAt: new Date()
@@ -607,26 +636,27 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
 
           return [nextConversation, ...prev];
         });
-
+        
         if (!mergedConversation) {
           console.warn('⚠️ mergedConversation bulunamadı, mesaj güncelleme atlandı:', conversationId);
           return;
         }
 
         setCurrentConversation(mergedConversation);
-        console.log('✅ Conversation mesajları güncellendi:', {
-          conversationId,
+          console.log('✅ Conversation mesajları güncellendi:', {
+            conversationId,
           messageCount: mergedConversation.messages.length,
           totalMessageCount: mergedConversation.totalMessageCount
-        });
+          });
       }
     } catch (error) {
       console.error('❌ Mesajlar yüklenirken hata:', error);
     } finally {
       // Yükleme işlemi tamamlandı (başarılı veya başarısız)
       loadingConversationsRef.current.delete(conversationId);
+      setConversationMessagesLoading(conversationId, false);
     }
-  }, [backendApiService]);
+  }, [backendApiService, setConversationMessagesLoading]);
 
   const selectConversation = useCallback(async (conversationId: string) => {
     if (softDeletedConversationsRef.current.has(conversationId)) {
@@ -873,178 +903,165 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     }
   }, [backendApiService, currentConversation]);
 
-  const loadConversations = useCallback(async () => {
+  const loadConversations = useCallback(async (options?: { reset?: boolean; limit?: number }) => {
+    const limit = options?.limit ?? conversationsPaginationRef.current.limit ?? DEFAULT_CONVERSATION_PAGE_SIZE;
+
+    if (options?.reset) {
+      conversationsPaginationRef.current = {
+        page: 1,
+        limit,
+        hasMore: true,
+      };
+      setHasMoreConversations(true);
+      setLoadingMessagesConversationIds([]);
+    }
+
+    if (isConversationsLoadingRef.current) {
+      console.log('⚠️ Konuşmalar zaten yükleniyor, istek atlandı');
+      return 0;
+    }
+
+    if (!conversationsPaginationRef.current.hasMore && !options?.reset) {
+      console.log('ℹ️ Yüklenecek başka konuşma yok');
+      return 0;
+    }
+
+    const pageToFetch = options?.reset ? 1 : conversationsPaginationRef.current.page;
+
+    isConversationsLoadingRef.current = true;
+    setIsLoadingConversations(true);
+
     try {
-      console.log('📚 Konuşmalar backend\'den yükleniyor...');
-      const response = await backendApiService.getConversations();
-      
+      console.log('📚 Konuşmalar backend\'den yükleniyor...', {
+        page: pageToFetch,
+        limit,
+        reset: options?.reset ?? false,
+      });
+
+      const response = await backendApiService.getConversations({ page: pageToFetch, limit });
+
       if (response.success && response.data) {
-        const conversationsData: any[] = Array.isArray(response.data) ? response.data : (response.data as any).conversations || [];
+        const responseData: any = response.data;
+        const conversationsData: any[] = Array.isArray(responseData)
+          ? responseData
+          : Array.isArray(responseData?.conversations)
+            ? responseData.conversations
+            : [];
+
+        const paginationInfo = !Array.isArray(responseData) ? responseData?.pagination || responseData?.meta : undefined;
+
         const activeConversationsData = conversationsData.filter((conv: any) => !softDeletedConversationsRef.current.has(conv.id));
-        console.log('✅ Backend\'den konuşmalar yüklendi:', {
-          toplam: conversationsData.length,
-          aktif: activeConversationsData.length,
-          softDelete: conversationsData.length - activeConversationsData.length,
-        });
-        
-        // Her konuşma için ilk 10 mesajı yükle - BATCH'ler halinde (rate limit'i önlemek için)
-        // Önce conversation'ları oluştur (mesajlar olmadan)
-        const conversationsWithoutMessages: ChatConversation[] = activeConversationsData.map((conv: any) => ({
-          id: conv.id,
-          title: conv.title || 'Yeni Sohbet',
-          isResearchMode: conv.isResearchMode || false,
-          isSoftDeleted: false,
-          messages: [] as ChatMessage[], // Mesajlar sonra yüklenecek
-          totalMessageCount: 0,
-          createdAt: new Date(conv.createdAt),
-          updatedAt: new Date(conv.updatedAt)
-        }));
-        
-        // Conversation'ları önce set et (mesajlar olmadan)
-        setConversations(conversationsWithoutMessages);
-        
-        // Mesajları batch'ler halinde yükle (3'er 3'er - rate limit'i önlemek için)
-        const BATCH_SIZE = 3;
-        const conversationsWithMessages: ChatConversation[] = [];
-        
-        for (let i = 0; i < activeConversationsData.length; i += BATCH_SIZE) {
-          const batch = activeConversationsData.slice(i, i + BATCH_SIZE);
-          
-          // Batch'i paralel yükle
-          const batchResults = await Promise.all(
-            batch.map(async (conv: any) => {
-              try {
-                // Rate limit kontrolü - eğer loadingConversationsRef'te varsa atla
-                if (loadingConversationsRef.current.has(conv.id)) {
-                  console.log(`⚠️ Conversation ${conv.id} zaten yükleniyor, atlanıyor...`);
-                  return conversationsWithoutMessages.find(c => c.id === conv.id) || {
-                    id: conv.id,
-                    title: conv.title || 'Yeni Sohbet',
-                    isResearchMode: conv.isResearchMode || false,
-                    isSoftDeleted: false,
-                    messages: [] as ChatMessage[],
-                    totalMessageCount: 0,
-                    createdAt: new Date(conv.createdAt),
-                    updatedAt: new Date(conv.updatedAt)
-                  };
-                }
-                
-                loadingConversationsRef.current.add(conv.id);
-                
-                const messagesResponse = await backendApiService.getMessages(conv.id, 1, 10);
-                
-                // Rate limit hatası kontrolü
-                if (!messagesResponse.success && 
-                    (messagesResponse.error === 'Çok fazla istek' || 
-                     messagesResponse.message?.includes('Çok fazla istek') ||
-                     messagesResponse.message?.includes('rate limit'))) {
-                  console.warn(`⚠️ Rate limit hatası - conversation ${conv.id} mesajları yüklenemedi`);
-                  loadingConversationsRef.current.delete(conv.id);
-                  return conversationsWithoutMessages.find(c => c.id === conv.id) || {
-                    id: conv.id,
-                    title: conv.title || 'Yeni Sohbet',
-                    isResearchMode: conv.isResearchMode || false,
-                    isSoftDeleted: false,
-                    messages: [] as ChatMessage[],
-                    totalMessageCount: 0,
-                    createdAt: new Date(conv.createdAt),
-                    updatedAt: new Date(conv.updatedAt)
-                  };
-                }
-                
-                const allMessages: ChatMessage[] = messagesResponse.success && messagesResponse.data && 'messages' in messagesResponse.data
-                  ? (messagesResponse.data as any).messages.map((msg: any) => ({
-                      id: msg.id,
-                      text: msg.text || '',
-                      isUser: msg.isUser,
-                      timestamp: new Date(msg.timestamp || msg.createdAt),
-                      images: msg.attachments?.filter((a: any) => a.type === 'IMAGE' || a.type === 'image').map((a: any) => a.url),
-                      files: msg.attachments?.filter((a: any) => a.type === 'FILE' || a.type === 'file').map((a: any) => ({
-                        name: a.filename,
-                        uri: a.url,
-                        size: a.size,
-                        mimeType: a.mimeType
-                      }))
-                    }))
-                  : [];
-                
-                loadingConversationsRef.current.delete(conv.id);
-                
-                const messages = allMessages.slice(0, 10);
-                
-                let totalMessageCount = allMessages.length;
-                if (messagesResponse.data && 'pagination' in messagesResponse.data) {
-                  totalMessageCount = (messagesResponse.data as any).pagination?.total || allMessages.length;
-                } else if (allMessages.length === 10) {
-                  totalMessageCount = 10;
-                }
-                
-                let finalTitle = conv.title || '';
-                if ((conv.title === 'New Conversation' || conv.title === 'Yeni Sohbet' || !(conv.title || '').trim()) && messages.length > 0) {
-                  const firstUserMessage = messages.find((msg: ChatMessage) => msg.isUser && msg.text && msg.text.trim());
-                  if (firstUserMessage) {
-                    finalTitle = generateConversationTitle(firstUserMessage.text);
-                    backendApiService.updateConversation(conv.id, finalTitle).catch(error => {
-                      console.error('❌ Backend başlık güncelleme hatası:', error);
-                    });
-                  }
-                }
-                
-                return {
-                  id: conv.id,
-                  title: finalTitle,
-                  isResearchMode: conv.isResearchMode || false,
-                  isSoftDeleted: false,
-                  messages,
-                  totalMessageCount,
-                  createdAt: new Date(conv.createdAt),
-                  updatedAt: new Date(conv.updatedAt)
-                };
-              } catch (error) {
-                loadingConversationsRef.current.delete(conv.id);
-                console.error(`❌ Konuşma ${conv.id} mesajları yüklenirken hata:`, error);
-                return conversationsWithoutMessages.find(c => c.id === conv.id) || {
-                  id: conv.id,
-                  title: conv.title || 'Yeni Sohbet',
-                  isResearchMode: conv.isResearchMode || false,
-                  isSoftDeleted: false,
-                  messages: [] as ChatMessage[],
-                  totalMessageCount: 0,
-                  createdAt: new Date(conv.createdAt),
-                  updatedAt: new Date(conv.updatedAt)
-                };
-              }
-            })
-          );
-          
-          conversationsWithMessages.push(...batchResults);
-          
-          // Batch'ler arasında kısa bir delay ekle (rate limit'i önlemek için)
-          if (i + BATCH_SIZE < activeConversationsData.length) {
-            await new Promise(resolve => setTimeout(resolve, 500)); // 500ms bekle
-          }
+
+        if (activeConversationsData.length === 0) {
+          conversationsPaginationRef.current = {
+            page: pageToFetch,
+            limit,
+            hasMore: false,
+          };
+          setHasMoreConversations(false);
+          console.log('📭 Yüklenecek aktif konuşma bulunamadı');
+          return 0;
         }
-        
-        const allConversations: ChatConversation[] = conversationsWithMessages;
-        
-        // Conversation'ları updatedAt'e göre sırala (en yeni en üstte)
-        allConversations.sort((a, b) => {
-          const timeA = a.updatedAt instanceof Date ? a.updatedAt.getTime() : new Date(a.updatedAt).getTime();
-          const timeB = b.updatedAt instanceof Date ? b.updatedAt.getTime() : new Date(b.updatedAt).getTime();
-          return timeB - timeA; // En yeni en üstte
+
+        const mappedConversations: ChatConversation[] = activeConversationsData.map((conv: any) => {
+          const totalMessages =
+            conv.totalMessageCount ??
+            conv.totalMessages ??
+            conv.messageCount ??
+            conv.messagesCount ??
+            conv.total ??
+            0;
+
+          return {
+            id: conv.id,
+            title: conv.title || 'Yeni Sohbet',
+            isResearchMode: conv.isResearchMode || false,
+            isSoftDeleted: false,
+            messages: [],
+            totalMessageCount: typeof totalMessages === 'number' ? totalMessages : 0,
+            createdAt: new Date(conv.createdAt),
+            updatedAt: new Date(conv.updatedAt),
+          };
         });
-        
-        // Tüm conversation'ları göster (mesajlar lazy load ile yüklenecek)
-        // Mesajsız conversation'lar da gösterilmeli çünkü mesajlar conversation seçildiğinde yüklenecek
-        console.log(`📊 Toplam konuşma: ${allConversations.length}`);
-        
-        setConversations(allConversations);
-        console.log('✅ Konuşmalar başarıyla yüklendi');
-      } else {
-        console.log('📭 Backend\'de konuşma bulunamadı');
+
+        setConversations(prev => {
+          const shouldReplace = options?.reset || prev.length === 0;
+
+          if (shouldReplace) {
+            return mappedConversations
+              .slice()
+              .sort((a, b) => {
+                const timeA = a.updatedAt instanceof Date ? a.updatedAt.getTime() : new Date(a.updatedAt).getTime();
+                const timeB = b.updatedAt instanceof Date ? b.updatedAt.getTime() : new Date(b.updatedAt).getTime();
+                return timeB - timeA;
+              });
+          }
+
+          const mergedMap = new Map<string, ChatConversation>();
+          prev.forEach(conv => mergedMap.set(conv.id, conv));
+
+          mappedConversations.forEach(conv => {
+            const existing = mergedMap.get(conv.id);
+            if (existing) {
+              mergedMap.set(conv.id, {
+                ...existing,
+                title: conv.title || existing.title,
+                isResearchMode: conv.isResearchMode ?? existing.isResearchMode,
+                updatedAt: conv.updatedAt,
+                totalMessageCount: conv.totalMessageCount ?? existing.totalMessageCount,
+              });
+            } else {
+              mergedMap.set(conv.id, conv);
+            }
+          });
+
+          return Array.from(mergedMap.values()).sort((a, b) => {
+            const timeA = a.updatedAt instanceof Date ? a.updatedAt.getTime() : new Date(a.updatedAt).getTime();
+            const timeB = b.updatedAt instanceof Date ? b.updatedAt.getTime() : new Date(b.updatedAt).getTime();
+            return timeB - timeA;
+          });
+        });
+
+        const pagination = paginationInfo || {};
+        const currentPage = pagination.currentPage ?? pagination.page ?? pageToFetch;
+        const totalPages = pagination.totalPages ?? pagination.lastPage ?? undefined;
+        const totalItems = pagination.total ?? pagination.totalItems ?? undefined;
+        const perPage = pagination.perPage ?? pagination.limit ?? limit;
+
+        let hasMore = true;
+
+        if (typeof totalPages === 'number') {
+          hasMore = currentPage < totalPages;
+        } else if (typeof totalItems === 'number') {
+          hasMore = currentPage * perPage < totalItems;
+        } else {
+          hasMore = mappedConversations.length === limit;
+        }
+
+        conversationsPaginationRef.current = {
+          page: hasMore ? currentPage + 1 : currentPage,
+          limit,
+          hasMore,
+        };
+        setHasMoreConversations(hasMore);
+
+        console.log('✅ Konuşmalar yüklendi:', {
+          page: currentPage,
+          fetched: mappedConversations.length,
+          hasMore,
+        });
+
+        return mappedConversations.length;
       }
+
+      console.error('❌ Backend\'den konuşmalar yüklenemedi:', response.error);
+      return 0;
     } catch (error) {
       console.error('❌ Konuşmalar yüklenirken hata:', error);
+      return 0;
+    } finally {
+      isConversationsLoadingRef.current = false;
+      setIsLoadingConversations(false);
     }
   }, [backendApiService]);
 
@@ -1084,6 +1101,9 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     updateResearchMode,
     loadConversations,
     updateConversationMessages,
+    hasMoreConversations,
+    isLoadingConversations,
+    loadingMessagesConversationIds,
   };
 
   return (

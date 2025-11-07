@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Keyboard, Platform, Dimensions, TextInput } from 'react-native';
+import { Keyboard, Platform, Dimensions, TextInput, LayoutAnimation, UIManager } from 'react-native';
 
 const { height, width } = Dimensions.get('window');
 
@@ -22,11 +22,36 @@ export const useKeyboardHandling = () => {
   const isIOS = Platform.OS === 'ios';
 
   useEffect(() => {
+    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
+
+  const animateLayout = useCallback((duration?: number) => {
+    const animationDuration = duration ?? 250;
+    LayoutAnimation.configureNext({
+      duration: animationDuration,
+      update: {
+        type: LayoutAnimation.Types.easeInEaseOut,
+      },
+      create: {
+        type: LayoutAnimation.Types.easeInEaseOut,
+        property: LayoutAnimation.Properties.opacity,
+      },
+      delete: {
+        type: LayoutAnimation.Types.easeInEaseOut,
+        property: LayoutAnimation.Properties.opacity,
+      },
+    });
+  }, []);
+
+  useEffect(() => {
     const keyboardWillShowListener = Keyboard.addListener(
       'keyboardWillShow',
       (e) => {
         setKeyboardAnimationDuration(e.duration || 250);
         setKeyboardAnimationEasing(e.easing || 'easeInEaseOut');
+        animateLayout(e.duration);
       }
     );
 
@@ -45,6 +70,7 @@ export const useKeyboardHandling = () => {
         }
         
         keyboardShowTimeoutRef.current = setTimeout(() => {
+          animateLayout(e.duration);
           setKeyboardHeight(e.endCoordinates.height);
           setIsKeyboardVisible(true);
         }, 50);
@@ -56,6 +82,7 @@ export const useKeyboardHandling = () => {
       (e) => {
         setKeyboardAnimationDuration(e.duration || 250);
         setKeyboardAnimationEasing(e.easing || 'easeInEaseOut');
+        animateLayout(e.duration);
       }
     );
 
@@ -74,6 +101,7 @@ export const useKeyboardHandling = () => {
         }
         
         keyboardHideTimeoutRef.current = setTimeout(() => {
+          animateLayout();
           setKeyboardHeight(0);
           setIsKeyboardVisible(false);
           // Don't automatically set input focus to false - let user control it
@@ -94,7 +122,7 @@ export const useKeyboardHandling = () => {
         clearTimeout(keyboardHideTimeoutRef.current);
       }
     };
-  }, []);
+  }, [animateLayout]);
 
   // Enhanced responsive padding calculations
   const getResponsivePaddingBottom = () => {

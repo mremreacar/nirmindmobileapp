@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   Dimensions,
   Image,
   ActivityIndicator,
+  Animated,
 } from 'react-native';
 import { useFonts } from 'expo-font';
 import { useAuth } from '../contexts/AuthContext';
@@ -63,7 +64,11 @@ const getResponsiveAssistantFontSize = () => {
   return Math.max(baseFontSize, 16);
 };
 
-const HeroSection: React.FC = () => {
+interface HeroSectionProps {
+  animationProgress?: Animated.Value;
+}
+
+const HeroSection: React.FC<HeroSectionProps> = ({ animationProgress }) => {
   const { user } = useAuth();
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
@@ -90,6 +95,28 @@ const HeroSection: React.FC = () => {
     'Poppins-Regular': require('@assets/fonts/Poppins-Regular .ttf'),
     'Poppins-Medium': require('@assets/fonts/Poppins-Medium.ttf'),
   });
+
+  const heroAnimatedStyle = useMemo(() => {
+    if (!animationProgress) {
+      return null;
+    }
+    return {
+      opacity: animationProgress.interpolate({
+        inputRange: [0, 0.35, 1],
+        outputRange: [0, 0.4, 1],
+        extrapolate: 'clamp',
+      }),
+      transform: [
+        {
+          translateY: animationProgress.interpolate({
+            inputRange: [0, 1],
+            outputRange: [24, 0],
+            extrapolate: 'clamp',
+          }),
+        },
+      ],
+    };
+  }, [animationProgress]);
 
   // Lazy load image after component mounts
   useEffect(() => {
@@ -133,7 +160,7 @@ const HeroSection: React.FC = () => {
   }
 
   return (
-    <View style={styles.heroSection}>
+    <Animated.View style={[styles.heroSection, heroAnimatedStyle || undefined]}>
       <View style={styles.gifContainer}>
         {!imageLoaded && !imageError && shouldLoadImage && (
           <ActivityIndicator 
@@ -173,9 +200,9 @@ const HeroSection: React.FC = () => {
         Merhaba{displayName ? `, ${displayName}` : ''}
       </Text>
       <Text allowFontScaling={false} style={styles.assistantText}>
-        Ben dijital asistanınız NirMind,{'\n'}size nasıl yardımcı olabilirim?
+        Ben dijital asistanınız NirMind,{"\n"}size nasıl yardımcı olabilirim?
       </Text>
-    </View>
+    </Animated.View>
   );
 };
 

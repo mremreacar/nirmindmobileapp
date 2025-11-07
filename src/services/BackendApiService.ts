@@ -466,8 +466,17 @@ class BackendApiService {
   // ==================== Nirmind Routes ====================
 
   // Conversation methods
-  async getConversations(): Promise<ApiResponse<ConversationData[]>> {
-    return this.makeRequest('/nirmind/conversations');
+  async getConversations(params?: { page?: number; limit?: number }): Promise<ApiResponse<ConversationData[]>> {
+    const queryParams = new URLSearchParams();
+    if (params?.page) {
+      queryParams.append('page', params.page.toString());
+    }
+    if (params?.limit) {
+      queryParams.append('limit', params.limit.toString());
+    }
+
+    const queryString = queryParams.toString();
+    return this.makeRequest(`/nirmind/conversations${queryString ? `?${queryString}` : ''}`);
   }
 
   async createConversation(title: string, initialMessage?: string): Promise<ApiResponse<ConversationData>> {

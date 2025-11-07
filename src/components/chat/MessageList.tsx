@@ -16,6 +16,7 @@ interface MessageListProps {
   keyboardHeight?: number;
   onScrollToEnd?: () => void;
   conversationId?: string;
+  isDataLoading?: boolean;
 }
 
 const MessageList: React.FC<MessageListProps> = ({ 
@@ -25,10 +26,47 @@ const MessageList: React.FC<MessageListProps> = ({
   isKeyboardVisible = false,
   keyboardHeight = 0,
   onScrollToEnd,
-  conversationId
+  conversationId,
+  isDataLoading = false,
 }) => {
   const { deleteMessage } = useChat();
   const [previewFile, setPreviewFile] = useState<{ uri: string; name: string; mimeType?: string } | null>(null);
+
+  const shouldShowSkeleton = isDataLoading && messages.length === 0;
+
+  const renderSkeletonMessages = () => {
+    return Array.from({ length: 4 }).map((_, index) => {
+      const isUserSkeleton = index % 2 === 0;
+      return (
+        <View
+          key={`skeleton-${index}`}
+          style={[
+            styles.skeletonMessageContainer,
+            isUserSkeleton ? styles.userMessage : styles.aiMessage,
+          ]}
+        >
+          <View
+            style={[
+              styles.messageWrapper,
+              isUserSkeleton ? styles.userMessageWrapper : styles.aiMessageWrapper,
+            ]}
+          >
+            <View
+              style={[
+                styles.messageBubble,
+                isUserSkeleton ? styles.userBubble : styles.aiBubble,
+                styles.skeletonBubble,
+                isUserSkeleton ? styles.skeletonUserBubble : styles.skeletonAiBubble,
+              ]}
+            >
+              <View style={styles.skeletonLinePrimary} />
+              <View style={styles.skeletonLineSecondary} />
+            </View>
+          </View>
+        </View>
+      );
+    });
+  };
 
   const handleDeleteMessage = (message: ChatMessage) => {
     if (!conversationId) {
@@ -174,122 +212,126 @@ const MessageList: React.FC<MessageListProps> = ({
         }, 100);
       }}
     >
-      {messages.map((message) => (
-        <TouchableOpacity
-          key={message.id}
-          onLongPress={() => handleDeleteMessage(message)}
-          activeOpacity={0.7}
-        >
-          <View
-            style={[
-              styles.messageContainer,
-              message.isUser ? styles.userMessage : styles.aiMessage
-            ]}
+      {shouldShowSkeleton ? (
+        renderSkeletonMessages()
+      ) : (
+        messages.map((message) => (
+          <TouchableOpacity
+            key={message.id}
+            onLongPress={() => handleDeleteMessage(message)}
+            activeOpacity={0.7}
           >
-          <View style={[
-            styles.messageWrapper,
-            message.isUser ? styles.userMessageWrapper : styles.aiMessageWrapper
-          ]}>
+            <View
+              style={[
+                styles.messageContainer,
+                message.isUser ? styles.userMessage : styles.aiMessage
+              ]}
+            >
             <View style={[
-              styles.messageBubble,
-              message.isUser ? styles.userBubble : styles.aiBubble
+              styles.messageWrapper,
+              message.isUser ? styles.userMessageWrapper : styles.aiMessageWrapper
             ]}>
-              {/* Resimler varsa göster */}
-              {message.images && message.images.length > 0 && (
-                <View style={styles.imagesContainer}>
-                  {message.images.map((imageUri, index) => (
-                    <Image
-                      key={`${message.id}-image-${index}`}
-                      source={{ uri: imageUri }}
-                      style={styles.messageImage}
-                      resizeMode="cover"
-                      onError={(error) => {
-                        console.error('❌ Image yüklenemedi:', imageUri, error.nativeEvent.error);
-                      }}
-                    />
-                  ))}
-                </View>
-              )}
-              
-              {/* Dosyalar varsa göster */}
-              {message.files && message.files.length > 0 && (
-                <View style={styles.filesContainer}>
-                  {message.files.map((file, index) => {
-                    const fileExtension = file.name.toLowerCase().split('.').pop() || '';
-                    const fileIcon = getFileTypeIcon(file.mimeType || null, file.name);
-                    const fileSize = file.size ? formatFileSize(file.size) : null;
-                    const fileTypeColor = getFileTypeColor(fileExtension, file.mimeType);
-                    
-                    return (
-                    <TouchableOpacity 
-                      key={index} 
-                        style={[styles.fileItem, { borderLeftColor: fileTypeColor }]}
-                      onPress={() => handleFilePress(file)}
-                      activeOpacity={0.7}
-                    >
-                        <View style={[styles.fileIconContainer, { backgroundColor: fileTypeColor + '20' }]}>
-                          <Text allowFontScaling={false} style={styles.fileIcon}>{fileIcon}</Text>
-                        </View>
-                        <View style={styles.fileInfoContainer}>
-                          <Text allowFontScaling={false} style={styles.fileName} numberOfLines={1}>
-                            {file.name}
-                          </Text>
-                          {fileSize && (
-                            <Text allowFontScaling={false} style={styles.fileSize}>
-                              {fileSize} • {fileExtension.toUpperCase()}
+              <View style={[
+                styles.messageBubble,
+                message.isUser ? styles.userBubble : styles.aiBubble
+              ]}>
+                {/* Resimler varsa göster */}
+                {message.images && message.images.length > 0 && (
+                  <View style={styles.imagesContainer}>
+                    {message.images.map((imageUri, index) => (
+                      <Image
+                        key={`${message.id}-image-${index}`}
+                        source={{ uri: imageUri }}
+                        style={styles.messageImage}
+                        resizeMode="cover"
+                        onError={(error) => {
+                          console.error('❌ Image yüklenemedi:', imageUri, error.nativeEvent.error);
+                        }}
+                      />
+                    ))}
+                  </View>
+                )}
+                
+                {/* Dosyalar varsa göster */}
+                {message.files && message.files.length > 0 && (
+                  <View style={styles.filesContainer}>
+                    {message.files.map((file, index) => {
+                      const fileExtension = file.name.toLowerCase().split('.').pop() || '';
+                      const fileIcon = getFileTypeIcon(file.mimeType || null, file.name);
+                      const fileSize = file.size ? formatFileSize(file.size) : null;
+                      const fileTypeColor = getFileTypeColor(fileExtension, file.mimeType);
+                      
+                      return (
+                      <TouchableOpacity 
+                        key={index} 
+                          style={[styles.fileItem, { borderLeftColor: fileTypeColor }]}
+                        onPress={() => handleFilePress(file)}
+                        activeOpacity={0.7}
+                      >
+                          <View style={[styles.fileIconContainer, { backgroundColor: fileTypeColor + '20' }]}>
+                            <Text allowFontScaling={false} style={styles.fileIcon}>{fileIcon}</Text>
+                          </View>
+                          <View style={styles.fileInfoContainer}>
+                            <Text allowFontScaling={false} style={styles.fileName} numberOfLines={1}>
+                              {file.name}
                             </Text>
-                          )}
-                        </View>
-                        <View style={styles.fileArrowContainer}>
-                          <Text allowFontScaling={false} style={styles.fileArrow}>›</Text>
-                        </View>
-                    </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              )}
-              
-              {/* Mesaj metni */}
-              {message.text && (
-                message.isUser ? (
-                  <Text allowFontScaling={false} style={[
-                    styles.messageText,
-                    styles.userMessageText
-                  ]}>
-                    {message.text}
-                  </Text>
-                ) : (
+                            {fileSize && (
+                              <Text allowFontScaling={false} style={styles.fileSize}>
+                                {fileSize} • {fileExtension.toUpperCase()}
+                              </Text>
+                            )}
+                          </View>
+                          <View style={styles.fileArrowContainer}>
+                            <Text allowFontScaling={false} style={styles.fileArrow}>›</Text>
+                          </View>
+                      </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+                
+                {/* Mesaj metni */}
+                {message.text && (
+                  message.isUser ? (
+                    <Text allowFontScaling={false} style={[
+                      styles.messageText,
+                      styles.userMessageText
+                    ]}>
+                      {message.text}
+                    </Text>
+                  ) : (
+                    <Markdown
+                      style={markdownStyles}
+                      allowFontScaling={false}
+                    >
+                      {message.text + (message.isStreaming ? ' ▊' : '')}
+                    </Markdown>
+                  )
+                )}
+                {/* Streaming cursor - sadece text yoksa ve streaming ise */}
+                {!message.text && message.isStreaming && (
                   <Markdown
                     style={markdownStyles}
                     allowFontScaling={false}
                   >
-                    {message.text + (message.isStreaming ? ' ▊' : '')}
+                    ▊
                   </Markdown>
-                )
-              )}
-              {/* Streaming cursor - sadece text yoksa ve streaming ise */}
-              {!message.text && message.isStreaming && (
-                <Markdown
-                  style={markdownStyles}
-                  allowFontScaling={false}
-                >
-                  ▊
-                </Markdown>
-              )}
+                )}
+              </View>
+              <Text allowFontScaling={false} style={[
+                styles.messageTime,
+                message.isUser ? styles.userMessageTime : styles.aiMessageTime
+              ]}>
+                {new Date(message.timestamp).toLocaleTimeString('tr-TR', {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+              </Text>
             </View>
-            <Text allowFontScaling={false} style={[
-              styles.messageTime,
-              message.isUser ? styles.userMessageTime : styles.aiMessageTime
-            ]}>
-              {new Date(message.timestamp).toLocaleTimeString('tr-TR', {
-                hour: '2-digit',
-                minute: '2-digit'
-              })}
-            </Text>
-          </View>
-          </View>
-        </TouchableOpacity>
-      ))}
+            </View>
+          </TouchableOpacity>
+        ))
+      )}
       
       {/* Loading indicator - sadece streaming mesajı yoksa göster */}
       {isLoading && !messages.some(msg => !msg.isUser && msg.isStreaming) && (
@@ -385,6 +427,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     width: '100%',
   },
+  skeletonMessageContainer: {
+    marginVertical: 6,
+    flexDirection: 'row',
+    width: '100%',
+  },
   userMessage: {
     justifyContent: 'flex-end',
   },
@@ -420,6 +467,28 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     borderBottomRightRadius: 20,
+  },
+  skeletonBubble: {
+    borderWidth: 0,
+  },
+  skeletonUserBubble: {
+    backgroundColor: 'rgba(126, 122, 233, 0.22)',
+  },
+  skeletonAiBubble: {
+    backgroundColor: 'rgba(255, 255, 255, 0.10)',
+  },
+  skeletonLinePrimary: {
+    height: 14,
+    width: '65%',
+    backgroundColor: 'rgba(255, 255, 255, 0.26)',
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  skeletonLineSecondary: {
+    height: 12,
+    width: '45%',
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    borderRadius: 8,
   },
   messageText: {
     fontFamily: 'Poppins-Regular',

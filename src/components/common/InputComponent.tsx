@@ -197,11 +197,16 @@ const InputComponent: React.FC<InputComponentProps> = ({
   const [isScrollable, setIsScrollable] = useState(false);
   const [characterCount, setCharacterCount] = useState(0);
   const [showCharacterCount, setShowCharacterCount] = useState(false);
+  const scrollViewRef = useRef<ScrollView | null>(null);
+  const [contentHeight, setContentHeight] = useState(0);
+  const [visibleHeight, setVisibleHeight] = useState(0);
+  const [canScrollUp, setCanScrollUp] = useState(false);
+  const [canScrollDown, setCanScrollDown] = useState(false);
   
   // Constants for dynamic sizing - Daha iyi genişleme
   const MIN_INPUT_HEIGHT = getResponsiveInputMinHeight() + 10; // 10px daha yüksek (daha dengeli)
-  const MAX_INPUT_HEIGHT = isSmallScreen ? 120 : 140; // Maksimum yükseklik artırıldı (daha iyi genişleme için)
-  const SCROLL_THRESHOLD = MAX_INPUT_HEIGHT * 0.85; // Scroll daha erken başlasın (%85)
+  const MAX_INPUT_HEIGHT = isTablet ? 240 : (isLargeScreen ? 200 : 180);
+  const SCROLL_THRESHOLD = MAX_INPUT_HEIGHT - 24;
   const CHARACTER_LIMIT_WARNING = Math.floor(maxLength * 0.8); // 80% of max length
   const CHARACTER_LIMIT_DANGER = Math.floor(maxLength * 0.95); // 95% of max length
 
@@ -212,40 +217,25 @@ const InputComponent: React.FC<InputComponentProps> = ({
     setShowCharacterCount(count > CHARACTER_LIMIT_WARNING);
   }, [inputText, CHARACTER_LIMIT_WARNING]);
 
-  // Dynamic height calculation - Daha iyi genişleme
-  const calculateInputHeight = useCallback((text: string) => {
-    if (!text.trim()) {
-      return MIN_INPUT_HEIGHT;
-    }
-    
-    // Estimate lines based on text length and average character width
-    const avgCharsPerLine = isSmallScreen ? 25 : 30; // Daha fazla karakter per line (daha iyi genişleme)
-    const lines = Math.ceil(text.length / avgCharsPerLine);
-    const lineHeight = isSmallScreen ? 22 : 24; // Line height artırıldı
-    const padding = getResponsiveInputPaddingVertical() * 2;
-    
-    const calculatedHeight = Math.max(MIN_INPUT_HEIGHT, (lines * lineHeight) + padding);
-    const finalHeight = Math.min(calculatedHeight, MAX_INPUT_HEIGHT);
-    
-    return finalHeight;
-  }, [MIN_INPUT_HEIGHT, MAX_INPUT_HEIGHT, isSmallScreen]);
-
-  // Height animation kaldırıldı - direkt state kullanılıyor
-  // const animateHeightChange = useCallback((newHeight: number) => {
-  //   // Animation kaldırıldı, direkt state kullanılıyor
-  // }, []);
-
-
-  // Update input height when text changes
   useEffect(() => {
-    const newHeight = calculateInputHeight(inputText);
-    // Scroll daha erken devreye girsin - MAX_INPUT_HEIGHT'ın %85'ine ulaştığında
-    const shouldBeScrollable = newHeight >= SCROLL_THRESHOLD;
-    
-    setInputHeight(newHeight);
-    setIsScrollable(shouldBeScrollable);
-    // animateHeightChange(newHeight); // Animation kaldırıldı
-  }, [inputText, calculateInputHeight, SCROLL_THRESHOLD]);
+    if (!inputText.trim()) {
+      setInputHeight(MIN_INPUT_HEIGHT);
+      setIsScrollable(false);
+      setCanScrollUp(false);
+      setCanScrollDown(false);
+    }
+  }, [inputText, MIN_INPUT_HEIGHT]);
+
+  useEffect(() => {
+    if (!isScrollable) {
+      setCanScrollUp(false);
+      setCanScrollDown(false);
+      return;
+    }
+
+    const hasScrollableContent = contentHeight > visibleHeight + 6;
+    setCanScrollDown(hasScrollableContent);
+  }, [contentHeight, visibleHeight, isScrollable]);
 
   // Dikte animasyonu - Native driver kullan
   useEffect(() => {
@@ -348,14 +338,20 @@ const InputComponent: React.FC<InputComponentProps> = ({
 
   const handleContentSizeChange = (event: any) => {
     const { height } = event.nativeEvent.contentSize;
-    const newHeight = Math.max(MIN_INPUT_HEIGHT, Math.min(height, MAX_INPUT_HEIGHT));
-    setInputHeight(newHeight);
-    setIsScrollable(height > MAX_INPUT_HEIGHT);
+    const boundedHeight = Math.max(MIN_INPUT_HEIGHT, Math.min(Math.ceil(height), MAX_INPUT_HEIGHT));
+    setInputHeight(boundedHeight);
+    setIsScrollable(height >= SCROLL_THRESHOLD);
+    setContentHeight(height);
     onContentSizeChange?.(event);
   };
 
   // Enhanced scroll handling - Son yazıları göstermek için
   const handleScroll = (event: any) => {
+    const offsetY = event.nativeEvent.contentOffset?.y || 0;
+    const layoutHeight = event.nativeEvent.layoutMeasurement?.height || 0;
+    const totalHeight = event.nativeEvent.contentSize?.height || 0;
+    setCanScrollUp(offsetY > 4);
+    setCanScrollDown(offsetY + layoutHeight < totalHeight - 6);
     onScroll?.(event);
   };
 
@@ -393,9 +389,12 @@ const InputComponent: React.FC<InputComponentProps> = ({
 
   // Smart scroll to bottom - Geliştirilmiş versiyon
   const scrollToBottom = useCallback(() => {
-    if (textInputRef.current && isScrollable) {
-      // TextInput'ta scrollToEnd yok, bunun yerine selection ile sona git
-      // Bu daha güvenilir bir yöntem
+    if (scrollViewRef.current && isScrollable) {
+      scrollViewRef.current.scrollToEnd({ animated: true });
+      return;
+    }
+
+    if (textInputRef.current) {
       try {
         textInputRef.current.setNativeProps({
           selection: { start: inputText.length, end: inputText.length }
@@ -404,7 +403,7 @@ const InputComponent: React.FC<InputComponentProps> = ({
         console.log('Scroll to bottom error:', error);
       }
     }
-  }, [isScrollable, inputText.length]);
+  }, [inputText.length, isScrollable]);
 
   // Auto scroll to bottom when typing - Geliştirilmiş versiyon
   useEffect(() => {
@@ -558,7 +557,12 @@ const InputComponent: React.FC<InputComponentProps> = ({
           )}
 
           {/* Alt Bölüm - Mesaj Yazma Alanı */}
-          <View style={styles.messageSection}>
+          <View
+            style={styles.messageSection}
+            onLayout={(event) => {
+              setVisibleHeight(event.nativeEvent.layout.height);
+            }}
+          >
             {/* Text Input, Processing, or Dictating */}
             {isProcessing ? (
               <Animated.View style={[styles.processingContainer, { transform: [{ scale: pulseAnim }] }]}>
@@ -595,50 +599,78 @@ const InputComponent: React.FC<InputComponentProps> = ({
                 </View>
               </Animated.View>
             ) : (
-              <TextInput
-                ref={textInputRef}
-                style={[
-                  styles.textInput, 
-                  textInputStyle,
-                  {
-                    height: inputHeight,
-                    maxHeight: MAX_INPUT_HEIGHT,
-                  },
-                  // Dikte sırasında stil güncellemeleri
-                  isDictating && {
-                    color: '#7E7AE9',
-                    fontWeight: '600',
-                  },
-                  // İşlem sırasında stil güncellemeleri
-                  isProcessing && {
-                    opacity: 0.6,
-                  },
-                ]}
-                placeholder={placeholder}
-                placeholderTextColor="#9CA3AF"
-                value={inputText}
-                onChangeText={handleTextChange}
-                onContentSizeChange={handleContentSizeChange}
-                onScroll={handleScroll}
-                onKeyPress={handleKeyPress}
-                onFocus={handleFocus}
-                onBlur={handleBlur}
-                editable={editable && !isDictating}
-                multiline={true}
-                scrollEnabled={isScrollable}
-                maxLength={maxLength}
-                returnKeyType="default"
-                autoCorrect={autoCorrect}
-                autoCapitalize={autoCapitalize}
-                onSubmitEditing={handleSubmitEditing}
-                underlineColorAndroid="transparent"
-                selectionColor="#7E7AE9"
-                cursorColor="#7E7AE9"
-                textAlignVertical="top"
-                keyboardType="default"
-                blurOnSubmit={false}
-                enablesReturnKeyAutomatically={false}
-              />
+              <>
+                <ScrollView
+                  ref={scrollViewRef}
+                  style={styles.textScrollView}
+                  contentContainerStyle={styles.textScrollViewContent}
+                  scrollEnabled={isScrollable}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  nestedScrollEnabled={true}
+                  onScroll={handleScroll}
+                  scrollEventThrottle={16}
+                >
+                  <TextInput
+                    ref={textInputRef}
+                    style={[
+                      styles.textInput, 
+                      textInputStyle,
+                      {
+                        minHeight: MIN_INPUT_HEIGHT,
+                        paddingRight: isScrollable ? 12 : 8,
+                        opacity: isProcessing ? 0.6 : 1,
+                      },
+                      isDictating && {
+                        color: '#7E7AE9',
+                        fontWeight: '600',
+                      },
+                    ]}
+                    placeholder={placeholder}
+                    placeholderTextColor="#9CA3AF"
+                    value={inputText}
+                    onChangeText={handleTextChange}
+                    onContentSizeChange={handleContentSizeChange}
+                    onKeyPress={handleKeyPress}
+                    onFocus={handleFocus}
+                    onBlur={handleBlur}
+                    editable={editable && !isDictating}
+                    multiline={true}
+                    maxLength={maxLength}
+                    returnKeyType="default"
+                    autoCorrect={autoCorrect}
+                    autoCapitalize={autoCapitalize}
+                    onSubmitEditing={handleSubmitEditing}
+                    underlineColorAndroid="transparent"
+                    selectionColor="#7E7AE9"
+                    cursorColor="#7E7AE9"
+                    textAlignVertical="top"
+                    keyboardType="default"
+                    blurOnSubmit={false}
+                    enablesReturnKeyAutomatically={false}
+                  />
+                </ScrollView>
+
+                {isScrollable && canScrollUp && (
+                  <LinearGradient
+                    pointerEvents="none"
+                    colors={["rgba(2, 2, 10, 0.85)", "rgba(2, 2, 10, 0)"]}
+                    style={[styles.scrollFade, styles.scrollFadeTop]}
+                  >
+                    <Text style={styles.scrollHintArrow}>⌃</Text>
+                  </LinearGradient>
+                )}
+
+                {isScrollable && canScrollDown && (
+                  <LinearGradient
+                    pointerEvents="none"
+                    colors={["rgba(2, 2, 10, 0)", "rgba(2, 2, 10, 0.85)"]}
+                    style={[styles.scrollFade, styles.scrollFadeBottom]}
+                  >
+                    <Text style={styles.scrollHintArrow}>⌄</Text>
+                  </LinearGradient>
+                )}
+              </>
             )}
           </View>
         </View>
@@ -1304,8 +1336,36 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 40,
     alignSelf: 'stretch', // Tam genişlik
+    position: 'relative',
+    justifyContent: 'center',
     // paddingTop ve marginTop kaldırıldı - attachment'lardan bağımsız
     // Çizgi kaldırıldı - ortadan bölen çizgi yok
+  },
+  textScrollView: {
+    maxHeight: 320,
+  },
+  textScrollViewContent: {
+    paddingRight: 4,
+    paddingVertical: 2,
+  },
+  scrollFade: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scrollFadeTop: {
+    top: 0,
+  },
+  scrollFadeBottom: {
+    bottom: 0,
+  },
+  scrollHintArrow: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    opacity: 0.6,
   },
   
   // Character Count Styles

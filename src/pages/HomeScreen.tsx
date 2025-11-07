@@ -14,6 +14,7 @@ import {
   TouchableOpacity,
   TextInput,
   Animated,
+  Easing,
   Modal,
   Alert,
   Platform,
@@ -47,6 +48,8 @@ import {
 } from "../constants";
 
 const { width, height } = Dimensions.get("window");
+
+const AnimatedKeyboardAvoidingView = Animated.createAnimatedComponent(KeyboardAvoidingView);
 
 interface HomeScreenProps {
   onOpenChatHistory: () => void;
@@ -100,6 +103,71 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   const translateY = useRef(new Animated.Value(height)).current;
   const translateXChat = useRef(new Animated.Value(-width)).current;
   const textInputRef = useRef<TextInput>(null);
+  const chatBackdropOpacity = useRef(new Animated.Value(0)).current;
+  const homeScale = useRef(new Animated.Value(1)).current;
+  const heroReveal = useRef(new Animated.Value(1)).current;
+  const homeDimOpacity = useMemo(
+    () =>
+      homeScale.interpolate({
+        inputRange: [0.94, 1],
+        outputRange: [0.82, 1],
+        extrapolate: "clamp",
+      }),
+    [homeScale]
+  );
+
+  const runChatEntrance = useCallback(() => {
+    Animated.parallel([
+      Animated.timing(translateXChat, {
+        toValue: 0,
+        duration: 240,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(chatBackdropOpacity, {
+        toValue: 1,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.spring(homeScale, {
+        toValue: 0.97,
+        speed: 16,
+        bounciness: 4,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [chatBackdropOpacity, homeScale, translateXChat]);
+
+  const runChatExit = useCallback(
+    (onComplete?: () => void) => {
+      Animated.parallel([
+        Animated.timing(translateXChat, {
+          toValue: -width,
+          duration: 180,
+          easing: Easing.in(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(chatBackdropOpacity, {
+          toValue: 0,
+          duration: 200,
+          easing: Easing.in(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.spring(homeScale, {
+          toValue: 1,
+          speed: 18,
+          bounciness: 0,
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        if (finished) {
+          onComplete?.();
+        }
+      });
+    },
+    [chatBackdropOpacity, homeScale, translateXChat]
+  );
 
   // Dikte feature hooks
   const { dictationState, toggleDictation } = useDictation({
@@ -238,73 +306,50 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     
     // Plus butonuna basıldığını işaretle
     setPlusButtonPressed(true);
+    // Home input'undaki odağı kaldır ve klavyeyi kapat
+    textInputRef.current?.blur();
+    setIsInputFocused(false);
+    Keyboard.dismiss();
     
     // Boş bir conversation oluştur
     const conversationId = await createNewConversation("Yeni Sohbet", "");
     setCreatedConversationId(conversationId);
     setShowChatScreen(true);
-
-    // Chat ekranını aç - smooth geçiş (senior seviyede)
-    Animated.timing(translateXChat, {
-      toValue: 0,
-      duration: 200,
-      useNativeDriver: true,
-    }).start();
-
-    // Input'u anında focus'la
-    if (textInputRef.current) {
-      textInputRef.current.focus();
-    }
-  }, [createNewConversation, translateXChat, textInputRef]);
+    runChatEntrance();
+  }, [createNewConversation, runChatEntrance, textInputRef]);
 
   const openChatScreen = useCallback(async () => {
     // Header'daki chat butonuna basıldığında yeni mesaj sayfası aç
     console.log("💬 Header chat butonu tıklandı - yeni mesaj açılıyor");
 
+    // Home input'undaki odağı kaldır ve klavyeyi kapat
+    textInputRef.current?.blur();
+    setIsInputFocused(false);
+    Keyboard.dismiss();
+
     // Boş bir conversation oluştur
     const conversationId = await createNewConversation("Yeni Sohbet", "");
     setCreatedConversationId(conversationId);
     setShowChatScreen(true);
-
-    // Chat ekranını aç - smooth geçiş (senior seviyede)
-    Animated.timing(translateXChat, {
-      toValue: 0,
-      duration: 200,
-      useNativeDriver: true,
-    }).start();
-
-    // Input'u anında focus'la
-    if (textInputRef.current) {
-      textInputRef.current.focus();
-    }
-  }, [createNewConversation, translateXChat, textInputRef]);
+    runChatEntrance();
+  }, [createNewConversation, runChatEntrance, textInputRef]);
 
   const closeChatScreen = useCallback(() => {
-    // Smooth kapatma - hafif animasyon (senior seviyede)
-    Animated.timing(translateXChat, {
-      toValue: -width,
-      duration: 150,
-      useNativeDriver: true,
-    }).start(() => {
+    runChatExit(() => {
       setShowChatScreen(false);
       setCreatedConversationId(undefined);
-      
-      // Input'u tamamen temizle - Chat ekranından geri dönerken
       setInputText("");
-      setPendingInitialMessage(""); // Pending mesajı da temizle
-      setPendingPromptType(undefined); // Pending promptType'ı da temizle
-      setSelectedImages([]); // Seçili resimleri temizle
-      setSelectedFiles([]); // Seçili dosyaları temizle
-      setArastirmaModu(false); // Araştırma modunu sıfırla
-      setIsInputFocused(false); // Focus'u temizle
-      setPlusButtonPressed(false); // Plus buton durumunu sıfırla
-      
-      // Keyboard'u kapat
+      setPendingInitialMessage("");
+      setPendingPromptType(undefined);
+      setSelectedImages([]);
+      setSelectedFiles([]);
+      setArastirmaModu(false);
+      setIsInputFocused(false);
+      setPlusButtonPressed(false);
       Keyboard.dismiss();
-      
-      onConversationSelected(); // Clear selected conversation
+      onConversationSelected();
     });
-  }, [onConversationSelected, translateXChat, width]);
+  }, [onConversationSelected, runChatExit]);
 
   const handleArastirmaPress = useCallback(() => {
     setArastirmaModu((prev) => !prev);
@@ -341,13 +386,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
         // ChatScreen'e geçiş yap
         console.log('💬 ChatScreen açılıyor...');
         setShowChatScreen(true);
-        
-        // Smooth animasyon ile aç
-        Animated.timing(translateXChat, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: true,
-        }).start();
+        runChatEntrance();
         
         setInputText("");
         console.log('✅ Öneri işlemi tamamlandı, mesaj ChatScreen\'de gönderilecek');
@@ -359,7 +398,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
       // Hata durumunda modal'ı tekrar aç
       setShowQuickSuggestions(true);
     }
-  }, [createNewConversation, selectConversation, translateXChat]);
+  }, [createNewConversation, runChatEntrance, selectConversation]);
 
 
   const handleSendFilesOnly = useCallback(async () => {
@@ -389,18 +428,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
 
       // Yeni mesajlaşma süreci başlat - Chat ekranına smooth geçiş
       setShowChatScreen(true);
-
-      // Smooth geçiş - senior seviyede
-      Animated.timing(translateXChat, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }).start();
+      runChatEntrance();
     } catch (error) {
       console.error("❌ Dosya gönderme hatası:", error);
       Alert.alert("Hata", "Dosyalar gönderilirken bir hata oluştu.");
     }
-  }, [selectedImages, selectedFiles, createNewConversation, translateXChat]);
+  }, [createNewConversation, runChatEntrance, selectedFiles, selectedImages]);
 
   const handleSendMessage = useCallback(async () => {
     // Herhangi bir içerik varsa (text, resim, dosya, dikte) mesaj gönder
@@ -454,9 +487,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
 
       // Chat ekranına geç - mesaj orada gönderilecek (inputText henüz temizlenmedi)
       setShowChatScreen(true);
-
-      // Anında geçiş - animasyon yok
-      translateXChat.setValue(0);
+      runChatEntrance();
       
       // Input'u hemen temizle (pendingInitialMessage korunacak)
       setInputText("");
@@ -475,7 +506,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     createNewConversation,
     updateResearchMode,
     arastirmaModu,
-    translateXChat,
+    runChatEntrance,
   ]);
 
   // Handle selected conversation - Optimized with smooth transition
@@ -488,23 +519,34 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
       
       // Chat ekranını aç
       setShowChatScreen(true);
-      
-      // Smooth geçiş - hafif animasyon
-      Animated.timing(translateXChat, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }).start();
+      runChatEntrance();
       
       console.log('✅ Chat ekranı açıldı, conversation yüklendi');
     }
-  }, [selectedConversationId, translateXChat, selectConversation]);
+  }, [runChatEntrance, selectConversation, selectedConversationId]);
 
   useEffect(() => {
     if (selectedConversationId) {
       handleConversationSelect();
     }
   }, [selectedConversationId, handleConversationSelect]);
+
+  useEffect(() => {
+    const isChatVisible = showChatScreen;
+    const animation = Animated.timing(heroReveal, {
+      toValue: isChatVisible ? 0 : 1,
+      duration: isChatVisible ? 160 : 500,
+      delay: isChatVisible ? 0 : 180,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    });
+
+    animation.start();
+
+    return () => {
+      animation.stop();
+    };
+  }, [heroReveal, showChatScreen]);
 
 
   // Show loading while fonts are loading
@@ -514,8 +556,14 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
 
   return (
     <View style={styles.container}>
-      <KeyboardAvoidingView
-        style={styles.container}
+      <AnimatedKeyboardAvoidingView
+        style={[
+          styles.container,
+          {
+            transform: [{ scale: homeScale }],
+            opacity: homeDimOpacity,
+          },
+        ]}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
         {...panResponder.panHandlers}
@@ -543,7 +591,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
           {/* Hero Section - Koşullu gösterim */}
           {!isInputFocused && (
             <View style={styles.heroSectionWrapper}>
-              <HeroSection />
+              <HeroSection animationProgress={heroReveal} />
             </View>
           )}
 
@@ -615,18 +663,24 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
             transparent={true}
             onRequestClose={closeChatScreen}
           >
-            <ChatScreen
-              translateX={translateXChat}
-              onClose={closeChatScreen}
-              onOpenChatHistory={onOpenChatHistory}
-              conversationId={selectedConversationId || createdConversationId}
-              initialArastirmaModu={arastirmaModu}
-              initialUploadModalOpen={plusButtonPressed}
-              initialMessage={pendingInitialMessage} // Sadece pendingInitialMessage kullan, inputText kullanma
-              initialPromptType={pendingPromptType} // Quick suggestion'dan gelen promptType
-              initialImages={selectedImages}
-              initialFiles={selectedFiles}
-            />
+            <View style={styles.chatModalContainer}>
+              <Animated.View
+                pointerEvents="none"
+                style={[styles.chatBackdrop, { opacity: chatBackdropOpacity }]}
+              />
+              <ChatScreen
+                translateX={translateXChat}
+                onClose={closeChatScreen}
+                onOpenChatHistory={onOpenChatHistory}
+                conversationId={selectedConversationId || createdConversationId}
+                initialArastirmaModu={arastirmaModu}
+                initialUploadModalOpen={plusButtonPressed}
+                initialMessage={pendingInitialMessage} // Sadece pendingInitialMessage kullan, inputText kullanma
+                initialPromptType={pendingPromptType} // Quick suggestion'dan gelen promptType
+                initialImages={selectedImages}
+                initialFiles={selectedFiles}
+              />
+            </View>
           </Modal>
 
           {/* Hızlı Öneriler Modal */}
@@ -678,7 +732,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
           </Modal>
         </LinearGradient>
       </TouchableWithoutFeedback>
-      </KeyboardAvoidingView>
+      </AnimatedKeyboardAvoidingView>
     </View>
   );
 };
@@ -688,6 +742,14 @@ const styles = StyleSheet.create({
     flex: 1,
     width: width,
     height: height,
+  },
+  chatModalContainer: {
+    flex: 1,
+    backgroundColor: "transparent",
+  },
+  chatBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(2, 2, 10, 0.68)",
   },
   header: {
     flexDirection: "row",

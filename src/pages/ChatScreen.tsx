@@ -90,8 +90,21 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   initialUploadModalOpen = false,
   initialPromptType,
 }) => {
-  const { currentConversation, addMessage, selectConversation, updateResearchMode } = useChat();
+  const {
+    currentConversation,
+    addMessage,
+    selectConversation,
+    updateResearchMode,
+    loadingMessagesConversationIds,
+  } = useChat();
   const { isLoading, sendMessage, sendQuickSuggestion } = useChatMessages();
+  const activeConversationId = useMemo(() => currentConversation?.id || conversationId || null, [currentConversation?.id, conversationId]);
+  const isConversationDataLoading = useMemo(() => {
+    if (!activeConversationId) {
+      return false;
+    }
+    return loadingMessagesConversationIds.includes(activeConversationId);
+  }, [activeConversationId, loadingMessagesConversationIds]);
   const { 
     keyboardHeight, 
     isKeyboardVisible, 
@@ -114,6 +127,18 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     isAndroid,
     isIOS
   } = useKeyboardHandling();
+
+  useEffect(() => {
+    if (initialUploadModalOpen) {
+      return;
+    }
+
+    const focusTimer = setTimeout(() => {
+      focusInput();
+    }, 220);
+
+    return () => clearTimeout(focusTimer);
+  }, [focusInput, initialUploadModalOpen]);
   const {
     showQuickSuggestions,
     setShowQuickSuggestions,
@@ -1149,6 +1174,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             isKeyboardVisible={isKeyboardVisible}
             keyboardHeight={keyboardHeight}
             conversationId={currentConversation?.id}
+            isDataLoading={isConversationDataLoading && ((currentConversation?.messages?.length || 0) === 0)}
             onScrollToEnd={() => {
               // Optional: Additional scroll handling
             }}
