@@ -221,12 +221,12 @@ const MessageList: React.FC<MessageListProps> = ({
                     const fileTypeColor = getFileTypeColor(fileExtension, file.mimeType);
                     
                     return (
-                      <TouchableOpacity 
-                        key={index} 
+                    <TouchableOpacity 
+                      key={index} 
                         style={[styles.fileItem, { borderLeftColor: fileTypeColor }]}
-                        onPress={() => handleFilePress(file)}
-                        activeOpacity={0.7}
-                      >
+                      onPress={() => handleFilePress(file)}
+                      activeOpacity={0.7}
+                    >
                         <View style={[styles.fileIconContainer, { backgroundColor: fileTypeColor + '20' }]}>
                           <Text allowFontScaling={false} style={styles.fileIcon}>{fileIcon}</Text>
                         </View>
@@ -243,7 +243,7 @@ const MessageList: React.FC<MessageListProps> = ({
                         <View style={styles.fileArrowContainer}>
                           <Text allowFontScaling={false} style={styles.fileArrow}>›</Text>
                         </View>
-                      </TouchableOpacity>
+                    </TouchableOpacity>
                     );
                   })}
                 </View>
