@@ -76,6 +76,7 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
   const [searchText, setSearchText] = useState('');
   const [showAllConversations, setShowAllConversations] = useState(false);
   const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
+  const [isConversationsLoading, setIsConversationsLoading] = useState(true);
   
   // Maksimum gösterilecek konuşma sayısı
   const MAX_CONVERSATIONS_DISPLAY = 10;
@@ -101,7 +102,28 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
 
   // Konuşmaları yükle
   useEffect(() => {
-    loadConversations();
+    let isMounted = true;
+
+    const fetchConversations = async () => {
+      try {
+        if (isMounted) {
+          setIsConversationsLoading(true);
+        }
+        await loadConversations();
+      } catch (error) {
+        console.error('❌ Konuşmalar yüklenirken hata:', error);
+      } finally {
+        if (isMounted) {
+          setIsConversationsLoading(false);
+        }
+      }
+    };
+
+    fetchConversations();
+
+    return () => {
+      isMounted = false;
+    };
   }, [loadConversations]);
 
   // Arama metni değiştiğinde tümünü göster durumunu sıfırla
@@ -254,34 +276,43 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
 
           {/* Chat List */}
           <View style={styles.chatList}>
-            {displayedConversations.map((conversation) => {
-                return (
-                  <View key={conversation.id} style={styles.conversationItem}>
-                    <TouchableOpacity 
-                      style={styles.chatItem}
-                      activeOpacity={0.7}
-                      onPress={() => handleConversationSelect(conversation.id)}
-                      onLongPress={() => handleDeleteConversation(conversation.id, conversation.title || 'Sohbet')}
-                    >
-                      <View style={styles.chatItemContent}>
-                        <Text allowFontScaling={false} style={styles.chatText}>{conversation.title || 'Sohbet'}</Text>
-                        <Text allowFontScaling={false} style={styles.chatDate}>
-                          {new Date(conversation.updatedAt).toLocaleDateString('tr-TR', {
-                            day: 'numeric',
-                            month: 'short',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
+            {isConversationsLoading ? (
+              Array.from({ length: 6 }).map((_, index) => (
+                <View key={`skeleton-${index}`} style={styles.conversationItem}>
+                  <View style={[styles.chatItem, styles.chatItemSkeleton]}>
+                    <View style={styles.skeletonTitle} />
+                    <View style={styles.skeletonDate} />
                   </View>
-                );
-              })}
+                </View>
+              ))
+            ) : (
+              displayedConversations.map((conversation) => (
+                <View key={conversation.id} style={styles.conversationItem}>
+                  <TouchableOpacity 
+                    style={styles.chatItem}
+                    activeOpacity={0.7}
+                    onPress={() => handleConversationSelect(conversation.id)}
+                    onLongPress={() => handleDeleteConversation(conversation.id, conversation.title || 'Sohbet')}
+                  >
+                    <View style={styles.chatItemContent}>
+                      <Text allowFontScaling={false} style={styles.chatText}>{conversation.title || 'Sohbet'}</Text>
+                      <Text allowFontScaling={false} style={styles.chatDate}>
+                        {new Date(conversation.updatedAt).toLocaleDateString('tr-TR', {
+                          day: 'numeric',
+                          month: 'short',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
           </View>
           
           {/* Tümünü Gör Butonu - 10'dan fazla konuşma varsa göster */}
-          {!showAllConversations && hasMoreConversations && (
+          {!isConversationsLoading && !showAllConversations && hasMoreConversations && (
             <TouchableOpacity
               style={styles.viewAllButton}
               onPress={() => setShowAllConversations(true)}
@@ -539,6 +570,24 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontFamily: 'Poppins-Medium',
     fontSize: 14,
+  },
+  chatItemSkeleton: {
+    opacity: 0.7,
+  },
+  skeletonTitle: {
+    height: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    borderRadius: 8,
+    width: '70%',
+    marginLeft: 33,
+  },
+  skeletonDate: {
+    height: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 6,
+    width: '40%',
+    marginLeft: 33,
+    marginTop: 10,
   },
 });
 
