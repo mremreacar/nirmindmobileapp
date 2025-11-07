@@ -99,56 +99,56 @@ export const useChatMessages = () => {
         console.log('📸 Resimler backend\'e yükleniyor...');
         const imageUploadResults = await Promise.allSettled(
           selectedImages.map(async (imageUri) => {
-            // Resmi base64'e çevir
-            const base64Data = await FileSystem.readAsStringAsync(imageUri, {
-              encoding: FileSystem.EncodingType.Base64,
-            });
+              // Resmi base64'e çevir
+              const base64Data = await FileSystem.readAsStringAsync(imageUri, {
+                encoding: FileSystem.EncodingType.Base64,
+              });
             
             // Base64 boyutunu kontrol et (50MB limit için ~37MB görsel)
             const base64SizeMB = (base64Data.length * 3) / 4 / 1024 / 1024;
             if (base64SizeMB > 35) {
               throw new Error(`Görsel çok büyük (${base64SizeMB.toFixed(2)}MB). Maksimum boyut: 35MB. Lütfen daha küçük bir görsel seçin.`);
             }
-            
-            // MIME type belirle
-            const getImageMimeType = (uri: string): string => {
-              const extension = uri.toLowerCase().split('.').pop();
-              switch (extension) {
-                case 'jpg':
-                case 'jpeg':
-                  return 'image/jpeg';
-                case 'png':
-                  return 'image/png';
-                case 'gif':
-                  return 'image/gif';
-                case 'webp':
-                  return 'image/webp';
-                default:
-                  return 'image/jpeg';
-              }
-            };
-            
-            const mimeType = getImageMimeType(imageUri);
-            const filename = `image_${Date.now()}_${Math.random().toString(36).substring(7)}.${mimeType.split('/')[1]}`;
-            
-            // Backend'e yükle
-            const uploadResponse = await backendApiService.uploadAttachment(
-              'IMAGE',
-              base64Data,
-              filename,
-              mimeType
-            );
-            
-            if (uploadResponse.success && uploadResponse.data) {
-              console.log('✅ Resim yüklendi:', uploadResponse.data.url);
-              return {
-                type: 'IMAGE',
-                url: uploadResponse.data.url,
-                filename: uploadResponse.data.filename,
-                size: uploadResponse.data.size,
-                mimeType: uploadResponse.data.mimeType
+              
+              // MIME type belirle
+              const getImageMimeType = (uri: string): string => {
+                const extension = uri.toLowerCase().split('.').pop();
+                switch (extension) {
+                  case 'jpg':
+                  case 'jpeg':
+                    return 'image/jpeg';
+                  case 'png':
+                    return 'image/png';
+                  case 'gif':
+                    return 'image/gif';
+                  case 'webp':
+                    return 'image/webp';
+                  default:
+                    return 'image/jpeg';
+                }
               };
-            } else {
+              
+              const mimeType = getImageMimeType(imageUri);
+              const filename = `image_${Date.now()}_${Math.random().toString(36).substring(7)}.${mimeType.split('/')[1]}`;
+              
+              // Backend'e yükle
+              const uploadResponse = await backendApiService.uploadAttachment(
+                'IMAGE',
+                base64Data,
+                filename,
+                mimeType
+              );
+              
+              if (uploadResponse.success && uploadResponse.data) {
+                console.log('✅ Resim yüklendi:', uploadResponse.data.url);
+                return {
+                  type: 'IMAGE',
+                  url: uploadResponse.data.url,
+                  filename: uploadResponse.data.filename,
+                  size: uploadResponse.data.size,
+                  mimeType: uploadResponse.data.mimeType
+                };
+              } else {
               const errorMsg = uploadResponse.error || uploadResponse.message || 'Resim yüklenemedi';
               throw new Error(errorMsg);
             }

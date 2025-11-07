@@ -749,21 +749,37 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     // En az bir içerik olmalı (yazı, dosya veya resim)
     const hasContent = inputText.trim() || selectedImages.length > 0 || selectedFiles.length > 0;
     
-    if (!hasContent || !currentConversation) {
-      console.log('⚠️ Mesaj gönderilemedi:', { 
+    if (!hasContent) {
+      console.log('⚠️ Mesaj gönderilemedi: içerik yok', { 
         hasText: !!inputText.trim(),
         hasImages: selectedImages.length > 0,
-        hasFiles: selectedFiles.length > 0,
-        hasContent,
-        hasConversation: !!currentConversation 
+        hasFiles: selectedFiles.length > 0
       });
+      return;
+    }
+    
+    // Conversation ID'yi belirle - önce prop'tan, sonra currentConversation'dan
+    const targetConversationId = conversationId || currentConversation?.id;
+    
+    if (!targetConversationId) {
+      console.error('❌ ChatScreen: conversationId eksik, mesaj gönderilemedi', {
+        hasPropConversationId: !!conversationId,
+        hasCurrentConversation: !!currentConversation,
+        hasCurrentConversationId: !!currentConversation?.id
+      });
+      Alert.alert(
+        'Hata',
+        'Konuşma bulunamadı. Lütfen tekrar deneyin.',
+        [{ text: 'Tamam' }]
+      );
       return;
     }
     
     console.log('📤 Kullanıcı mesajı gönderiliyor:', {
       text: inputText,
       images: selectedImages.length,
-      files: selectedFiles.length
+      files: selectedFiles.length,
+      conversationId: targetConversationId
     });
     
     // Sadece kullanıcının yazdığı mesajı kullan, sistem mesajı ekleme
@@ -786,14 +802,31 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     try {
       // Araştırma modu aktifse RESEARCH promptType kullan
       const promptType = arastirmaModu ? 'RESEARCH' : undefined;
-      await sendMessage(finalMessage, currentConversation.id, arastirmaModu, imagesToSend, filesToSend, promptType);
+      await sendMessage(finalMessage, targetConversationId, arastirmaModu, imagesToSend, filesToSend, promptType);
       console.log('✅ Kullanıcı mesajı gönderildi, AI cevap bekleniyor...');
       
       // Başarılı gönderimden sonra input'un temiz olduğundan emin ol (garanti için)
       inputClearedRef.current = true;
       setInputText("");
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Mesaj gönderme hatası:', error);
+      
+      // Kullanıcıya hata mesajı göster
+      const errorMessage = error?.message || 'Mesaj gönderilirken bir hata oluştu';
+      if (errorMessage.includes('conversationId eksik')) {
+        Alert.alert(
+          'Hata',
+          'Konuşma bulunamadı. Lütfen tekrar deneyin.',
+          [{ text: 'Tamam' }]
+        );
+      } else {
+        Alert.alert(
+          'Hata',
+          errorMessage,
+          [{ text: 'Tamam' }]
+        );
+      }
+      
       // Hata durumunda input'u geri yükle
       inputClearedRef.current = false; // Hata durumunda flag'i reset et
       setInputText(finalMessage);
@@ -803,11 +836,25 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   };
 
   const handleSendFilesOnly = async () => {
-    if (isLoading || !currentConversation) {
-      console.log('⚠️ Dosyalar gönderilemedi:', { 
-        isLoading, 
-        hasConversation: !!currentConversation 
+    if (isLoading) {
+      console.log('⚠️ Zaten bir mesaj işleniyor, dosyalar gönderilemedi');
+      return;
+    }
+
+    // Conversation ID'yi belirle - önce prop'tan, sonra currentConversation'dan
+    const targetConversationId = conversationId || currentConversation?.id;
+
+    if (!targetConversationId) {
+      console.error('❌ ChatScreen: conversationId eksik, dosyalar gönderilemedi', {
+        hasPropConversationId: !!conversationId,
+        hasCurrentConversation: !!currentConversation,
+        hasCurrentConversationId: !!currentConversation?.id
       });
+      Alert.alert(
+        'Hata',
+        'Konuşma bulunamadı. Lütfen tekrar deneyin.',
+        [{ text: 'Tamam' }]
+      );
       return;
     }
 
@@ -822,12 +869,15 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
       files: selectedFiles.length
     });
     
+    // Attachment'ları kopyala (state temizlenmeden önce)
+    const imagesToSend = [...selectedImages];
+    const filesToSend = [...selectedFiles];
+    
+    try {
     // Dosyaları backend üzerinden gönder (useChatMessages hook'u zaten backend'e yüklüyor)
     // Boş mesaj ile gönder (sadece dosyalar/görseller)
     const promptType = arastirmaModu ? 'RESEARCH' : undefined;
-    await sendMessage('', currentConversation.id, arastirmaModu, selectedImages, selectedFiles, promptType);
-    // Araştırma modunu kapatma - conversation'a bağlı bir ayar
-    // setArastirmaModu(false); // Kaldırıldı - conversation'a bağlı bir ayar
+      await sendMessage('', targetConversationId, arastirmaModu, imagesToSend, filesToSend, promptType);
     
     // Dosyaları temizle
     setSelectedImages([]);
@@ -837,6 +887,29 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     closeUploadModal();
     
     console.log('✅ Dosyalar gönderildi, AI cevap bekleniyor...');
+    } catch (error: any) {
+      console.error('❌ Dosya gönderme hatası:', error);
+      
+      // Kullanıcıya hata mesajı göster
+      const errorMessage = error?.message || 'Dosyalar gönderilirken bir hata oluştu';
+      if (errorMessage.includes('conversationId eksik')) {
+        Alert.alert(
+          'Hata',
+          'Konuşma bulunamadı. Lütfen tekrar deneyin.',
+          [{ text: 'Tamam' }]
+        );
+      } else {
+        Alert.alert(
+          'Hata',
+          errorMessage,
+          [{ text: 'Tamam' }]
+        );
+      }
+      
+      // Hata durumunda dosyaları geri yükle
+      setSelectedImages(imagesToSend);
+      setSelectedFiles(filesToSend);
+    }
   };
 
   const handleQuickSuggestionSelect = async (suggestion: {question: string, promptType: string}) => {

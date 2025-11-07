@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -56,10 +56,28 @@ const LoginMethodScreen = ({
   const [isAppleLoading, setIsAppleLoading] = useState(false);
   const [isNirpaxLoading, setIsNirpaxLoading] = useState(false);
   const [showWebView, setShowWebView] = useState(false);
-  const [webViewUrl, setWebViewUrl] = useState("");
+  const [webViewUrl, setWebViewUrl] = useState<string | null>(null);
+  const [webViewLoading, setWebViewLoading] = useState(true);
+  const webViewRef = React.useRef<any>(null);
   const { handleAuthCallback, setUser } = useAuth();
   const insets = useSafeAreaInsets();
   const crossAppAuthService = CrossAppAuthService.getInstance();
+
+  // Modal açıldığında URL'i hazırla
+  useEffect(() => {
+    if (showWebView) {
+      if (!webViewUrl) {
+        const url = crossAppAuthService.getWebViewLoginUrl();
+        console.log("🌐 WebView URL hazırlanıyor:", url);
+        setWebViewUrl(url);
+        setWebViewLoading(true);
+      }
+    } else {
+      // Modal kapandığında URL'i temizle
+      setWebViewUrl(null);
+      setWebViewLoading(true);
+    }
+  }, [showWebView]);
   const googleAuthService = GoogleAuthService.getInstance();
   const appleAuthService = AppleAuthService.getInstance();
   const backendApiService = BackendApiService.getInstance();
@@ -232,15 +250,18 @@ const LoginMethodScreen = ({
       setIsNirpaxLoading(true);
       console.log("🔵 Nirpax login başlatılıyor...");
 
-      // Direkt HTML sayfasını aç (deep link kontrolü yapmadan)
-      const webViewUrl = crossAppAuthService.getWebViewLoginUrl();
-      console.log("🌐 WebView login açılıyor:", webViewUrl);
-      setWebViewUrl(webViewUrl);
+      // URL'i hazırla ve modal'ı aç
+      const url = crossAppAuthService.getWebViewLoginUrl();
+      console.log("🌐 WebView URL hazırlanıyor:", url);
+      setWebViewUrl(url);
+      setWebViewLoading(true);
       setShowWebView(true);
       setIsNirpaxLoading(false);
     } catch (error: any) {
       console.error("❌ Nirpax login hatası:", error);
       setIsNirpaxLoading(false);
+      setWebViewLoading(false);
+      setWebViewUrl(null);
       Alert.alert(
         "Giriş Başarısız",
         "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
@@ -251,19 +272,31 @@ const LoginMethodScreen = ({
 
   const parseTokenFromUrl = (url: string): { token?: string; error?: string } => {
     try {
-      // URL'den token veya error parametresini çıkar
-      const tokenMatch = url.match(/[?&]token=([^&]+)/);
-      const errorMatch = url.match(/[?&]error=([^&]+)/);
+      // URL'den token veya error parametresini çıkar (Nirpay implementasyonu gibi)
+      const urlObj = new URL(url);
+      const token = urlObj.searchParams.get('token') || urlObj.hash.split('token=')[1]?.split('&')[0];
+      const error = urlObj.searchParams.get('error') || urlObj.hash.split('error=')[1]?.split('&')[0];
       
-      if (tokenMatch) {
-        const token = decodeURIComponent(tokenMatch[1]);
-        return { token };
-      } else if (errorMatch) {
-        const error = decodeURIComponent(errorMatch[1]);
-        return { error };
+      if (token) {
+        return { token: decodeURIComponent(token) };
+      } else if (error) {
+        return { error: decodeURIComponent(error) };
       }
     } catch (error) {
       console.error("❌ URL parse hatası:", error);
+      // Fallback: regex ile dene
+      try {
+        const tokenMatch = url.match(/[?&#]token=([^&]+)/);
+        const errorMatch = url.match(/[?&#]error=([^&]+)/);
+        
+        if (tokenMatch) {
+          return { token: decodeURIComponent(tokenMatch[1]) };
+        } else if (errorMatch) {
+          return { error: decodeURIComponent(errorMatch[1]) };
+        }
+      } catch (regexError) {
+        console.error("❌ Regex parse hatası:", regexError);
+      }
     }
     return {};
   };
@@ -277,8 +310,36 @@ const LoginMethodScreen = ({
       return;
     }
 
-    // Check if it's a callback URL with token
-    if (url && (url.includes("nirmind://auth-callback") || url.startsWith("nirmind://"))) {
+    // Check if URL contains token parameter (Nirpay implementasyonu gibi)
+    if (url && (url.includes('token=') || url.includes('nirmind://auth'))) {
+      try {
+        const urlObj = new URL(url);
+        const token = urlObj.searchParams.get('token') || urlObj.hash.split('token=')[1]?.split('&')[0];
+      
+        if (token) {
+          console.log("✅ Token bulundu:", token.substring(0, 20) + '...');
+        setShowWebView(false);
+        
+        try {
+            await handleAuthCallback(token);
+          onLoginSuccess();
+        } catch (error: any) {
+          console.error("❌ Auth callback hatası:", error);
+          Alert.alert(
+            "Giriş Başarısız",
+            error.message || "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+            [{ text: "Tamam" }]
+          );
+        }
+        return;
+        }
+      } catch (error) {
+        console.warn("⚠️ URL parse hatası:", error);
+      }
+    }
+
+    // Check if it's a callback URL with token (fallback)
+    if (url && (url.includes("nirmind://auth") || url.startsWith("nirmind://"))) {
       console.log("✅ Callback URL yakalandı:", url);
       
       const parsed = parseTokenFromUrl(url);
@@ -303,33 +364,9 @@ const LoginMethodScreen = ({
         console.error("❌ Redirect URL'den hata:", parsed.error);
         Alert.alert(
           "Giriş Başarısız",
-          decodeURIComponent(parsed.error) || "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+          parsed.error || "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
           [{ text: "Tamam", onPress: () => setShowWebView(false) }]
         );
-        return;
-      }
-    }
-
-    // Check if URL contains token parameter (fallback for other redirect formats)
-    if (url && url.includes("token=") && !url.includes("cross-app-login-page")) {
-      console.log("🔍 URL'de token parametresi bulundu:", url);
-      const parsed = parseTokenFromUrl(url);
-      
-      if (parsed.token) {
-        console.log("✅ Token URL parametresinden alındı");
-        setShowWebView(false);
-        
-        try {
-          await handleAuthCallback(parsed.token);
-          onLoginSuccess();
-        } catch (error: any) {
-          console.error("❌ Auth callback hatası:", error);
-          Alert.alert(
-            "Giriş Başarısız",
-            error.message || "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
-            [{ text: "Tamam" }]
-          );
-        }
         return;
       }
     }
@@ -340,7 +377,7 @@ const LoginMethodScreen = ({
     console.log("🔍 Should start load:", url);
 
     // If it's our callback URL, intercept it
-    if (url && (url.includes("nirmind://auth-callback") || url.startsWith("nirmind://"))) {
+    if (url && (url.includes("nirmind://auth") || url.startsWith("nirmind://"))) {
       console.log("🚫 Blocking navigation, handling callback");
       handleWebViewNavigationStateChange({ url, loading: false });
       return false; // Block the navigation
@@ -477,21 +514,36 @@ const LoginMethodScreen = ({
       <Modal
         visible={showWebView}
         animationType="slide"
-        onRequestClose={() => setShowWebView(false)}
+        onRequestClose={() => {
+          setShowWebView(false);
+          // URL ve loading state useEffect'te temizlenecek
+        }}
       >
         <SafeAreaView style={styles.webViewContainer} edges={['top']}>
           <StatusBar barStyle="light-content" backgroundColor="#16163C" />
           <View style={[styles.webViewHeader, { paddingTop: Math.max(insets.top, 10) }]}>
             <TouchableOpacity
-              onPress={() => setShowWebView(false)}
+              onPress={() => {
+                setShowWebView(false);
+                // URL ve loading state useEffect'te temizlenecek
+              }}
               style={[styles.closeButton, { top: Math.max(insets.top, 10) }]}
             >
               <Text style={styles.closeButtonText}>✕ Kapat</Text>
             </TouchableOpacity>
             <Text style={styles.webViewTitle}>Nirpax ile Giriş</Text>
           </View>
+          {webViewLoading && (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#00DDA5" />
+              <Text style={styles.loadingText}>Sayfa yükleniyor...</Text>
+            </View>
+          )}
+          {webViewUrl ? (
           <WebView
-            style={styles.webView}
+            ref={webViewRef}
+            key={webViewUrl} // URL değiştiğinde WebView'i yeniden render et
+            style={[styles.webView, webViewLoading && styles.webViewHidden]}
             source={{ 
               uri: webViewUrl,
               headers: {
@@ -500,15 +552,21 @@ const LoginMethodScreen = ({
                 'Accept-Language': 'tr-TR,tr;q=0.9,en;q=0.8',
                 'Accept-Encoding': 'gzip, deflate, br',
                 'Cache-Control': 'no-cache',
-                'Pragma': 'no-cache',
-                'Origin': 'https://nircore.io',
-                'Referer': 'https://nircore.io/'
+                'Pragma': 'no-cache'
               }
             }}
             originWhitelist={['*']}
             onNavigationStateChange={handleWebViewNavigationStateChange}
             onShouldStartLoadWithRequest={handleShouldStartLoad}
-            startInLoadingState={true}
+            onLoadStart={() => {
+              console.log('🔄 WebView yüklenmeye başladı');
+              setWebViewLoading(true);
+            }}
+            onLoadEnd={() => {
+              console.log('✅ WebView yüklendi');
+              setWebViewLoading(false);
+            }}
+            startInLoadingState={false}
             mixedContentMode="always"
             allowsInlineMediaPlayback={true}
             javaScriptEnabled={true}
@@ -523,22 +581,27 @@ const LoginMethodScreen = ({
             onError={(syntheticEvent) => {
               const { nativeEvent } = syntheticEvent;
               console.error('❌ WebView error:', nativeEvent);
+              setWebViewLoading(false);
               Alert.alert(
                 'Bağlantı Hatası',
                 'Sayfa yüklenirken bir hata oluştu. Lütfen internet bağlantınızı kontrol edin ve tekrar deneyin.',
                 [
                   { 
                     text: 'Kapat', 
-                    onPress: () => setShowWebView(false),
+                    onPress: () => {
+                      setShowWebView(false);
+                    },
                     style: 'cancel'
                   },
                   { 
                     text: 'Yeniden Dene', 
                     onPress: () => {
                       // WebView'i yeniden yükle
-                      setWebViewUrl('');
-                      setTimeout(() => {
                         const url = crossAppAuthService.getWebViewLoginUrl();
+                      console.log("🔄 WebView yeniden yükleniyor:", url);
+                      setWebViewLoading(true);
+                      setWebViewUrl(null);
+                      setTimeout(() => {
                         setWebViewUrl(url);
                       }, 100);
                     }
@@ -549,11 +612,17 @@ const LoginMethodScreen = ({
             onHttpError={(syntheticEvent) => {
               const { nativeEvent } = syntheticEvent;
               console.error('❌ WebView HTTP error:', nativeEvent);
+              setWebViewLoading(false);
               if (nativeEvent.statusCode >= 400) {
                 Alert.alert(
                   'Sunucu Hatası',
                   `Sunucu hatası oluştu (${nativeEvent.statusCode}). Lütfen daha sonra tekrar deneyin.`,
-                  [{ text: 'Tamam', onPress: () => setShowWebView(false) }]
+                  [{ 
+                    text: 'Tamam', 
+                    onPress: () => {
+                      setShowWebView(false);
+                    }
+                  }]
                 );
               }
             }}
@@ -605,12 +674,8 @@ const LoginMethodScreen = ({
                 }
               }
             }}
-            renderLoading={() => (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#00DDA5" />
-              </View>
-            )}
           />
+          ) : null}
         </SafeAreaView>
       </Modal>
     </LinearGradient>
@@ -761,6 +826,9 @@ const styles = StyleSheet.create({
     flex: 1,
     width: width,
   },
+  webViewHidden: {
+    opacity: 0,
+  },
   webViewHeader: {
     minHeight: 60,
     backgroundColor: "#16163C",
@@ -795,6 +863,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#FFFFFF",
+    zIndex: 1000,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: "#666666",
+    fontFamily: "Poppins-Regular",
   },
   infoContainer: {
     position: "absolute",

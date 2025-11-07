@@ -8,7 +8,7 @@ class CrossAppAuthService {
   private readonly NIRPAX_DEEP_LINK = 'nirpax://cross-app-auth';
   private readonly NIRPAX_PACKAGE_NAME = 'com.nireya.nirpax'; // Android package name
   private readonly NIRPAX_BUNDLE_ID = 'com.nireya.nirpax'; // iOS bundle ID
-  private readonly BACKEND_LOGIN_URL = `${API_BASE_URL}/nirmind/auth/cross-app-login-page`;
+  private readonly BACKEND_LOGIN_URL = `${API_BASE_URL}/nirpax/auth/cross-app-login-page`;
 
   private constructor() {}
 
@@ -39,7 +39,7 @@ class CrossAppAuthService {
    */
   async openNirpaxApp(): Promise<boolean> {
     try {
-      const deepLinkUrl = `${this.NIRPAX_DEEP_LINK}?source=nirmind&callback=nirmind://auth-callback`;
+      const deepLinkUrl = `${this.NIRPAX_DEEP_LINK}?source=nirmind&callback=nirmind://auth`;
       console.log('🚀 Nirpax uygulaması açılıyor:', deepLinkUrl);
       
       const canOpen = await Linking.canOpenURL(deepLinkUrl);
@@ -60,7 +60,7 @@ class CrossAppAuthService {
    * WebView için backend login URL'ini döner
    */
   getWebViewLoginUrl(): string {
-    const redirectUrl = encodeURIComponent('nirmind://auth-callback');
+    const redirectUrl = encodeURIComponent('nirmind://auth');
     return `${this.BACKEND_LOGIN_URL}?source=nirmind&redirect=${redirectUrl}`;
   }
 

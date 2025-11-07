@@ -32,7 +32,7 @@ export const DeepLinkHandler: React.FC<DeepLinkHandlerProps> = ({ onLoginSuccess
     };
 
     const handleDeepLink = async (url: string) => {
-      if (url.startsWith('nirmind://auth-callback')) {
+      if (url.startsWith('nirmind://auth')) {
         console.log('✅ Auth callback alındı');
         const parsed = crossAppAuthService.parseAuthCallback(url);
 
