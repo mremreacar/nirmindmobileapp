@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -61,6 +61,7 @@ const LoginMethodScreen = ({
   const [webViewUrl, setWebViewUrl] = useState<string | null>(null);
   const [webViewLoading, setWebViewLoading] = useState(true);
   const webViewRef = React.useRef<any>(null);
+  const webViewSpinnerTimerRef = useRef<NodeJS.Timeout | null>(null);
   const { handleAuthCallback, setUser } = useAuth();
   const insets = useSafeAreaInsets();
   const crossAppAuthService = CrossAppAuthService.getInstance();
@@ -73,13 +74,22 @@ const LoginMethodScreen = ({
         console.log("🌐 WebView URL hazırlanıyor:", url);
         setWebViewUrl(url);
         setWebViewLoading(true);
+        if (webViewSpinnerTimerRef.current) {
+          clearTimeout(webViewSpinnerTimerRef.current);
+        }
+        webViewSpinnerTimerRef.current = setTimeout(() => {
+          setWebViewLoading(false);
+        }, 2500);
       }
     } else {
-      // Modal kapandığında URL'i temizle
+      if (webViewSpinnerTimerRef.current) {
+        clearTimeout(webViewSpinnerTimerRef.current);
+        webViewSpinnerTimerRef.current = null;
+      }
       setWebViewUrl(null);
       setWebViewLoading(true);
     }
-  }, [showWebView]);
+  }, [showWebView, webViewUrl, crossAppAuthService]);
   const googleAuthService = GoogleAuthService.getInstance();
   const appleAuthService = AppleAuthService.getInstance();
   const backendApiService = BackendApiService.getInstance();
@@ -252,11 +262,16 @@ const LoginMethodScreen = ({
       setIsNirpaxLoading(true);
       console.log("🔵 Nirpax login başlatılıyor...");
 
-      // URL'i hazırla ve modal'ı aç
       const url = crossAppAuthService.getWebViewLoginUrl();
       console.log("🌐 WebView URL hazırlanıyor:", url);
       setWebViewUrl(url);
       setWebViewLoading(true);
+      if (webViewSpinnerTimerRef.current) {
+        clearTimeout(webViewSpinnerTimerRef.current);
+      }
+      webViewSpinnerTimerRef.current = setTimeout(() => {
+        setWebViewLoading(false);
+      }, 2500);
       setShowWebView(true);
       setIsNirpaxLoading(false);
     } catch (error: any) {
@@ -309,8 +324,18 @@ const LoginMethodScreen = ({
 
     // Skip if still loading
     if (loading) {
+      if (webViewSpinnerTimerRef.current) {
+        clearTimeout(webViewSpinnerTimerRef.current);
+      }
+      webViewSpinnerTimerRef.current = setTimeout(() => setWebViewLoading(false), 1500);
       return;
     }
+
+    if (webViewSpinnerTimerRef.current) {
+      clearTimeout(webViewSpinnerTimerRef.current);
+      webViewSpinnerTimerRef.current = null;
+    }
+    setWebViewLoading(false);
 
     const isCallbackUrl =
       url &&
@@ -584,16 +609,16 @@ const LoginMethodScreen = ({
             <Text style={styles.webViewTitle}>Nirpax ile Giriş</Text>
           </View>
           {webViewLoading && (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#00DDA5" />
-              <Text style={styles.loadingText}>Sayfa yükleniyor...</Text>
-            </View>
-          )}
+             <View style={styles.loadingContainer} pointerEvents="none">
+               <ActivityIndicator size="large" color="#00DDA5" />
+               <Text style={styles.loadingText}>Sayfa yükleniyor...</Text>
+             </View>
+           )}
           {webViewUrl ? (
           <WebView
             ref={webViewRef}
             key={webViewUrl} // URL değiştiğinde WebView'i yeniden render et
-            style={[styles.webView, webViewLoading && styles.webViewHidden]}
+            style={styles.webView}
             source={{ 
               uri: webViewUrl,
               headers: {
@@ -646,10 +671,13 @@ const LoginMethodScreen = ({
                   { 
                     text: 'Yeniden Dene', 
                     onPress: () => {
-                      // WebView'i yeniden yükle
-                        const url = crossAppAuthService.getWebViewLoginUrl();
+                      const url = crossAppAuthService.getWebViewLoginUrl();
                       console.log("🔄 WebView yeniden yükleniyor:", url);
                       setWebViewLoading(true);
+                      if (webViewSpinnerTimerRef.current) {
+                        clearTimeout(webViewSpinnerTimerRef.current);
+                      }
+                      webViewSpinnerTimerRef.current = setTimeout(() => setWebViewLoading(false), 2500);
                       setWebViewUrl(null);
                       setTimeout(() => {
                         setWebViewUrl(url);
@@ -876,9 +904,6 @@ const styles = StyleSheet.create({
     flex: 1,
     width: width,
   },
-  webViewHidden: {
-    opacity: 0,
-  },
   webViewHeader: {
     minHeight: 60,
     backgroundColor: "#16163C",
@@ -912,7 +937,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "rgba(255, 255, 255, 0.85)",
     zIndex: 1000,
   },
   loadingText: {
