@@ -500,9 +500,12 @@ const LoginMethodScreen = ({
                 'Accept-Language': 'tr-TR,tr;q=0.9,en;q=0.8',
                 'Accept-Encoding': 'gzip, deflate, br',
                 'Cache-Control': 'no-cache',
-                'Pragma': 'no-cache'
+                'Pragma': 'no-cache',
+                'Origin': 'https://nircore.io',
+                'Referer': 'https://nircore.io/'
               }
             }}
+            originWhitelist={['*']}
             onNavigationStateChange={handleWebViewNavigationStateChange}
             onShouldStartLoadWithRequest={handleShouldStartLoad}
             startInLoadingState={true}
@@ -510,8 +513,13 @@ const LoginMethodScreen = ({
             allowsInlineMediaPlayback={true}
             javaScriptEnabled={true}
             domStorageEnabled={true}
-            sharedCookiesEnabled={false}
+            sharedCookiesEnabled={true}
+            thirdPartyCookiesEnabled={true}
             allowsBackForwardNavigationGestures={false}
+            cacheEnabled={false}
+            incognito={false}
+            setSupportMultipleWindows={false}
+            allowsProtectedMedia={true}
             onError={(syntheticEvent) => {
               const { nativeEvent } = syntheticEvent;
               console.error('❌ WebView error:', nativeEvent);
