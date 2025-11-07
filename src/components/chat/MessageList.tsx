@@ -209,9 +209,18 @@ const MessageList: React.FC<MessageListProps> = ({
                     style={markdownStyles}
                     allowFontScaling={false}
                   >
-                    {message.text}
+                    {message.text + (message.isStreaming ? ' ▊' : '')}
                   </Markdown>
                 )
+              )}
+              {/* Streaming cursor - sadece text yoksa ve streaming ise */}
+              {!message.text && message.isStreaming && (
+                <Markdown
+                  style={markdownStyles}
+                  allowFontScaling={false}
+                >
+                  ▊
+                </Markdown>
               )}
             </View>
             <Text allowFontScaling={false} style={[
@@ -228,8 +237,8 @@ const MessageList: React.FC<MessageListProps> = ({
         </TouchableOpacity>
       ))}
       
-      {/* Loading indicator */}
-      {isLoading && (
+      {/* Loading indicator - sadece streaming mesajı yoksa göster */}
+      {isLoading && !messages.some(msg => !msg.isUser && msg.isStreaming) && (
         <View style={[styles.messageContainer, styles.aiMessage]}>
           <View style={[styles.messageWrapper, styles.aiMessageWrapper]}>
             <View style={[styles.messageBubble, styles.aiBubble]}>

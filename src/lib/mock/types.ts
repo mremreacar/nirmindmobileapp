@@ -11,6 +11,7 @@ export interface ChatMessage {
   timestamp: Date;
   images?: string[];
   files?: any[];
+  isStreaming?: boolean; // Streaming mesajları için flag
 }
 
 export interface ChatConversation {

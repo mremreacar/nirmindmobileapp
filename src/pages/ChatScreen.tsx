@@ -130,12 +130,21 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   const [arastirmaModu, setArastirmaModu] = useState(initialArastirmaModu);
   const [isPickingDocument, setIsPickingDocument] = useState(false);
   const [isPickingImage, setIsPickingImage] = useState(false);
+  
+  // Input temizleme kontrolü için ref
+  const inputClearedRef = useRef(false);
 
   // Dikte feature hooks
   const { dictationState, toggleDictation } = useDictation({
     onTextUpdate: (text: string) => {
       // Hızlı text güncelleme - console log'ları kaldırdık
-      setInputText(prev => prev + text);
+      // Wrapper fonksiyonu kullan (flag reset için)
+      const currentText = inputText;
+      const newText = currentText + text;
+      if (newText.length > 0) {
+        inputClearedRef.current = false;
+      }
+      setInputText(newText);
     },
     onError: (error: string) => {
       console.error('Chat dikte hatası:', error);
@@ -173,11 +182,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   // Initialize with initial message - sadece conversation yoksa set et
   useEffect(() => {
     // Eğer conversation varsa ve initial message varsa, mesaj otomatik gönderilecek
-    // Bu yüzden input'u sadece conversation yoksa set edelim
-    if (initialMessage && !currentConversation) {
+    // Bu yüzden input'u sadece conversation yoksa, input boşsa ve input temizlenmemişse set edelim
+    if (initialMessage && !currentConversation && !inputText.trim() && !inputClearedRef.current) {
       setInputText(initialMessage);
     }
-  }, [initialMessage, currentConversation]);
+  }, [initialMessage, currentConversation, inputText]);
 
   // Initialize UploadModal if needed
   useEffect(() => {
@@ -365,16 +374,24 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialMessage, conversationId, initialArastirmaModu, initialPromptType]); // currentConversation ve isLoading dependency'den kaldırıldı
 
-  // Initialize conversation when component mounts - NON-BLOCKING
+  // Initialize conversation when component mounts or conversationId changes - NON-BLOCKING
   // Bu useEffect initialMessage'dan bağımsız çalışmalı
   useEffect(() => {
     if (conversationId && conversationLoadedRef.current !== conversationId) {
+      console.log('📥 ChatScreen: Conversation seçiliyor:', conversationId);
       // Conversation yüklemesini paralel yap, mesaj gönderimini bloklamasın
       conversationLoadedRef.current = conversationId; // Flag'i set et
-      selectConversation(conversationId).catch((error: any) => {
-        console.error('❌ Conversation seçilirken hata:', error);
-        conversationLoadedRef.current = null; // Hata durumunda flag'i reset et
-      });
+      selectConversation(conversationId)
+        .then(() => {
+          console.log('✅ ChatScreen: Conversation başarıyla seçildi:', conversationId);
+        })
+        .catch((error: any) => {
+          console.error('❌ ChatScreen: Conversation seçilirken hata:', error);
+          conversationLoadedRef.current = null; // Hata durumunda flag'i reset et
+        });
+    } else if (!conversationId) {
+      // conversationId yoksa flag'i temizle
+      conversationLoadedRef.current = null;
     }
   }, [conversationId, selectConversation]);
 
@@ -752,7 +769,15 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     // Sadece kullanıcının yazdığı mesajı kullan, sistem mesajı ekleme
     let finalMessage = inputText.trim();
     
+    // Attachment'ları kopyala (state temizlenmeden önce)
+    const imagesToSend = [...selectedImages];
+    const filesToSend = [...selectedFiles];
+    
     // Input'u hemen temizle (kullanıcı deneyimi için)
+    inputClearedRef.current = true; // Input temizlendi flag'i
+    console.log('🧹 Input temizleniyor...', { currentInputText: inputText });
+    
+    // Input'u temizle - React state update
     setInputText("");
     // Araştırma modunu kapatma - conversation'a bağlı bir ayar
     setSelectedImages([]);
@@ -761,12 +786,19 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     try {
       // Araştırma modu aktifse RESEARCH promptType kullan
       const promptType = arastirmaModu ? 'RESEARCH' : undefined;
-      await sendMessage(finalMessage, currentConversation.id, arastirmaModu, selectedImages, selectedFiles, promptType);
+      await sendMessage(finalMessage, currentConversation.id, arastirmaModu, imagesToSend, filesToSend, promptType);
       console.log('✅ Kullanıcı mesajı gönderildi, AI cevap bekleniyor...');
+      
+      // Başarılı gönderimden sonra input'un temiz olduğundan emin ol (garanti için)
+      inputClearedRef.current = true;
+      setInputText("");
     } catch (error) {
       console.error('❌ Mesaj gönderme hatası:', error);
       // Hata durumunda input'u geri yükle
+      inputClearedRef.current = false; // Hata durumunda flag'i reset et
       setInputText(finalMessage);
+      setSelectedImages(imagesToSend);
+      setSelectedFiles(filesToSend);
     }
   };
 
@@ -1065,7 +1097,13 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
           <InputComponent
             inputText={inputText}
-            setInputText={setInputText}
+            setInputText={(text) => {
+              // Kullanıcı yazmaya başladığında flag'i reset et
+              if (text.length > 0) {
+                inputClearedRef.current = false;
+              }
+              setInputText(text);
+            }}
             onSendMessage={handleSendMessage}
             onDictate={toggleDictation}
             onOpenUploadModal={openUploadModal}

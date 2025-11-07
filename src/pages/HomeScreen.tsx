@@ -479,17 +479,26 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   ]);
 
   // Handle selected conversation - Optimized with smooth transition
-  const handleConversationSelect = useCallback(() => {
+  const handleConversationSelect = useCallback(async () => {
     if (selectedConversationId) {
+      console.log('📥 Geçmiş sohbetten conversation seçildi:', selectedConversationId);
+      
+      // Conversation'ı ChatContext'te seç
+      await selectConversation(selectedConversationId);
+      
+      // Chat ekranını aç
       setShowChatScreen(true);
-      // Smooth geçiş - hafif animasyon (senior seviyede)
+      
+      // Smooth geçiş - hafif animasyon
       Animated.timing(translateXChat, {
         toValue: 0,
-        duration: 100, // Çok hızlı ama smooth
+        duration: 200,
         useNativeDriver: true,
       }).start();
+      
+      console.log('✅ Chat ekranı açıldı, conversation yüklendi');
     }
-  }, [selectedConversationId, translateXChat]);
+  }, [selectedConversationId, translateXChat, selectConversation]);
 
   useEffect(() => {
     if (selectedConversationId) {

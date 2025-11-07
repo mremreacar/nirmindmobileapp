@@ -516,6 +516,9 @@ class BackendApiService {
   }
 
   // Send Message with Streaming (SSE) - ChatGPT gibi gerçek zamanlı yazma efekti
+  // React Native'de fetch API'nin response.body.getReader() çalışmıyor
+  // Bu yüzden XMLHttpRequest kullanıyoruz
+  // Returns an abort function to cancel the request
   async sendMessageStream(
     conversationId: string,
     message: string,
@@ -526,106 +529,389 @@ class BackendApiService {
     onAIChunk: (chunk: string, fullContent: string) => void,
     onAIComplete: (aiMessage: any) => void,
     onError: (error: string) => void
-  ): Promise<void> {
-    const token = await this.getAuthToken();
-    if (!token) {
-      onError('Authentication token not found');
-      return;
-    }
+  ): Promise<() => void> {
+    let xhr: XMLHttpRequest | null = null;
+    let isAborted = false;
+    let isResolved = false;
+    
+    // Timeout'ları fonksiyon scope'unda tut (abort fonksiyonu için gerekli)
+    let connectionTimeout: NodeJS.Timeout | null = null;
+    let streamTimeout: NodeJS.Timeout | null = null;
+    
+    const abort = () => {
+      if (isAborted || isResolved) return;
+      isAborted = true;
+      // Timeout'ları temizle
+      if (connectionTimeout) {
+        clearTimeout(connectionTimeout);
+        connectionTimeout = null;
+      }
+      if (streamTimeout) {
+        clearTimeout(streamTimeout);
+        streamTimeout = null;
+      }
+      if (xhr) {
+        console.log('🛑 XMLHttpRequest abort ediliyor...');
+        xhr.abort();
+        xhr = null;
+      }
+    };
 
     try {
-      const response = await fetch(`${API_BASE_URL}/nirmind/messages/stream`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ conversationId, message, attachments, promptType }),
+      const token = await this.getAuthToken();
+      if (!token) {
+        // Token yoksa hata bildir ama abort fonksiyonunu döndür (kullanıcı kodunun çökmesini önlemek için)
+        onError('Authentication token not found');
+        // Promise ile abort fonksiyonunu döndür (sync return yerine)
+        return Promise.resolve(abort);
+      }
+
+      // Promise'i hemen döndür, abort fonksiyonunu da döndür
+      // ÖNEMLİ: Promise'i hemen resolve et ki abort fonksiyonu kullanılabilsin
+      const promise = new Promise<() => void>((resolve) => {
+        // Abort fonksiyonunu hemen döndür - böylece await eden kod abort fonksiyonunu hemen alır
+        resolve(abort);
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const errorMessage = errorData.message || `HTTP error! status: ${response.status}`;
-        // 404 hatası için özel mesaj
-        if (response.status === 404) {
-          onError(`Route not found: ${response.status}`);
-        } else {
-          onError(errorMessage);
-        }
-        return;
-      }
-
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      if (!reader) {
-        onError('Response body reader not available');
-        return;
-      }
-
-      while (true) {
-        const { done, value } = await reader.read();
+      
+      // XMLHttpRequest'i asenkron olarak başlat (Promise resolve edildikten sonra)
+      // Bu şekilde abort fonksiyonu hemen kullanılabilir
+      // NOT: connectionTimeout ve streamTimeout değişkenleri dış scope'tan erişilebilir
+      (async () => {
+      try {
+        console.log('🌊 Streaming endpoint cagriliyor (XMLHttpRequest):', `${API_BASE_URL}/nirmind/messages/stream`);
         
-        if (done) {
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const events = buffer.split('\n\n');
-        buffer = events.pop() || '';
-
-        for (const eventBlock of events) {
-          if (!eventBlock.trim()) continue;
-          
-          let eventType = '';
-          let eventData = '';
-          
-          const lines = eventBlock.split('\n');
-          for (const line of lines) {
-            if (line.startsWith('event: ')) {
-              eventType = line.substring(7).trim();
-            } else if (line.startsWith('data: ')) {
-              eventData = line.substring(6).trim();
-            }
+        xhr = new XMLHttpRequest();
+        let buffer = '';
+        let eventCount = 0;
+        let firstChunkTime: number | null = null;
+        const requestStartTime = Date.now();
+        const processedEvents = new Set<string>(); // İşlenen event'leri takip et (duplicate önlemek için)
+        
+        // Timeout mekanizması - ilk chunk gelene kadar kısa, sonrasında uzun
+        const CONNECTION_TIMEOUT = 30000; // İlk bağlantı için 30 saniye
+        const STREAM_TIMEOUT = 180000; // Stream başladıktan sonra 3 dakika (uzun AI cevapları için artırıldı)
+        
+        // İlk bağlantı timeout'u (dış scope'taki connectionTimeout değişkenine atama yap)
+        connectionTimeout = setTimeout(() => {
+          if (isAborted || isResolved || firstChunkTime) return;
+          console.error('❌ Connection timeout - ilk chunk gelmedi');
+          if (xhr) {
+            xhr.abort();
           }
+          onError('Bağlantı zaman aşımına uğradı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
+          if (!isResolved && !isAborted) {
+            isResolved = true;
+          }
+        }, CONNECTION_TIMEOUT);
+        
+        xhr.open('POST', `${API_BASE_URL}/nirmind/messages/stream`, true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        xhr.setRequestHeader('Accept', 'text/event-stream');
+        
+        xhr.onreadystatechange = () => {
+          if (isAborted) return;
           
-          if (eventType && eventData) {
-            try {
-              const data = JSON.parse(eventData);
-              
-              switch (eventType) {
-                case 'user_message':
-                  if (data.success && data.data?.userMessage) {
-                    onUserMessage(data.data.userMessage);
-                  }
-                  break;
-                case 'ai_start':
-                  onAIStart();
-                  break;
-                case 'ai_chunk':
-                  if (data.content && data.fullContent) {
-                    onAIChunk(data.content, data.fullContent);
-                  }
-                  break;
-                case 'ai_complete':
-                  if (data.success && data.data?.aiMessage) {
-                    onAIComplete(data.data.aiMessage);
-                  }
-                  break;
-                case 'error':
-                  onError(data.message || data.error || 'An error occurred');
-                  return;
+          if (xhr && xhr.readyState === XMLHttpRequest.HEADERS_RECEIVED) {
+            const contentType = xhr.getResponseHeader('Content-Type');
+            console.log('🌊 Streaming response headers alindi:', {
+              status: xhr.status,
+              statusText: xhr.statusText,
+              contentType: contentType,
+              readyState: xhr.readyState
+            });
+            
+            if (xhr.status !== 200) {
+              console.error('❌ Streaming endpoint hatasi:', xhr.status, xhr.statusText);
+              if (connectionTimeout) {
+                clearTimeout(connectionTimeout);
+                connectionTimeout = null;
               }
-            } catch (parseError) {
-              console.error('❌ SSE data parse error:', parseError, 'Event:', eventType, 'Data:', eventData);
+              onError(`HTTP error! status: ${xhr.status}`);
+              if (!isResolved && !isAborted) {
+                isResolved = true;
+              }
+              return;
             }
           }
+        };
+        
+        xhr.onprogress = () => {
+          if (isAborted || !xhr) return;
+          
+          if (!firstChunkTime) {
+            firstChunkTime = Date.now();
+            const timeToFirstChunk = firstChunkTime - requestStartTime;
+            console.log('✅ Ilk SSE chunk alindi:', {
+              timeToFirstChunk: `${timeToFirstChunk}ms`,
+              timeToFirstChunkSeconds: `${(timeToFirstChunk / 1000).toFixed(2)}s`
+            });
+            
+            // İlk chunk geldi, connection timeout'u iptal et ve stream timeout'u başlat
+            if (connectionTimeout) {
+              clearTimeout(connectionTimeout);
+              connectionTimeout = null;
+            }
+            
+            // Stream timeout'u başlat - eğer stream başladıktan sonra uzun süre veri gelmezse
+            streamTimeout = setTimeout(() => {
+              if (isAborted || isResolved) return;
+              console.error('❌ Stream timeout - uzun süre veri gelmedi');
+              if (xhr) {
+                xhr.abort();
+              }
+              onError('Yanıt alınamadı. Lütfen tekrar deneyin.');
+              if (!isResolved && !isAborted) {
+                isResolved = true;
+              }
+            }, STREAM_TIMEOUT);
+          } else {
+            // Veri gelmeye devam ediyor, stream timeout'u sıfırla
+            if (streamTimeout) {
+              clearTimeout(streamTimeout);
+              streamTimeout = setTimeout(() => {
+                if (isAborted || isResolved) return;
+                console.error('❌ Stream timeout - uzun süre veri gelmedi');
+                if (xhr) {
+                  xhr.abort();
+                }
+                onError('Yanıt alınamadı. Lütfen tekrar deneyin.');
+                if (!isResolved && !isAborted) {
+                  isResolved = true;
+                }
+              }, STREAM_TIMEOUT);
+            }
+          }
+          
+          // Yeni data geldi - sadece yeni kısmı al
+          const currentResponseText = xhr.responseText;
+          const newData = currentResponseText.substring(buffer.length);
+          
+          if (!newData) return; // Yeni data yoksa işleme
+          
+          buffer += newData;
+          
+          // Event'leri parse et - sadece tamamlanmış event'leri işle
+          // Buffer'ı '\n\n' ile böl, son kısmı (tamamlanmamış) buffer'da kalır
+          let lastNewlineIndex = -1;
+          let processedLength = 0;
+          
+          // Buffer'ın sonundan başlayarak tamamlanmış event'leri bul
+          for (let i = buffer.length - 1; i >= 0; i--) {
+            if (buffer.substring(i, i + 2) === '\n\n') {
+              lastNewlineIndex = i;
+              break;
+            }
+          }
+          
+          // Tamamlanmış event'leri işle
+          if (lastNewlineIndex >= 0) {
+            const completeEvents = buffer.substring(0, lastNewlineIndex + 2);
+            const incompleteEvent = buffer.substring(lastNewlineIndex + 2);
+            
+            // Tamamlanmış event'leri parse et
+            const eventBlocks = completeEvents.split('\n\n').filter(block => block.trim());
+            
+            for (const eventBlock of eventBlocks) {
+              if (!eventBlock.trim()) continue;
+              
+              let eventType = '';
+              let eventData = '';
+              
+              const lines = eventBlock.split('\n');
+              for (const line of lines) {
+                if (line.startsWith('event: ')) {
+                  eventType = line.substring(7).trim();
+                } else if (line.startsWith('data: ')) {
+                  eventData = line.substring(6).trim();
+                }
+              }
+              
+              if (eventType && eventData) {
+                // Event key oluştur - event type + data hash (ilk 100 karakter)
+                const eventKey = `${eventType}:${eventData.substring(0, 100)}`;
+                
+                // Duplicate kontrolü - aynı event'i birden fazla kez işleme
+                if (processedEvents.has(eventKey)) {
+                  continue; // Bu event zaten işlendi, sessizce atla
+                }
+                processedEvents.add(eventKey);
+                
+                eventCount++;
+                try {
+                  const data = JSON.parse(eventData);
+                  
+                  if (eventCount <= 5) {
+                    console.log(`📨 SSE event alindi: ${eventType} (${eventCount}. event)`);
+                  }
+                  
+                  switch (eventType) {
+                    case 'user_message':
+                      if (data.success && data.data?.userMessage) {
+                        console.log('✅ User message event isleniyor');
+                        onUserMessage(data.data.userMessage);
+                      }
+                      break;
+                    case 'ai_start':
+                      console.log('✅ AI start event isleniyor');
+                      onAIStart();
+                      break;
+                    case 'ai_chunk':
+                      if (data.content && data.fullContent) {
+                        if (eventCount <= 3) {
+                          console.log(`📝 AI chunk alindi (${data.content.length} karakter)`);
+                        }
+                        onAIChunk(data.content, data.fullContent);
+                      }
+                      break;
+                    case 'ai_complete':
+                      if (isAborted) return;
+                      console.log('✅ AI complete event isleniyor');
+                      // Timeout'ları temizle
+                      if (connectionTimeout) {
+                        clearTimeout(connectionTimeout);
+                        connectionTimeout = null;
+                      }
+                      if (streamTimeout) {
+                        clearTimeout(streamTimeout);
+                        streamTimeout = null;
+                      }
+                      if (data.success && data.data?.aiMessage) {
+                        onAIComplete(data.data.aiMessage);
+                      }
+                      const totalDuration = Date.now() - requestStartTime;
+                      console.log('✅ SSE stream tamamlandi:', {
+                        totalDuration: `${totalDuration}ms`,
+                        totalDurationSeconds: `${(totalDuration / 1000).toFixed(2)}s`,
+                        eventCount
+                      });
+                      if (!isResolved && !isAborted) {
+                        isResolved = true;
+                      }
+                      return;
+                    case 'error':
+                      if (isAborted) return;
+                      // Timeout'ları temizle
+                      if (connectionTimeout) {
+                        clearTimeout(connectionTimeout);
+                        connectionTimeout = null;
+                      }
+                      if (streamTimeout) {
+                        clearTimeout(streamTimeout);
+                        streamTimeout = null;
+                      }
+                      console.error('❌ SSE error event:', data.message || data.error);
+                      onError(data.message || data.error || 'Bir hata oluştu');
+                      if (!isResolved && !isAborted) {
+                        isResolved = true;
+                      }
+                      return;
+                  }
+                } catch (parseError) {
+                  console.error('❌ SSE data parse error:', parseError, 'Event:', eventType, 'Data:', eventData?.substring(0, 100) || 'N/A');
+                }
+              }
+            }
+            
+            // Buffer'ı güncelle - sadece tamamlanmamış kısmı tut
+            buffer = incompleteEvent;
+          }
+        };
+        
+        xhr.onload = () => {
+          if (isAborted) return;
+          // Timeout'ları temizle
+          if (connectionTimeout) {
+            clearTimeout(connectionTimeout);
+            connectionTimeout = null;
+          }
+          if (streamTimeout) {
+            clearTimeout(streamTimeout);
+            streamTimeout = null;
+          }
+          const totalDuration = Date.now() - requestStartTime;
+          console.log('✅ SSE stream tamamlandi (onload):', {
+            status: xhr?.status,
+            totalDuration: `${totalDuration}ms`,
+            eventCount
+          });
+          if (!isResolved && !isAborted) {
+            isResolved = true;
+          }
+        };
+        
+        xhr.onerror = () => {
+          if (isAborted) return;
+          // Timeout'ları temizle
+          if (connectionTimeout) {
+            clearTimeout(connectionTimeout);
+            connectionTimeout = null;
+          }
+          if (streamTimeout) {
+            clearTimeout(streamTimeout);
+            streamTimeout = null;
+          }
+          console.error('❌ XMLHttpRequest error:', {
+            status: xhr?.status,
+            statusText: xhr?.statusText,
+            readyState: xhr?.readyState
+          });
+          onError(`Bağlantı hatası: ${xhr?.statusText || 'Sunucuya bağlanılamadı'}`);
+          if (!isResolved && !isAborted) {
+            isResolved = true;
+          }
+        };
+        
+        xhr.ontimeout = () => {
+          if (isAborted) return;
+          // Timeout'ları temizle
+          if (connectionTimeout) {
+            clearTimeout(connectionTimeout);
+            connectionTimeout = null;
+          }
+          if (streamTimeout) {
+            clearTimeout(streamTimeout);
+            streamTimeout = null;
+          }
+          const timeoutDuration = Date.now() - requestStartTime;
+          // Native timeout - bu durum normal olabilir (uzun AI cevapları için)
+          // Log seviyesini düşür, sadece bilgilendirme amaçlı
+          console.warn('⚠️ XMLHttpRequest native timeout (bu normal olabilir - uzun AI cevapları için):', {
+            duration: `${timeoutDuration}ms`,
+            durationSeconds: `${(timeoutDuration / 1000).toFixed(2)}s`,
+            firstChunkReceived: !!firstChunkTime,
+            eventCount
+          });
+          onError('İstek zaman aşımına uğradı. Lütfen tekrar deneyin.');
+          if (!isResolved && !isAborted) {
+            isResolved = true;
+          }
+        };
+        
+        // Native timeout'u da ayarla (fallback için)
+        xhr.timeout = STREAM_TIMEOUT;
+        
+        // Request body gönder
+        xhr.send(JSON.stringify({ conversationId, message, attachments, promptType }));
+        
+        console.log('✅ XMLHttpRequest gonderildi, SSE stream bekleniyor...');
+        
+      } catch (error: any) {
+        if (isAborted) return;
+        console.error('❌ Streaming error:', error);
+        onError(error.message || 'Streaming connection failed');
+        if (!isResolved && !isAborted) {
+          isResolved = true;
         }
       }
+      })(); // IIFE - Immediately Invoked Function Expression
+      
+      return promise; // Promise'i döndür (abort fonksiyonu ile resolve edilmiş)
     } catch (error: any) {
-      console.error('❌ Streaming error:', error);
-      onError(error.message || 'Streaming connection failed');
+      console.error('❌ sendMessageStream başlatılırken hata:', error);
+      onError(error.message || 'Streaming başlatılamadı');
+      // Hata durumunda da abort fonksiyonunu Promise olarak döndür
+      return Promise.resolve(abort);
     }
   }
 

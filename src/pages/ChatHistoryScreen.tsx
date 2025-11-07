@@ -71,10 +71,14 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
   onOpenProfile,
 }) => {
   const { user } = useAuth();
-  const { conversations, deleteConversation, loadConversations, updateConversationMessages } = useChat();
+  const { conversations, deleteConversation, loadConversations, updateConversationMessages, selectConversation } = useChat();
   const [searchText, setSearchText] = useState('');
   const [expandedConversations, setExpandedConversations] = useState<Set<string>>(new Set());
   const [loadingFullMessages, setLoadingFullMessages] = useState<Set<string>>(new Set());
+  const [showAllConversations, setShowAllConversations] = useState(false);
+  
+  // Maksimum gösterilecek konuşma sayısı
+  const MAX_CONVERSATIONS_DISPLAY = 10;
   
   // Kullanıcı adının baş harflerini al
   const getInitials = () => {
@@ -99,6 +103,26 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
   useEffect(() => {
     loadConversations();
   }, [loadConversations]);
+
+  // Arama metni değiştiğinde tümünü göster durumunu sıfırla
+  useEffect(() => {
+    setShowAllConversations(false);
+  }, [searchText]);
+
+  // Filtrelenmiş konuşmalar
+  const filteredConversations = conversations.filter(conv => {
+    const title = conv.title || '';
+    const search = searchText || '';
+    return title.toLowerCase().includes(search.toLowerCase());
+  });
+
+  // Gösterilecek konuşmalar
+  const displayedConversations = showAllConversations 
+    ? filteredConversations 
+    : filteredConversations.slice(0, MAX_CONVERSATIONS_DISPLAY);
+  
+  // 10'dan fazla konuşma var mı?
+  const hasMoreConversations = filteredConversations.length > MAX_CONVERSATIONS_DISPLAY;
 
   const handleLoadAllMessages = async (conversationId: string) => {
     setLoadingFullMessages(prev => new Set(prev).add(conversationId));
@@ -138,12 +162,26 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
     }
   };
 
-  const handleConversationSelect = (conversationId: string) => {
+  const handleConversationSelect = async (conversationId: string) => {
     // Klavyeyi kapat
     Keyboard.dismiss();
+    
+    console.log('📥 Geçmiş sohbetten conversation seçiliyor:', conversationId);
+    
+    // Conversation'ı ChatContext'te seç - bu conversation'ı yükler
+    try {
+      await selectConversation(conversationId);
+      console.log('✅ Conversation ChatContext\'te seçildi:', conversationId);
+    } catch (error) {
+      console.error('❌ Conversation seçilirken hata:', error);
+    }
+    
+    // Parent component'e bildir
     if (onSelectConversation) {
       onSelectConversation(conversationId);
     }
+    
+    // ChatHistoryScreen'i kapat ve Home'a dön
     onBack();
   };
 
@@ -239,13 +277,7 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
 
           {/* Chat List */}
           <View style={styles.chatList}>
-            {conversations
-              .filter(conv => {
-                const title = conv.title || '';
-                const search = searchText || '';
-                return title.toLowerCase().includes(search.toLowerCase());
-              })
-              .map((conversation) => {
+            {displayedConversations.map((conversation) => {
                 const isExpanded = expandedConversations.has(conversation.id);
                 const isLoading = loadingFullMessages.has(conversation.id);
                 const totalMessageCount = conversation.totalMessageCount || conversation.messages.length;
@@ -303,6 +335,19 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
                 );
               })}
           </View>
+          
+          {/* Tümünü Gör Butonu - 10'dan fazla konuşma varsa göster */}
+          {!showAllConversations && hasMoreConversations && (
+            <TouchableOpacity
+              style={styles.viewAllButton}
+              onPress={() => setShowAllConversations(true)}
+              activeOpacity={0.7}
+            >
+              <Text allowFontScaling={false} style={styles.viewAllButtonText}>
+                Tümünü Gör ({filteredConversations.length - MAX_CONVERSATIONS_DISPLAY} sohbet daha)
+              </Text>
+            </TouchableOpacity>
+          )}
         </ScrollView>
 
 
@@ -433,6 +478,20 @@ const styles = StyleSheet.create({
   showAllButtonText: {
     fontFamily: 'Poppins-Medium',
     fontSize: 12,
+    fontWeight: '500',
+    color: '#7E7AE9',
+  },
+  viewAllButton: {
+    marginTop: 16,
+    marginBottom: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewAllButtonText: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 14,
     fontWeight: '500',
     color: '#7E7AE9',
   },

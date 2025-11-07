@@ -326,15 +326,24 @@ const InputComponent: React.FC<InputComponentProps> = ({
       return;
     }
     
-    // Input'u temizle
-    setInputText("");
-    // Send message
+    // Input'u temizleme - ChatScreen'de yapılacak
+    // Send message - ChatScreen input'u temizleyecek
     onSendMessage();
   };
 
   const handleTextChange = (text: string) => {
+    // React state'i güncelle
     setInputText(text);
     onTextChange?.(text);
+    
+    // Native state'i de senkronize et (özellikle temizleme için önemli)
+    if (text === '' && textInputRef.current) {
+      try {
+        textInputRef.current.setNativeProps({ text: '' });
+      } catch (error) {
+        // Hata durumunda sessizce devam et
+      }
+    }
   };
 
   const handleContentSizeChange = (event: any) => {
@@ -350,9 +359,11 @@ const InputComponent: React.FC<InputComponentProps> = ({
     onScroll?.(event);
   };
 
-  // Input text değiştiğinde son yazıları göstermek için
+  // Input text değiştiğinde son yazıları göstermek için ve native state'i senkronize et
   useEffect(() => {
-    if (inputText.length > 0 && textInputRef.current) {
+    if (!textInputRef.current) return;
+    
+    if (inputText.length > 0) {
       // Kısa bir gecikme ile cursor'ı sona taşı
       setTimeout(() => {
         if (textInputRef.current) {
@@ -360,7 +371,23 @@ const InputComponent: React.FC<InputComponentProps> = ({
             selection: { start: inputText.length, end: inputText.length }
           });
         }
-      }, 50); // Gecikme azaltıldı (100ms -> 50ms)
+      }, 50);
+    } else {
+      // Input temizlendiğinde TextInput'un native state'ini de temizle
+      // Bu React Native'de native state ile React state senkronizasyonu için gerekli
+      // Hemen temizle (gecikme yok)
+      try {
+        textInputRef.current.setNativeProps({
+          text: ''
+        });
+        // Selection'ı da sıfırla
+        textInputRef.current.setNativeProps({
+          selection: { start: 0, end: 0 }
+        });
+      } catch (error) {
+        // Hata durumunda sessizce devam et
+        // Native state zaten React state'e bağlı, bu sadece bir optimizasyon
+      }
     }
   }, [inputText]);
 
