@@ -4,6 +4,7 @@ import Markdown from 'react-native-markdown-display';
 import { ChatMessage } from '@/src/lib/mock/types';
 import { useChat } from '@/src/lib/context/ChatContext';
 import { WebView } from 'react-native-webview';
+import { getFileTypeIcon, formatFileSize } from '@/src/utils/fileValidation';
 
 const { width, height } = Dimensions.get('window');
 
@@ -83,6 +84,38 @@ const MessageList: React.FC<MessageListProps> = ({
 
   const closePreview = () => {
     setPreviewFile(null);
+  };
+
+  // Dosya tipine göre renk döndür
+  const getFileTypeColor = (extension: string, mimeType?: string | null): string => {
+    if (mimeType?.startsWith('image/')) return '#00DDA5';
+    if (mimeType?.startsWith('video/')) return '#FF6B6B';
+    if (mimeType?.startsWith('audio/')) return '#4ECDC4';
+    
+    switch (extension.toLowerCase()) {
+      case 'pdf':
+        return '#FF6B6B';
+      case 'doc':
+      case 'docx':
+        return '#4A90E2';
+      case 'xls':
+      case 'xlsx':
+        return '#50C878';
+      case 'ppt':
+      case 'pptx':
+        return '#FF9500';
+      case 'txt':
+      case 'md':
+        return '#9B59B6';
+      case 'json':
+      case 'xml':
+        return '#E67E22';
+      case 'zip':
+      case 'rar':
+        return '#95A5A6';
+      default:
+        return '#7F8C8D';
+    }
   };
 
   const openFileInBrowser = async (uri: string) => {
@@ -181,17 +214,38 @@ const MessageList: React.FC<MessageListProps> = ({
               {/* Dosyalar varsa göster */}
               {message.files && message.files.length > 0 && (
                 <View style={styles.filesContainer}>
-                  {message.files.map((file, index) => (
-                    <TouchableOpacity 
-                      key={index} 
-                      style={styles.fileItem}
-                      onPress={() => handleFilePress(file)}
-                      activeOpacity={0.7}
-                    >
-                      <Text allowFontScaling={false} style={styles.fileIcon}>📄</Text>
-                      <Text allowFontScaling={false} style={styles.fileName}>{file.name}</Text>
-                    </TouchableOpacity>
-                  ))}
+                  {message.files.map((file, index) => {
+                    const fileExtension = file.name.toLowerCase().split('.').pop() || '';
+                    const fileIcon = getFileTypeIcon(file.mimeType || null, file.name);
+                    const fileSize = file.size ? formatFileSize(file.size) : null;
+                    const fileTypeColor = getFileTypeColor(fileExtension, file.mimeType);
+                    
+                    return (
+                      <TouchableOpacity 
+                        key={index} 
+                        style={[styles.fileItem, { borderLeftColor: fileTypeColor }]}
+                        onPress={() => handleFilePress(file)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[styles.fileIconContainer, { backgroundColor: fileTypeColor + '20' }]}>
+                          <Text allowFontScaling={false} style={styles.fileIcon}>{fileIcon}</Text>
+                        </View>
+                        <View style={styles.fileInfoContainer}>
+                          <Text allowFontScaling={false} style={styles.fileName} numberOfLines={1}>
+                            {file.name}
+                          </Text>
+                          {fileSize && (
+                            <Text allowFontScaling={false} style={styles.fileSize}>
+                              {fileSize} • {fileExtension.toUpperCase()}
+                            </Text>
+                          )}
+                        </View>
+                        <View style={styles.fileArrowContainer}>
+                          <Text allowFontScaling={false} style={styles.fileArrow}>›</Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
               )}
               
@@ -432,23 +486,57 @@ const styles = StyleSheet.create({
   },
   filesContainer: {
     marginBottom: 8,
-    gap: 8,
+    gap: 10,
   },
   fileItem: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    padding: 12,
+    borderRadius: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#7F8C8D',
+    gap: 12,
+    minHeight: 64,
+  },
+  fileIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 10,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    padding: 8,
-    borderRadius: 8,
-    gap: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   fileIcon: {
-    fontSize: 16,
+    fontSize: 24,
+  },
+  fileInfoContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    gap: 4,
   },
   fileName: {
     color: '#FFFFFF',
-    fontSize: 14,
-    flex: 1,
+    fontSize: 15,
+    fontFamily: 'Poppins-Medium',
+    lineHeight: 20,
+  },
+  fileSize: {
+    color: 'rgba(255, 255, 255, 0.6)',
+    fontSize: 12,
+    fontFamily: 'Poppins-Regular',
+    lineHeight: 16,
+  },
+  fileArrowContainer: {
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fileArrow: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 20,
+    fontWeight: '300',
   },
   // Dosya Önizleme Modal Stilleri
   previewModalOverlay: {
