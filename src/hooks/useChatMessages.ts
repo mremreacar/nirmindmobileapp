@@ -38,12 +38,14 @@ export const useChatMessages = () => {
 
     // Conversation ID kontrolü - kritik!
     if (!conversationId) {
+      const errorMessage = 'conversationId eksik, mesaj gönderilemedi';
       console.error('❌ sendMessage: conversationId eksik, mesaj gönderilemedi:', {
         messageText: messageText.substring(0, 50),
         hasImages: selectedImages.length > 0,
         hasFiles: selectedFiles.length > 0
       });
-      return;
+      // Hata fırlat ki ChatScreen bunu yakalayabilsin
+      throw new Error(errorMessage);
     }
 
     console.log('📤 Mesaj backend\'e gönderiliyor:', { messageText, conversationId, isResearchMode });
@@ -95,67 +97,95 @@ export const useChatMessages = () => {
       // Resimleri yükle
       if (selectedImages.length > 0) {
         console.log('📸 Resimler backend\'e yükleniyor...');
-        const imageAttachments = await Promise.all(
+        const imageUploadResults = await Promise.allSettled(
           selectedImages.map(async (imageUri) => {
-            try {
-              // Resmi base64'e çevir
-              const base64Data = await FileSystem.readAsStringAsync(imageUri, {
-                encoding: FileSystem.EncodingType.Base64,
-              });
-              
-              // MIME type belirle
-              const getImageMimeType = (uri: string): string => {
-                const extension = uri.toLowerCase().split('.').pop();
-                switch (extension) {
-                  case 'jpg':
-                  case 'jpeg':
-                    return 'image/jpeg';
-                  case 'png':
-                    return 'image/png';
-                  case 'gif':
-                    return 'image/gif';
-                  case 'webp':
-                    return 'image/webp';
-                  default:
-                    return 'image/jpeg';
-                }
-              };
-              
-              const mimeType = getImageMimeType(imageUri);
-              const filename = `image_${Date.now()}_${Math.random().toString(36).substring(7)}.${mimeType.split('/')[1]}`;
-              
-              // Backend'e yükle
-              const uploadResponse = await backendApiService.uploadAttachment(
-                'IMAGE',
-                base64Data,
-                filename,
-                mimeType
-              );
-              
-              if (uploadResponse.success && uploadResponse.data) {
-                console.log('✅ Resim yüklendi:', uploadResponse.data.url);
-                return {
-                  type: 'IMAGE',
-                  url: uploadResponse.data.url,
-                  filename: uploadResponse.data.filename,
-                  size: uploadResponse.data.size,
-                  mimeType: uploadResponse.data.mimeType
-                };
-              } else {
-                console.error('❌ Resim yükleme hatası:', uploadResponse.error);
-                console.error('❌ Resim yükleme detayları:', uploadResponse.message || uploadResponse);
-                // Hata olsa bile null döndür, böylece diğer dosyalar yüklenmeye devam eder
-                return null;
+            // Resmi base64'e çevir
+            const base64Data = await FileSystem.readAsStringAsync(imageUri, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+            
+            // Base64 boyutunu kontrol et (50MB limit için ~37MB görsel)
+            const base64SizeMB = (base64Data.length * 3) / 4 / 1024 / 1024;
+            if (base64SizeMB > 35) {
+              throw new Error(`Görsel çok büyük (${base64SizeMB.toFixed(2)}MB). Maksimum boyut: 35MB. Lütfen daha küçük bir görsel seçin.`);
+            }
+            
+            // MIME type belirle
+            const getImageMimeType = (uri: string): string => {
+              const extension = uri.toLowerCase().split('.').pop();
+              switch (extension) {
+                case 'jpg':
+                case 'jpeg':
+                  return 'image/jpeg';
+                case 'png':
+                  return 'image/png';
+                case 'gif':
+                  return 'image/gif';
+                case 'webp':
+                  return 'image/webp';
+                default:
+                  return 'image/jpeg';
               }
-            } catch (error) {
-              console.error('❌ Resim işleme hatası:', error);
-              return null;
+            };
+            
+            const mimeType = getImageMimeType(imageUri);
+            const filename = `image_${Date.now()}_${Math.random().toString(36).substring(7)}.${mimeType.split('/')[1]}`;
+            
+            // Backend'e yükle
+            const uploadResponse = await backendApiService.uploadAttachment(
+              'IMAGE',
+              base64Data,
+              filename,
+              mimeType
+            );
+            
+            if (uploadResponse.success && uploadResponse.data) {
+              console.log('✅ Resim yüklendi:', uploadResponse.data.url);
+              return {
+                type: 'IMAGE',
+                url: uploadResponse.data.url,
+                filename: uploadResponse.data.filename,
+                size: uploadResponse.data.size,
+                mimeType: uploadResponse.data.mimeType
+              };
+            } else {
+              const errorMsg = uploadResponse.error || uploadResponse.message || 'Resim yüklenemedi';
+              throw new Error(errorMsg);
             }
           })
         );
         
+        // Başarılı ve başarısız yüklemeleri ayır
+        const successfulImageAttachments: any[] = [];
+        const failedUploads: string[] = [];
+        
+        imageUploadResults.forEach((result, index) => {
+          if (result.status === 'fulfilled' && result.value) {
+            successfulImageAttachments.push(result.value);
+          } else {
+            const errorMsg = result.status === 'rejected' 
+              ? result.reason?.message || 'Bilinmeyen hata'
+              : 'Görsel yüklenemedi';
+            failedUploads.push(`Görsel ${index + 1}: ${errorMsg}`);
+            console.error(`❌ Görsel ${index + 1} yüklenemedi:`, errorMsg);
+          }
+        });
+        
+        // Eğer tüm görseller başarısız olduysa hata fırlat
+        if (successfulImageAttachments.length === 0 && selectedImages.length > 0) {
+          const errorMessage = failedUploads.length > 0 
+            ? failedUploads.join('\n')
+            : 'Tüm görseller yüklenemedi. Lütfen daha küçük görseller seçin veya tekrar deneyin.';
+          throw new Error(errorMessage);
+        }
+        
+        // Eğer bazı görseller başarısız olduysa uyarı ver ama devam et
+        if (failedUploads.length > 0) {
+          console.warn(`⚠️ ${failedUploads.length} görsel yüklenemedi:`, failedUploads);
+        }
+        
         // Başarılı yüklemeleri ekle
-        attachments.push(...imageAttachments.filter(att => att !== null));
+        attachments.push(...successfulImageAttachments);
       }
       
       // Dosyaları yükle
@@ -228,6 +258,11 @@ export const useChatMessages = () => {
 
       // Araştırma modu aktifse veya promptType gönderilmişse onu kullan
       const finalPromptType = promptType || (isResearchMode ? 'RESEARCH' : undefined);
+
+      // Attachment'lar ve mesaj kontrolü - backend'e göndermeden önce
+      if (attachments.length === 0 && !finalMessage.trim()) {
+        throw new Error('Mesaj veya görsel/dosya gereklidir. Lütfen bir mesaj yazın veya görsel/dosya seçin.');
+      }
 
       console.log('📤 Backend\'e gönderilecek attachment\'lar:', {
         attachmentCount: attachments.length,
@@ -788,6 +823,24 @@ export const useChatMessages = () => {
       
       const errorText = error.message || 'Bağlantı hatası. Lütfen internet bağlantınızı kontrol edin.';
       
+      // Görsel yükleme hatası kontrolü - Alert göster
+      if (errorText.includes('Görsel') || 
+          errorText.includes('görsel') || 
+          errorText.includes('request entity too large') ||
+          errorText.includes('çok büyük') ||
+          errorText.includes('Maksimum boyut')) {
+        console.error('❌ Görsel yükleme hatası:', errorText);
+        Alert.alert(
+          "Görsel Yükleme Hatası",
+          errorText.includes('çok büyük') || errorText.includes('Maksimum boyut')
+            ? errorText
+            : "Görsel yüklenemedi. Lütfen daha küçük bir görsel seçin veya tekrar deneyin.",
+          [{ text: "Tamam" }]
+        );
+        setIsLoading(false);
+        return; // Görsel yükleme hatasında mesajı chat'e ekleme
+      }
+      
       // Timeout hataları - UI'da gösterilmesin
       const isTimeoutError = errorText.includes('zaman aşımına uğradı') || 
                              errorText.includes('timeout') || 
@@ -812,7 +865,21 @@ export const useChatMessages = () => {
           "Çok fazla istek gönderildi. Lütfen birkaç dakika sonra tekrar deneyin.",
           [{ text: "Tamam" }]
         );
+        setIsLoading(false);
         return; // Rate limit hatasında mesajı chat'e ekleme
+      }
+      
+      // Mesaj veya attachment gereklidir hatası - Alert göster
+      if (errorText.includes('Mesaj veya görsel') || 
+          errorText.includes('Message or attachment is required')) {
+        console.error('❌ Mesaj/attachment eksik hatası:', errorText);
+        Alert.alert(
+          "Eksik Bilgi",
+          "Mesaj veya görsel/dosya gereklidir. Lütfen bir mesaj yazın veya görsel/dosya seçin.",
+          [{ text: "Tamam" }]
+        );
+        setIsLoading(false);
+        return; // Bu hatada mesajı chat'e ekleme
       }
       
       const errorMessage: ChatMessage = {
