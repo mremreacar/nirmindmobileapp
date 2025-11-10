@@ -1,4 +1,8 @@
-import React, { useState } from "react";
+
+
+// ------------------------------------------------------------
+// File: src/screens/CompleteProfileScreen.tsx (FINAL)
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -17,6 +21,12 @@ import { useFonts } from "expo-font";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import BackendApiService from "../services/BackendApiService";
 import { useAuth } from "../contexts/AuthContext";
+import { CountryCode } from "react-native-country-picker-modal";
+import PhoneField from "../components/PhoneField";
+import { parsePhoneNumberFromString } from "libphonenumber-js";
+
+const DEFAULT_COUNTRY_CODE: CountryCode = "TR";
+const DEFAULT_CALLING_CODE = "90";
 
 const { width, height } = Dimensions.get("window");
 
@@ -38,22 +48,25 @@ const CompleteProfileScreen: React.FC<CompleteProfileScreenProps> = ({
   const isPlaceholderValue = (value: string | undefined): boolean => {
     if (!value) return true;
     const normalized = value.trim().toLowerCase();
-    return normalized === 'apple' || normalized === 'google' || normalized === 'user' || normalized === '';
+    return normalized === "apple" || normalized === "google" || normalized === "user" || normalized === "";
   };
 
   const getInitialFirstName = () => {
-    const value = initialData?.firstName?.trim() || '';
-    return isPlaceholderValue(value) ? '' : value;
+    const value = initialData?.firstName?.trim() || "";
+    return isPlaceholderValue(value) ? "" : value;
   };
 
   const getInitialLastName = () => {
-    const value = initialData?.lastName?.trim() || '';
-    return isPlaceholderValue(value) ? '' : value;
+    const value = initialData?.lastName?.trim() || "";
+    return isPlaceholderValue(value) ? "" : value;
   };
 
   const [firstName, setFirstName] = useState(getInitialFirstName());
   const [lastName, setLastName] = useState(getInitialLastName());
-  const [phone, setPhone] = useState(initialData?.phone?.trim() || "");
+  const [countryCode, setCountryCode] = useState<CountryCode>(DEFAULT_COUNTRY_CODE);
+  const [callingCode, setCallingCode] = useState<string>(DEFAULT_CALLING_CODE);
+  const [phoneNumber, setPhoneNumber] = useState<string>(""); // ulusal numara (sadece rakam)
+  const [isCountryPickerVisible, setIsCountryPickerVisible] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState(false);
   const { user, setUser } = useAuth();
   const backendApiService = BackendApiService.getInstance();
@@ -69,6 +82,41 @@ const CompleteProfileScreen: React.FC<CompleteProfileScreenProps> = ({
   const needsLastName = missingFields.includes("lastName");
   const needsPhone = missingFields.includes("phone");
 
+  // initialData.phone varsa parçala (E.164: +<callingCode><ulusal>)
+  useEffect(() => {
+    let isMounted = true;
+
+    const initializePhoneState = async () => {
+      const rawPhone = initialData?.phone?.trim();
+      if (!rawPhone) {
+        if (isMounted) {
+          setPhoneNumber("");
+          setCallingCode(DEFAULT_CALLING_CODE);
+          setCountryCode(DEFAULT_COUNTRY_CODE);
+        }
+        return;
+      }
+
+      const sanitized = rawPhone.replace(/\s+/g, "");
+      const phoneMatch = sanitized.match(/^\+?(\d{1,4})(\d*)$/);
+      if (phoneMatch) {
+        const [, detectedCallingCode, remainingDigits] = phoneMatch;
+        if (isMounted) {
+          setCallingCode(detectedCallingCode);
+          setPhoneNumber(remainingDigits.replace(/\D/g, ""));
+        }
+      } else {
+        const digitsOnly = sanitized.replace(/[^0-9]/g, "");
+        if (isMounted) {
+          setPhoneNumber(digitsOnly);
+        }
+      }
+    };
+
+    initializePhoneState();
+    return () => { isMounted = false; };
+  }, [initialData?.phone]);
+
   const handleComplete = async () => {
     // Validation
     if (needsFirstName && (!firstName || firstName.trim() === "")) {
@@ -81,28 +129,35 @@ const CompleteProfileScreen: React.FC<CompleteProfileScreenProps> = ({
       return;
     }
 
-    if (needsPhone && (!phone || phone.trim() === "")) {
+    const sanitizedPhoneNumber = phoneNumber.replace(/[^0-9]/g, "");
+    let e164PhoneNumber = "";
+
+    if (needsPhone && !sanitizedPhoneNumber) {
       Alert.alert("Eksik Bilgi", "Lütfen telefon numaranızı giriniz.");
       return;
     }
 
     // Placeholder değerleri kontrol et
     const normalizedFirstName = firstName.trim().toLowerCase();
-    if (normalizedFirstName === 'apple' || normalizedFirstName === 'google' || normalizedFirstName === 'user') {
+    if (["apple", "google", "user"].includes(normalizedFirstName)) {
       Alert.alert("Geçersiz İsim", "Lütfen gerçek adınızı giriniz. 'Apple', 'Google' veya 'User' gibi değerler kabul edilmez.");
       return;
     }
 
     const normalizedLastName = lastName.trim().toLowerCase();
-    if (normalizedLastName === 'apple' || normalizedLastName === 'google' || normalizedLastName === 'user') {
+    if (["apple", "google", "user"].includes(normalizedLastName)) {
       Alert.alert("Geçersiz Soyisim", "Lütfen gerçek soyadınızı giriniz. 'Apple', 'Google' veya 'User' gibi değerler kabul edilmez.");
       return;
     }
 
-    // Telefon formatı kontrolü (opsiyonel)
-    if (needsPhone && phone && !phone.match(/^\+?[0-9]{10,15}$/)) {
-      Alert.alert("Hata", "Lütfen geçerli bir telefon numarası giriniz.");
-      return;
+    // Telefon E.164 regex kontrolü (opsiyonel)
+    if (needsPhone && sanitizedPhoneNumber) {
+      const parsedPhone = parsePhoneNumberFromString(`+${callingCode}${sanitizedPhoneNumber}`);
+      if (!parsedPhone || !parsedPhone.isValid()) {
+        Alert.alert("Hata", "Lütfen geçerli bir telefon numarası giriniz.");
+        return;
+      }
+      e164PhoneNumber = parsedPhone.number;
     }
 
     try {
@@ -110,14 +165,10 @@ const CompleteProfileScreen: React.FC<CompleteProfileScreenProps> = ({
 
       // Profil bilgilerini güncelle
       const updateData: any = {};
-      if (needsFirstName && firstName.trim()) {
-        updateData.firstName = firstName.trim();
-      }
-      if (needsLastName && lastName.trim()) {
-        updateData.lastName = lastName.trim();
-      }
-      if (needsPhone && phone.trim()) {
-        updateData.phone = phone.trim();
+      if (needsFirstName && firstName.trim()) updateData.firstName = firstName.trim();
+      if (needsLastName && lastName.trim()) updateData.lastName = lastName.trim();
+      if (needsPhone && sanitizedPhoneNumber) {
+        updateData.phone = e164PhoneNumber;
       }
 
       const response = await backendApiService.updateUserProfile(updateData);
@@ -132,12 +183,12 @@ const CompleteProfileScreen: React.FC<CompleteProfileScreenProps> = ({
             phone: response.data.phone || user.phone,
           };
           setUser(updatedUser);
-          
-          // AsyncStorage'a da kaydet
+
+          // AsyncStorage'a kaydet
           try {
-            await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
+            await AsyncStorage.setItem("user", JSON.stringify(updatedUser));
           } catch (error) {
-            console.error('❌ User AsyncStorage kaydetme hatası:', error);
+            console.error("❌ User AsyncStorage kaydetme hatası:", error);
           }
         }
 
@@ -155,31 +206,16 @@ const CompleteProfileScreen: React.FC<CompleteProfileScreenProps> = ({
     }
   };
 
-  if (!fontsLoaded) {
-    return null;
-  }
+  if (!fontsLoaded) return null;
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-    >
-      <LinearGradient
-        colors={["#03030B", "#16163C"]}
-        style={styles.gradient}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-        >
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+      <LinearGradient colors={["#03030B", "#16163C"]} style={styles.gradient} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }}>
+        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
           {/* Header */}
           <View style={styles.header}>
             <Text style={styles.title}>Profil Bilgilerinizi Tamamlayın</Text>
-            <Text style={styles.subtitle}>
-              Devam etmek için eksik bilgilerinizi giriniz
-            </Text>
+            <Text style={styles.subtitle}>Devam etmek için eksik bilgilerinizi giriniz</Text>
           </View>
 
           {/* Form */}
@@ -217,36 +253,23 @@ const CompleteProfileScreen: React.FC<CompleteProfileScreenProps> = ({
             {needsPhone && (
               <View style={styles.inputContainer}>
                 <Text style={styles.label}>Telefon Numarası *</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="+90 555 123 45 67"
-                  placeholderTextColor="#999999"
-                  value={phone}
-                  onChangeText={setPhone}
-                  keyboardType="phone-pad"
-                  editable={!isLoading}
+                <PhoneField
+                  value={phoneNumber}
+                  onChange={setPhoneNumber}
+                  countryCode={countryCode}
+                  callingCode={callingCode}
+                  setCallingCode={setCallingCode}
+                  setCountryCode={setCountryCode}
+                  disabled={isLoading}
                 />
               </View>
             )}
           </View>
 
           {/* Complete Button */}
-          <TouchableOpacity
-            style={[styles.completeButton, isLoading && styles.completeButtonDisabled]}
-            onPress={handleComplete}
-            disabled={isLoading}
-          >
-            <LinearGradient
-              colors={["#00DDA5", "#007759"]}
-              style={styles.completeButtonGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-            >
-              {isLoading ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.completeButtonText}>Tamamla</Text>
-              )}
+          <TouchableOpacity style={[styles.completeButton, isLoading && styles.completeButtonDisabled]} onPress={handleComplete} disabled={isLoading}>
+            <LinearGradient colors={["#00DDA5", "#007759"]} style={styles.completeButtonGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+              {isLoading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.completeButtonText}>Tamamla</Text>}
             </LinearGradient>
           </TouchableOpacity>
         </ScrollView>
@@ -256,86 +279,20 @@ const CompleteProfileScreen: React.FC<CompleteProfileScreenProps> = ({
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  gradient: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: 24,
-    paddingTop: 60,
-    paddingBottom: 40,
-  },
-  header: {
-    marginBottom: 40,
-    alignItems: "center",
-  },
-  title: {
-    fontFamily: "Poppins-Medium",
-    fontSize: 24,
-    fontWeight: "500",
-    color: "#FFFFFF",
-    textAlign: "center",
-    marginBottom: 12,
-  },
-  subtitle: {
-    fontFamily: "Poppins-Regular",
-    fontSize: 14,
-    fontWeight: "400",
-    color: "#CCCCCC",
-    textAlign: "center",
-    lineHeight: 20,
-  },
-  form: {
-    marginBottom: 32,
-  },
-  inputContainer: {
-    marginBottom: 24,
-  },
-  label: {
-    fontFamily: "Poppins-Medium",
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#FFFFFF",
-    marginBottom: 8,
-  },
-  input: {
-    width: "100%",
-    height: 56,
-    backgroundColor: "#1A1A3E",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    fontFamily: "Poppins-Regular",
-    fontSize: 16,
-    color: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#2A2A4E",
-  },
-  completeButton: {
-    width: "100%",
-    borderRadius: 50,
-    overflow: "hidden",
-    height: 56,
-    marginTop: 20,
-  },
-  completeButtonDisabled: {
-    opacity: 0.6,
-  },
-  completeButtonGradient: {
-    width: "100%",
-    height: 56,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  completeButtonText: {
-    fontFamily: "Poppins-Medium",
-    fontSize: 16,
-    fontWeight: "500",
-    color: "#FFFFFF",
-  },
+  container: { flex: 1 },
+  gradient: { flex: 1 },
+  scrollContent: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 60, paddingBottom: 40 },
+  header: { marginBottom: 40, alignItems: "center" },
+  title: { fontFamily: "Poppins-Medium", fontSize: 24, fontWeight: "500", color: "#FFFFFF", textAlign: "center", marginBottom: 12 },
+  subtitle: { fontFamily: "Poppins-Regular", fontSize: 14, fontWeight: "400", color: "#CCCCCC", textAlign: "center", lineHeight: 20 },
+  form: { marginBottom: 32 },
+  inputContainer: { marginBottom: 24 },
+  label: { fontFamily: "Poppins-Medium", fontSize: 14, fontWeight: "500", color: "#FFFFFF", marginBottom: 8 },
+  input: { width: "100%", height: 56, backgroundColor: "#1A1A3E", borderRadius: 12, paddingHorizontal: 16, fontFamily: "Poppins-Regular", fontSize: 16, color: "#FFFFFF", borderWidth: 1, borderColor: "#2A2A4E" },
+  completeButton: { width: "100%", borderRadius: 50, overflow: "hidden", height: 56, marginTop: 20 },
+  completeButtonDisabled: { opacity: 0.6 },
+  completeButtonGradient: { width: "100%", height: 56, justifyContent: "center", alignItems: "center" },
+  completeButtonText: { fontFamily: "Poppins-Medium", fontSize: 16, fontWeight: "500", color: "#FFFFFF" },
 });
 
 export default CompleteProfileScreen;
-
