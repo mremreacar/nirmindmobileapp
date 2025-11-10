@@ -16,6 +16,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.nireya.nirmind",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSPhotoLibraryUsageDescription": "Bu uygulama fotoğraflarınıza erişmek için izin gerektirir.",
@@ -39,10 +40,17 @@
         "CFBundleURLTypes": [
           {
             "CFBundleURLName": "nirmind",
-            "CFBundleURLSchemes": ["nirmind"]
+            "CFBundleURLSchemes": [
+              "nirmind",
+              "com.googleusercontent.apps.331062533957-d7fbhednl9gi1og0u8fqcb281qhj7480"
+            ]
           }
         ],
-        "LSApplicationQueriesSchemes": ["nirpax"]
+        "LSApplicationQueriesSchemes": [
+          "nirmind",
+          "nirpax",
+          "nirpay"
+        ]
       },
       "appleTeamId": "5B43Y4572U"
     },

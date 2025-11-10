@@ -1,21 +1,11 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  memo,
-} from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import {
   View,
-  Text,
   StyleSheet,
   Dimensions,
-  TouchableOpacity,
   TextInput,
   Animated,
   Easing,
-  Modal,
   Alert,
   Platform,
   TouchableWithoutFeedback,
@@ -25,52 +15,20 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFonts } from "expo-font";
-import { SvgXml } from "react-native-svg";
-import ChatScreen from "@src/pages/ChatScreen";
 import HeroSection from "../components/HeroSection";
 import Header from "../components/Header";
-import InputComponent from "../components/common/InputComponent";
-import ActionButtons from "../components/chat/ActionButtons";
 import { useChat } from "../lib/context/ChatContext";
-import { useChatMessages } from "../hooks/useChatMessages";
 import { useQuickSuggestions } from "../hooks/useQuickSuggestions";
 import { useDictation, useWaveAnimation } from "../features/dictation";
 import { useFilePermissions, usePermissionDialogs } from "../lib/permissions";
-import {
-  isSmallScreen,
-  getResponsivePadding,
-  getResponsiveWidth,
-  getResponsiveGap,
-  getResponsivePaddingBottom,
-  getKeyboardAwarePaddingBottom,
-  getResponsiveHeaderPaddingTop,
-  getResponsiveHeaderPaddingBottom,
-} from "../constants";
+import { HomeScreenProps, QuickSuggestion } from "../types/homeScreen";
+import HomeBottomSection from "../components/home/HomeBottomSection";
+import HomeChatModal from "../components/home/HomeChatModal";
+import HomeQuickSuggestionsModal from "../components/home/HomeQuickSuggestionsModal";
 
 const { width, height } = Dimensions.get("window");
 
 const AnimatedKeyboardAvoidingView = Animated.createAnimatedComponent(KeyboardAvoidingView);
-
-interface HomeScreenProps {
-  onOpenChatHistory: () => void;
-  selectedConversationId?: string;
-  onConversationSelected: () => void;
-}
-
-// Memoized components for performance
-const MemoizedSvgIcon = memo(
-  ({
-    xml,
-    width,
-    height,
-    style,
-  }: {
-    xml: string;
-    width: number;
-    height: number;
-    style?: any;
-  }) => <SvgXml xml={xml} width={width} height={height} style={style} />
-);
 
 const HomeScreen: React.FC<HomeScreenProps> = ({
   onOpenChatHistory,
@@ -78,7 +36,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   onConversationSelected,
 }) => {
   const { createNewConversation, selectConversation, updateResearchMode } = useChat();
-  const { sendMessage, sendQuickSuggestion } = useChatMessages();
   const {
     showQuickSuggestions,
     setShowQuickSuggestions,
@@ -100,7 +57,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   const [arastirmaModu, setArastirmaModu] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [plusButtonPressed, setPlusButtonPressed] = useState(false);
-  const translateY = useRef(new Animated.Value(height)).current;
   const translateXChat = useRef(new Animated.Value(-width)).current;
   const textInputRef = useRef<TextInput>(null);
   const chatBackdropOpacity = useRef(new Animated.Value(0)).current;
@@ -355,7 +311,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     setArastirmaModu((prev) => !prev);
   }, []);
 
-  const handleQuickSuggestionSelect = useCallback(async (suggestion: {question: string, promptType: string}) => {
+  const handleQuickSuggestionSelect = useCallback(async (suggestion: QuickSuggestion) => {
     console.log('🎯 Öneri seçildi:', suggestion);
     
     try {
@@ -548,6 +504,61 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     };
   }, [heroReveal, showChatScreen]);
 
+  const inputComponentProps = useMemo(
+    () => ({
+      inputText,
+      setInputText,
+      onSendMessage: handleSendMessage,
+      onDictate: toggleDictation,
+      onOpenUploadModal: openModal,
+      isDictating: dictationState.isDictating,
+      isProcessing: dictationState.isProcessing,
+      isInputFocused,
+      setIsInputFocused,
+      hasSelectedFiles: selectedImages.length > 0 || selectedFiles.length > 0,
+      selectedFilesCount: selectedFiles.length,
+      selectedImagesCount: selectedImages.length,
+      showSelectedFilesIndicator: true,
+      selectedImages,
+      selectedFiles,
+      onRemoveImage: (index: number) => {
+        setSelectedImages((prev) => prev.filter((_, i) => i !== index));
+      },
+      onRemoveFile: (index: number) => {
+        setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
+      },
+      onFocus: handleInputFocus,
+      onBlur: handleInputBlur,
+      onTextChange: handleTextChange,
+      placeholder: "İstediğinizi sorun",
+      multiline: false,
+      autoCorrect: true,
+      autoCapitalize: "sentences" as const,
+      returnKeyType: "send" as const,
+      keyboardType: "default" as const,
+      onSubmitEditing: handleSendMessage,
+      waveAnimations,
+      textInputRef,
+    }),
+    [
+      inputText,
+      handleSendMessage,
+      toggleDictation,
+      openModal,
+      dictationState.isDictating,
+      dictationState.isProcessing,
+      isInputFocused,
+      setIsInputFocused,
+      selectedImages,
+      selectedFiles,
+      handleInputFocus,
+      handleInputBlur,
+      handleTextChange,
+      waveAnimations,
+      textInputRef,
+    ]
+  );
+
 
   // Show loading while fonts are loading
   if (!fontsLoaded) {
@@ -596,140 +607,37 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
           )}
 
           {/* Bottom Section Container - Fixed at bottom */}
-          <View
-            style={[
-              styles.bottomSectionContainer,
-              {
-                paddingBottom: getKeyboardAwarePaddingBottom(
-                  keyboardHeight,
-                  isKeyboardVisible
-                ),
-              },
-            ]}
-          >
-            {/* Action Buttons */}
-            <ActionButtons
-              onSuggestions={handleOnerilerPress}
-              onResearch={handleArastirmaPress}
-              isLoading={false}
-              isResearchMode={arastirmaModu}
-            />
+          <HomeBottomSection
+            keyboardHeight={keyboardHeight}
+            isKeyboardVisible={isKeyboardVisible}
+            isResearchMode={arastirmaModu}
+            onPressResearch={handleArastirmaPress}
+            onPressSuggestions={handleOnerilerPress}
+            inputProps={inputComponentProps}
+          />
 
-            {/* Input Section */}
-            <InputComponent
-              inputText={inputText}
-              setInputText={setInputText}
-              onSendMessage={handleSendMessage}
-              onDictate={toggleDictation}
-              onOpenUploadModal={openModal}
-              isDictating={dictationState.isDictating}
-              isProcessing={dictationState.isProcessing}
-              isInputFocused={isInputFocused}
-              setIsInputFocused={setIsInputFocused}
-              textInputRef={textInputRef}
-              hasSelectedFiles={
-                selectedImages.length > 0 || selectedFiles.length > 0
-              }
-              selectedFilesCount={selectedFiles.length}
-              selectedImagesCount={selectedImages.length}
-              showSelectedFilesIndicator={true}
-              selectedImages={selectedImages}
-              selectedFiles={selectedFiles}
-              onRemoveImage={(index) => {
-                setSelectedImages((prev) => prev.filter((_, i) => i !== index));
-              }}
-              onRemoveFile={(index) => {
-                setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
-              }}
-              onFocus={handleInputFocus}
-              onBlur={handleInputBlur}
-              onTextChange={handleTextChange}
-              placeholder="İstediğinizi sorun"
-              multiline={false}
-              autoCorrect={true}
-              autoCapitalize="sentences"
-              returnKeyType="send"
-              keyboardType="default"
-              onSubmitEditing={handleSendMessage}
-              waveAnimations={waveAnimations}
-            />
-          </View>
-
-
-          {/* Chat Screen Modal */}
-          <Modal
+          <HomeChatModal
             visible={showChatScreen}
-            animationType="none"
-            transparent={true}
             onRequestClose={closeChatScreen}
-          >
-            <View style={styles.chatModalContainer}>
-              <Animated.View
-                pointerEvents="none"
-                style={[styles.chatBackdrop, { opacity: chatBackdropOpacity }]}
-              />
-            <ChatScreen
-              translateX={translateXChat}
-              onClose={closeChatScreen}
-              onOpenChatHistory={onOpenChatHistory}
-              conversationId={selectedConversationId || createdConversationId}
-              initialArastirmaModu={arastirmaModu}
-              initialUploadModalOpen={plusButtonPressed}
-              initialMessage={pendingInitialMessage} // Sadece pendingInitialMessage kullan, inputText kullanma
-              initialPromptType={pendingPromptType} // Quick suggestion'dan gelen promptType
-              initialImages={selectedImages}
-              initialFiles={selectedFiles}
-            />
-            </View>
-          </Modal>
+            chatBackdropOpacity={chatBackdropOpacity}
+            translateX={translateXChat}
+            onOpenChatHistory={onOpenChatHistory}
+            conversationId={selectedConversationId || createdConversationId}
+            initialArastirmaModu={arastirmaModu}
+            initialUploadModalOpen={plusButtonPressed}
+            initialMessage={pendingInitialMessage}
+            initialPromptType={pendingPromptType}
+            initialImages={selectedImages}
+            initialFiles={selectedFiles}
+          />
 
-          {/* Hızlı Öneriler Modal */}
-          <Modal
+          <HomeQuickSuggestionsModal
             visible={showQuickSuggestions}
-            animationType="slide"
-            transparent={true}
-            onRequestClose={() => setShowQuickSuggestions(false)}
-          >
-            <TouchableOpacity
-              style={styles.modalOverlay}
-              activeOpacity={1}
-              onPress={() => setShowQuickSuggestions(false)}
-            >
-              <TouchableOpacity
-                style={styles.quickSuggestionsModal}
-                activeOpacity={1}
-                onPress={(e) => e.stopPropagation()}
-              >
-                <View style={styles.modalHeader}>
-                  <Text allowFontScaling={false} style={styles.modalTitle}>Hızlı Öneriler</Text>
-                  <TouchableOpacity
-                    style={styles.closeButton}
-                    onPress={() => setShowQuickSuggestions(false)}
-                  >
-                    <Text allowFontScaling={false} style={styles.closeButtonText}>✕</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.suggestionsList}>
-                  {isLoadingSuggestions ? (
-                    <Text allowFontScaling={false} style={styles.loadingText}>Öneriler yükleniyor...</Text>
-                  ) : currentSuggestions.length > 0 ? (
-                    currentSuggestions.map((suggestion, index) => (
-                      <TouchableOpacity
-                        key={`${suggestion.question}-${index}`}
-                        style={styles.suggestionItem}
-                        onPress={() => handleQuickSuggestionSelect(suggestion)}
-                      >
-                        <Text allowFontScaling={false} style={styles.suggestionText}>{suggestion.question}</Text>
-                      </TouchableOpacity>
-                    ))
-                  ) : (
-                    <Text allowFontScaling={false} style={styles.loadingText}>Öneri bulunamadı</Text>
-                  )}
-                </View>
-              </TouchableOpacity>
-            </TouchableOpacity>
-          </Modal>
+            onClose={() => setShowQuickSuggestions(false)}
+            isLoading={isLoadingSuggestions}
+            suggestions={currentSuggestions}
+            onSelectSuggestion={handleQuickSuggestionSelect}
+          />
         </LinearGradient>
       </TouchableWithoutFeedback>
       </AnimatedKeyboardAvoidingView>
@@ -740,197 +648,13 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    width: width,
-    height: height,
-  },
-  chatModalContainer: {
-    flex: 1,
-    backgroundColor: "transparent",
-  },
-  chatBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(2, 2, 10, 0.68)",
-  },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    paddingTop: getResponsiveHeaderPaddingTop(),
-    paddingBottom: getResponsiveHeaderPaddingBottom(),
-    position: "relative",
-  },
-  headerButton: {
-    width: 48,
-    height: 48,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  arrowButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 100,
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: "rgba(255, 255, 255, 0.3)",
-    paddingTop: 17,
-    paddingRight: 12,
-    paddingBottom: 12,
-    paddingLeft: 12,
-  },
-  arrowText: {
-    color: "#FFFFFF",
-    fontSize: 20,
-    fontWeight: "bold",
-    marginTop: -6,
-  },
-  headerCenter: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  headerTitle: {
-    fontFamily: "SpaceGrotesk-Regular",
-    fontSize: 18,
-    fontWeight: "400",
-    color: "#FFFFFF",
-  },
-  chatButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 100,
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: "rgba(255, 255, 255, 0.3)",
-    paddingTop: 17,
-    paddingRight: 12,
-    paddingBottom: 12,
-    paddingLeft: 12,
-  },
-  chatIcon: {
-    fontSize: 20,
-    marginTop: -7,
-  },
-  bottomSectionContainer: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: "column",
-    justifyContent: "flex-start",
-    alignItems: "flex-start",
-    paddingHorizontal: getResponsivePadding(),
-    paddingBottom: getResponsivePaddingBottom(),
-    paddingTop: 20,
-    width: getResponsiveWidth(),
-    gap: getResponsiveGap(),
-    alignSelf: "center",
-    backgroundColor: "transparent",
-    zIndex: 1000,
-  },
-  logoStyle: {
-    transform: [{ rotate: "0deg" }],
-    opacity: 1,
+    width,
+    height,
   },
   heroSectionWrapper: {
     flex: 1,
     justifyContent: "flex-start",
     alignItems: "center",
-  },
-  sendButton: {
-    width: isSmallScreen ? 80 : 90,
-    height: isSmallScreen ? 52 : 58,
-    borderRadius: isSmallScreen ? 26 : 29,
-    borderWidth: 1.8,
-    borderColor: "rgba(255, 255, 255, 0.75)",
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "transparent",
-    overflow: "hidden",
-    marginLeft: 8,
-  },
-  sendButtonDisabled: {
-    opacity: 0.5,
-  },
-  sendButtonGradient: {
-    width: "100%",
-    height: "100%",
-    borderRadius: isSmallScreen ? 26 : 29,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  sendButtonText: {
-    color: "white",
-    fontSize: isSmallScreen ? 14 : 16,
-    fontFamily: "Poppins-Medium",
-    fontWeight: "600",
-  },
-  // Hızlı Öneriler Modal Stilleri
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  quickSuggestionsModal: {
-    backgroundColor: "#1A1A2E",
-    borderRadius: 20,
-    width: width * 0.9,
-    maxHeight: height * 0.7,
-    borderWidth: 1,
-    borderColor: "#FFFFFF30",
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: "#FFFFFF30",
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#FFFFFF",
-    fontFamily: "Poppins-Medium",
-  },
-  closeButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: "#3B38BD",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  closeButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  suggestionsList: {
-    maxHeight: height * 0.5,
-  },
-  suggestionItem: {
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#2A2A3E",
-  },
-  suggestionText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontFamily: "Poppins-Regular",
-    lineHeight: 22,
-  },
-  loadingText: {
-    color: "#999999",
-    fontSize: 14,
-    fontFamily: "Poppins-Regular",
-    textAlign: "center",
-    padding: 20,
   },
 });
 
