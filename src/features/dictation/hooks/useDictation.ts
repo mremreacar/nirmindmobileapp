@@ -47,11 +47,15 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
     try {
       // Haptic feedback kaldırıldı - kullanıcı titreşim istemiyor
       
+      // Yeni dikte başladığında önceki state'leri temizle
+      lastReceivedTextRef.current = ''; // Son alınan text'i reset et
+      setCurrentMessage(''); // Current message'ı temizle (yeni dikte için)
+      
       isProcessingRef.current = true;
       isDictatingRef.current = true; // Ref'i güncelle
       isStoppingRef.current = false; // Durdurma işlemi yok
       setIsDictating(true);
-      lastReceivedTextRef.current = ''; // Yeni dikte başladığında reset et
+      
       callbacks.onStart?.();
 
       console.log('✅ [useDictation] Dikte başlatılıyor...', {
@@ -62,67 +66,50 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
         (result: any) => {
           console.log('Dikte sonucu:', result);
           
-          // Ara sonuçları da göster (interim results)
-          if (result.text) {
+          // Sadece final results'ı ekle - interim results'ı ignore et (tekrar eklenmesini önlemek için)
+          if (result.text && result.isFinal) {
             const currentText = result.text.trim();
-            console.log('📝 Dikte text alındı:', currentText, 'isFinal:', result.isFinal);
+            console.log('📝 Dikte final text alındı:', currentText);
             
-            // React Native Voice her seferinde tam metni döndürür, artımlı değil
-            // Bu yüzden sadece yeni eklenen kısmı bulmalıyız
+            // React Native Voice her seferinde tam metni döndürür
+            // Önceki metinle karşılaştır ve sadece yeni kısmı ekle
             const lastText = lastReceivedTextRef.current;
             
             let textToAdd = '';
             
-            if (result.isFinal) {
-              // Final result: Eğer tam metin daha uzunsa, sadece yeni kısmı ekle
-              if (lastText === '') {
-                // İlk sonuç - tam metni ekle
-                textToAdd = currentText;
-                console.log('✅ İlk final result - tam metin:', textToAdd);
-              } else if (currentText.length > lastText.length && currentText.startsWith(lastText)) {
-                // Yeni kısım eklendi
-                textToAdd = currentText.substring(lastText.length);
-                console.log('✅ Final result - yeni eklenen kısım:', textToAdd);
-              } else if (currentText !== lastText) {
-                // Metin tamamen değişti (düzeltme yapıldı)
-                // Önceki metni sil ve yeni metni ekle
-                // Ancak bu durumda önceki metni silmek zor, bu yüzden sadece yeni kısmı ekle
-                textToAdd = currentText.replace(lastText, '');
-                if (!textToAdd) {
-                  textToAdd = currentText; // Eğer replace sonucu boşsa, tamamını kullan
-                }
-                console.log('✅ Final result - metin değişti, yeni kısım:', textToAdd);
+            if (lastText === '') {
+              // İlk final result - tam metni ekle
+              textToAdd = currentText;
+              console.log('✅ İlk final result - tam metin:', textToAdd);
+            } else if (currentText.length > lastText.length && currentText.startsWith(lastText)) {
+              // Yeni kısım eklendi - sadece yeni kısmı ekle
+              textToAdd = currentText.substring(lastText.length);
+              // Boşluk kontrolü - eğer yeni kısım boşlukla başlıyorsa, onu da ekle
+              if (textToAdd && !textToAdd.startsWith(' ') && lastText.endsWith(' ')) {
+                // Önceki metin boşlukla bitiyor, yeni kısım boşlukla başlamıyorsa, boşluk ekle
+                textToAdd = ' ' + textToAdd;
+              }
+              console.log('✅ Final result - yeni eklenen kısım:', textToAdd);
+            } else if (currentText !== lastText) {
+              // Metin tamamen değişti veya düzeltme yapıldı
+              // Önceki metni input'tan çıkar ve yeni metni ekle
+              // Ancak bu karmaşık, bu yüzden sadece farkı ekle
+              const diff = currentText.replace(lastText, '');
+              if (diff) {
+                textToAdd = diff;
               } else {
-                // Aynı metin tekrar geldi, ekleme
-                console.log('⚠️ Aynı final result tekrar geldi, atlanıyor');
-                return;
-              }
-              lastReceivedTextRef.current = currentText;
-            } else {
-              // Interim result: Sadece yeni kısmı ekle
-              if (lastText === '') {
-                // İlk interim result - tam metni ekle
+                // Eğer replace sonucu boşsa, tamamını kullan (metin tamamen değişti)
                 textToAdd = currentText;
-                console.log('📝 İlk interim result - tam metin:', textToAdd);
-                // İlk interim result için de ref'i güncelle (sonraki karşılaştırmalar için)
-                lastReceivedTextRef.current = currentText;
-              } else if (currentText.length > lastText.length && currentText.startsWith(lastText)) {
-                // Yeni kısım eklendi
-                textToAdd = currentText.substring(lastText.length);
-                console.log('📝 Interim result - yeni eklenen kısım:', textToAdd);
-                // Interim result için de ref'i güncelle (artımlı güncelleme için)
-                lastReceivedTextRef.current = currentText;
-              } else if (currentText !== lastText) {
-                // Metin değişti
-                textToAdd = currentText.replace(lastText, '');
-                if (!textToAdd) {
-                  textToAdd = currentText;
-                }
-                console.log('📝 Interim result - metin değişti, yeni kısım:', textToAdd);
-                // Metin değiştiyse ref'i güncelle
-                lastReceivedTextRef.current = currentText;
               }
+              console.log('✅ Final result - metin değişti, yeni kısım:', textToAdd);
+            } else {
+              // Aynı metin tekrar geldi, ekleme
+              console.log('⚠️ Aynı final result tekrar geldi, atlanıyor');
+              return;
             }
+            
+            // Ref'i güncelle
+            lastReceivedTextRef.current = currentText;
             
             // Sadece yeni eklenen kısmı mesaj alanına ekle
             if (textToAdd) {
@@ -130,11 +117,14 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
               // Debounce olmadan direkt ekle (daha hızlı ve güvenilir)
               callbacks.onTextUpdate(textToAdd);
               
-              // Her sonuç için current message'a ekle (backup - dikte durdurulduğunda kullanılacak)
+              // Current message'a ekle (backup - dikte durdurulduğunda kullanılacak)
               setCurrentMessage(prev => prev + textToAdd);
             } else {
               console.log('⚠️ textToAdd boş, mesaj alanına eklenmiyor');
             }
+          } else if (result.text && !result.isFinal) {
+            // Interim result - sadece logla, ekleme (tekrar eklenmesini önlemek için)
+            console.log('📝 Interim result alındı (eklenmeyecek):', result.text.trim());
           }
         },
         (error: string) => {

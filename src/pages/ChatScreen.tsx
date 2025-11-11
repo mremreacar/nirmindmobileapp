@@ -160,6 +160,10 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     },
     onStart: () => {
       console.log('✅ [ChatScreen] Chat dikte başlatıldı');
+      // Yeni dikte başladığında input alanını temizle (önceki dikte metnini kaldır)
+      setInputText('');
+      inputClearedRef.current = true;
+      console.log('🧹 [ChatScreen] Input alanı temizlendi (yeni dikte için)');
     },
     onStop: () => {
       console.log('🛑 [ChatScreen] Chat dikte durduruldu');

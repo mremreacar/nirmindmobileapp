@@ -686,7 +686,7 @@ export const useChatMessages = () => {
             const errorTime = Date.now();
             const errorDuration = errorTime - messageStartTime;
             
-            // Bağlantı hatası kontrolü - ekran kapalıyken normal bir durum
+            // Bağlantı hatası kontrolü - Status 200 ile gelen hatalar gerçek hata değil
             const isConnectionError = error.includes('Bağlantı hatası') || 
                                     error.includes('bağlanılamadı') || 
                                     error.includes('bağlanışamadı') ||
@@ -695,8 +695,10 @@ export const useChatMessages = () => {
                                     error.includes('connection') ||
                                     error.includes('Network');
             
+            // Status 200 ile gelen bağlantı hataları gerçek hata değil (SSE stream normal kapanmış)
+            // Bu durumda sessizce ignore et - log bile yazma
             if (isConnectionError) {
-              console.log('ℹ️ Bağlantı hatası - ekran kapalıyken normal bir durum, UI\'da gösterilmeyecek:', error);
+              // Sessizce ignore et - gereksiz log spam'ini önlemek için
               // Hata durumunda optimistic mesajı ve streaming mesajını kaldır
               if (conversationId) {
                 removeMessage(conversationId, tempUserMessageId);
@@ -1090,7 +1092,7 @@ export const useChatMessages = () => {
       
       const errorText = error.message || 'Bağlantı hatası. Lütfen internet bağlantınızı kontrol edin.';
       
-      // Bağlantı hatası kontrolü - ekran kapalıyken normal bir durum
+      // Bağlantı hatası kontrolü - Status 200 ile gelen hatalar gerçek hata değil
       const isConnectionError = errorText.includes('Bağlantı hatası') || 
                                 errorText.includes('bağlanılamadı') || 
                                 errorText.includes('bağlanışamadı') ||
@@ -1099,8 +1101,10 @@ export const useChatMessages = () => {
                                 errorText.includes('connection') ||
                                 errorText.includes('Network');
       
-      if (isConnectionError && isAppInBackground) {
-        console.log('ℹ️ Bağlantı hatası - ekran kapalıyken normal bir durum, UI\'da gösterilmeyecek:', errorText);
+      // Status 200 ile gelen bağlantı hataları gerçek hata değil (SSE stream normal kapanmış)
+      // Ekran kapalıyken veya açıkken, bu hataları sessizce ignore et
+      if (isConnectionError) {
+        // Sessizce ignore et - gereksiz log spam'ini önlemek için
         setIsLoading(false);
         return; // UI'da gösterme
       }
@@ -1164,9 +1168,10 @@ export const useChatMessages = () => {
         return; // Bu hatada mesajı chat'e ekleme
       }
       
-      // Bağlantı hatası kontrolü - ekran kapalıyken normal bir durum, UI'da gösterme
-      if (isConnectionError && isAppInBackground) {
-        console.log('ℹ️ Bağlantı hatası - ekran kapalıyken normal bir durum, hata mesajı chat\'e eklenmeyecek:', errorText);
+      // Bağlantı hatası kontrolü - Status 200 ile gelen hatalar gerçek hata değil
+      // Ekran kapalıyken veya açıkken, bu hataları sessizce ignore et
+      if (isConnectionError) {
+        // Sessizce ignore et - gereksiz log spam'ini önlemek için
         setIsLoading(false);
         return; // UI'da gösterme
       }

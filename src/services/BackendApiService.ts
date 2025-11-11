@@ -999,6 +999,14 @@ class BackendApiService {
         
         xhr.onerror = () => {
           if (isAborted) return;
+          
+          // Status 200 ise, bu gerçek bir hata değil (SSE stream normal kapanmış olabilir)
+          // onload zaten çağrılmışsa veya çağrılacaksa, bu hatayı tamamen ignore et
+          if (xhr?.status === 200 && (xhr?.readyState === 4 || isResolved)) {
+            // Sessizce ignore et - log bile yazma (gereksiz log spam'ini önlemek için)
+            return;
+          }
+          
           // Timeout'ları temizle
           if (connectionTimeout) {
             clearTimeout(connectionTimeout);
@@ -1008,12 +1016,22 @@ class BackendApiService {
             clearTimeout(streamTimeout);
             streamTimeout = null;
           }
-          console.error('❌ XMLHttpRequest error:', {
-            status: xhr?.status,
-            statusText: xhr?.statusText,
-            readyState: xhr?.readyState
-          });
-          onError(`Bağlantı hatası: ${xhr?.statusText || 'Sunucuya bağlanılamadı'}`);
+          
+          // Gerçek bir hata varsa logla ve callback çağır
+          if (xhr?.status !== 200 && xhr?.status !== 0) {
+            // Status 0 genellikle network hatası (offline, connection refused, etc.)
+            // Status 200 dışındaki durumlar gerçek hatalar
+            console.error('❌ XMLHttpRequest error:', {
+              status: xhr?.status,
+              statusText: xhr?.statusText,
+              readyState: xhr?.readyState
+            });
+            onError(`Bağlantı hatası: ${xhr?.statusText || 'Sunucuya bağlanılamadı'}`);
+          } else {
+            // Status 200 veya 0 (ama readyState 4 değilse) - muhtemelen stream normal kapanmış
+            // Sessizce ignore et - log yazma
+          }
+          
           if (!isResolved && !isAborted) {
             isResolved = true;
           }
