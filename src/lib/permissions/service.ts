@@ -11,9 +11,77 @@
 
 import { Platform, Alert, Linking } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import * as MediaLibrary from 'expo-media-library';
-import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+
+// Conditional import for expo-document-picker (not available in Expo Go)
+// Lazy loading: Module will only be loaded when needed
+let DocumentPicker: any = null;
+let documentPickerLoadingAttempted = false;
+
+const loadDocumentPickerModule = (): any => {
+  if (DocumentPicker !== null) {
+    return DocumentPicker;
+  }
+  
+  if (documentPickerLoadingAttempted) {
+    return null;
+  }
+  
+  documentPickerLoadingAttempted = true;
+  
+  try {
+    const expoDocumentPickerModule = require('expo-document-picker');
+    if (expoDocumentPickerModule && typeof expoDocumentPickerModule.getDocumentAsync === 'function') {
+      DocumentPicker = expoDocumentPickerModule;
+      console.log('✅ Expo DocumentPicker modülü başarıyla yüklendi');
+      return DocumentPicker;
+    }
+  } catch (error: any) {
+    const errorMessage = error?.message || 'Unknown error';
+    if (errorMessage.includes('Cannot find native module') || errorMessage.includes('ExpoDocumentPicker')) {
+      console.log('ℹ️ Expo DocumentPicker modülü mevcut değil (Development build gerekli: npx expo run:ios veya npx expo run:android)');
+    } else {
+      console.warn('⚠️ Expo DocumentPicker modülü yüklenemedi:', errorMessage);
+    }
+  }
+  
+  return null;
+};
+
+// Conditional import for expo-media-library (not available in Expo Go)
+// Lazy loading: Module will only be loaded when needed
+let MediaLibrary: any = null;
+let mediaLibraryLoadingAttempted = false;
+
+const loadMediaLibraryModule = (): any => {
+  if (MediaLibrary !== null) {
+    return MediaLibrary;
+  }
+  
+  if (mediaLibraryLoadingAttempted) {
+    return null;
+  }
+  
+  mediaLibraryLoadingAttempted = true;
+  
+  try {
+    const expoMediaLibraryModule = require('expo-media-library');
+    if (expoMediaLibraryModule && typeof expoMediaLibraryModule.getPermissionsAsync === 'function') {
+      MediaLibrary = expoMediaLibraryModule;
+      console.log('✅ Expo MediaLibrary modülü başarıyla yüklendi');
+      return MediaLibrary;
+    }
+  } catch (error: any) {
+    const errorMessage = error?.message || 'Unknown error';
+    if (errorMessage.includes('Cannot find native module') || errorMessage.includes('ExpoMediaLibrary')) {
+      console.log('ℹ️ Expo MediaLibrary modülü mevcut değil (Development build gerekli: npx expo run:ios veya npx expo run:android)');
+    } else {
+      console.warn('⚠️ Expo MediaLibrary modülü yüklenemedi:', errorMessage);
+    }
+  }
+  
+  return null;
+};
 import { PermissionType, PermissionStatus, PermissionResult, PermissionState, PermissionService } from './types';
 import { PERMISSION_MESSAGES, PERMISSION_TIMEOUTS } from './constants';
 
@@ -280,11 +348,29 @@ class PermissionServiceImpl implements PermissionService {
   }
 
   private async checkMediaLibraryPermission(): Promise<PermissionResult> {
-    const { status, canAskAgain } = await MediaLibrary.getPermissionsAsync();
-    return {
-      status: this.mapExpoStatus(status),
-      canAskAgain: canAskAgain ?? true
-    };
+    const mediaLibraryModule = loadMediaLibraryModule();
+    if (!mediaLibraryModule) {
+      console.warn('⚠️ Expo MediaLibrary modülü mevcut değil (Development build gerekli)');
+      return {
+        status: PermissionStatus.DENIED,
+        canAskAgain: true,
+        reason: 'MediaLibrary modülü mevcut değil - Development build gerekli'
+      };
+    }
+    try {
+      const { status, canAskAgain } = await mediaLibraryModule.getPermissionsAsync();
+      return {
+        status: this.mapExpoStatus(status),
+        canAskAgain: canAskAgain ?? true
+      };
+    } catch (error) {
+      console.error('❌ MediaLibrary permission kontrol hatası:', error);
+      return {
+        status: PermissionStatus.DENIED,
+        canAskAgain: true,
+        reason: error instanceof Error ? error.message : 'Bilinmeyen hata'
+      };
+    }
   }
 
   private async checkDocumentsPermission(): Promise<PermissionResult> {
@@ -348,11 +434,29 @@ class PermissionServiceImpl implements PermissionService {
         };
       
       case PermissionType.MEDIA_LIBRARY:
-        const mediaResult = await MediaLibrary.requestPermissionsAsync();
-        return {
-          status: this.mapExpoStatus(mediaResult.status),
-          canAskAgain: mediaResult.canAskAgain ?? true
-        };
+        const mediaLibraryModule = loadMediaLibraryModule();
+        if (!mediaLibraryModule) {
+          console.warn('⚠️ Expo MediaLibrary modülü mevcut değil (Development build gerekli)');
+          return {
+            status: PermissionStatus.DENIED,
+            canAskAgain: true,
+            reason: 'MediaLibrary modülü mevcut değil - Development build gerekli'
+          };
+        }
+        try {
+          const mediaResult = await mediaLibraryModule.requestPermissionsAsync();
+          return {
+            status: this.mapExpoStatus(mediaResult.status),
+            canAskAgain: mediaResult.canAskAgain ?? true
+          };
+        } catch (error) {
+          console.error('❌ MediaLibrary permission istek hatası:', error);
+          return {
+            status: PermissionStatus.DENIED,
+            canAskAgain: true,
+            reason: error instanceof Error ? error.message : 'Bilinmeyen hata'
+          };
+        }
       
       case PermissionType.DOCUMENTS:
         // DocumentPicker için özel işlem

@@ -1,6 +1,45 @@
 import { Platform, Alert, AppState } from 'react-native';
-import * as Speech from 'expo-speech';
 import { Audio } from 'expo-av';
+
+// Conditional import for expo-speech (not available in Expo Go)
+// Lazy loading: Module will only be loaded when needed
+// Note: This will show an error in Expo Go, but it's expected behavior
+// The module will only work in development builds (npx expo run:ios or npx expo run:android)
+let Speech: any = null;
+let speechModuleLoadingAttempted = false;
+
+const loadSpeechModule = (): any => {
+  if (Speech !== null) {
+    return Speech;
+  }
+  
+  if (speechModuleLoadingAttempted) {
+    return null;
+  }
+  
+  speechModuleLoadingAttempted = true;
+  
+  try {
+    // Try to require expo-speech module
+    const expoSpeechModule = require('expo-speech');
+    if (expoSpeechModule && typeof expoSpeechModule.speak === 'function') {
+      Speech = expoSpeechModule;
+      console.log('✅ Expo Speech modülü başarıyla yüklendi');
+      return Speech;
+    }
+  } catch (error: any) {
+    // Module not available (e.g., in Expo Go)
+    // This is expected in Expo Go - the module requires a development build
+    const errorMessage = error?.message || 'Unknown error';
+    if (errorMessage.includes('Cannot find native module') || errorMessage.includes('ExpoSpeech')) {
+      console.log('ℹ️ Expo Speech modülü mevcut değil (Development build gerekli: npx expo run:ios veya npx expo run:android)');
+    } else {
+      console.warn('⚠️ Expo Speech modülü yüklenemedi:', errorMessage);
+    }
+  }
+  
+  return null;
+};
 import { 
   AndroidOutputFormat, 
   AndroidAudioEncoder, 
@@ -584,8 +623,13 @@ class SpeechService {
   }
 
   async speak(text: string, options?: { language?: string; rate?: number }): Promise<void> {
+    const speechModule = loadSpeechModule();
+    if (!speechModule) {
+      console.warn('⚠️ Expo Speech modülü mevcut değil (Development build gerekli)');
+      return;
+    }
     try {
-      await Speech.speak(text, {
+      await speechModule.speak(text, {
         language: options?.language || 'tr-TR',
         rate: options?.rate || 0.5,
       });
@@ -596,16 +640,26 @@ class SpeechService {
   }
 
   async stopSpeaking(): Promise<void> {
+    const speechModule = loadSpeechModule();
+    if (!speechModule) {
+      console.warn('⚠️ Expo Speech modülü mevcut değil (Development build gerekli)');
+      return;
+    }
     try {
-      await Speech.stop();
+      await speechModule.stop();
     } catch (error) {
       console.error('Stop speaking error:', error);
     }
   }
 
   async isSpeaking(): Promise<boolean> {
+    const speechModule = loadSpeechModule();
+    if (!speechModule) {
+      console.warn('⚠️ Expo Speech modülü mevcut değil (Development build gerekli)');
+      return false;
+    }
     try {
-      return Speech.isSpeakingAsync();
+      return speechModule.isSpeakingAsync();
     } catch (error) {
       console.error('Is speaking check error:', error);
       return false;

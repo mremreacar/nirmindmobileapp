@@ -1,9 +1,43 @@
 import { useCallback, useState } from 'react';
 import { Alert, type TextInput } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import * as DocumentPicker from 'expo-document-picker';
 import { PermissionType } from '@/src/lib/permissions';
 import type { ChatSelectedFile } from '@/src/types/chat';
+
+// Conditional import for expo-document-picker (not available in Expo Go)
+// Lazy loading: Module will only be loaded when needed
+let DocumentPicker: any = null;
+let documentPickerLoadingAttempted = false;
+
+const loadDocumentPickerModule = (): any => {
+  if (DocumentPicker !== null) {
+    return DocumentPicker;
+  }
+  
+  if (documentPickerLoadingAttempted) {
+    return null;
+  }
+  
+  documentPickerLoadingAttempted = true;
+  
+  try {
+    const expoDocumentPickerModule = require('expo-document-picker');
+    if (expoDocumentPickerModule && typeof expoDocumentPickerModule.getDocumentAsync === 'function') {
+      DocumentPicker = expoDocumentPickerModule;
+      console.log('✅ Expo DocumentPicker modülü başarıyla yüklendi');
+      return DocumentPicker;
+    }
+  } catch (error: any) {
+    const errorMessage = error?.message || 'Unknown error';
+    if (errorMessage.includes('Cannot find native module') || errorMessage.includes('ExpoDocumentPicker')) {
+      console.log('ℹ️ Expo DocumentPicker modülü mevcut değil (Development build gerekli: npx expo run:ios veya npx expo run:android)');
+    } else {
+      console.warn('⚠️ Expo DocumentPicker modülü yüklenemedi:', errorMessage);
+    }
+  }
+  
+  return null;
+};
 
 interface PermissionHookResult {
   isGranted: boolean;
@@ -153,7 +187,18 @@ export const useChatAttachments = ({
         }
       }
 
-      const result = await DocumentPicker.getDocumentAsync({
+      const documentPickerModule = loadDocumentPickerModule();
+      if (!documentPickerModule) {
+        console.warn('⚠️ Expo DocumentPicker modülü mevcut değil (Development build gerekli)');
+        Alert.alert(
+          'Özellik Mevcut Değil',
+          'Dosya seçme özelliği için development build gereklidir. Lütfen npx expo run:ios veya npx expo run:android komutunu kullanın.',
+          [{ text: 'Tamam' }]
+        );
+        return;
+      }
+
+      const result = await documentPickerModule.getDocumentAsync({
         type: [
           'application/pdf',
           'application/msword',
@@ -359,7 +404,18 @@ export const useChatAttachments = ({
 
   const handleSelectFile = useCallback(async () => {
     try {
-      const result = await DocumentPicker.getDocumentAsync({
+      const documentPickerModule = loadDocumentPickerModule();
+      if (!documentPickerModule) {
+        console.warn('⚠️ Expo DocumentPicker modülü mevcut değil (Development build gerekli)');
+        Alert.alert(
+          'Özellik Mevcut Değil',
+          'Dosya seçme özelliği için development build gereklidir. Lütfen npx expo run:ios veya npx expo run:android komutunu kullanın.',
+          [{ text: 'Tamam' }]
+        );
+        return;
+      }
+
+      const result = await documentPickerModule.getDocumentAsync({
         type: '*/*',
         copyToCacheDirectory: true,
       });

@@ -59,8 +59,42 @@ import {
 } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 import * as ImagePicker from 'expo-image-picker';
-import * as MediaLibrary from 'expo-media-library';
 import type { ChatSelectedFile } from '@/src/types/chat';
+
+// Conditional import for expo-media-library (not available in Expo Go)
+// Lazy loading: Module will only be loaded when needed
+let MediaLibrary: any = null;
+let mediaLibraryLoadingAttempted = false;
+
+const loadMediaLibraryModule = (): any => {
+  if (MediaLibrary !== null) {
+    return MediaLibrary;
+  }
+  
+  if (mediaLibraryLoadingAttempted) {
+    return null;
+  }
+  
+  mediaLibraryLoadingAttempted = true;
+  
+  try {
+    const expoMediaLibraryModule = require('expo-media-library');
+    if (expoMediaLibraryModule && typeof expoMediaLibraryModule.getAssetsAsync === 'function') {
+      MediaLibrary = expoMediaLibraryModule;
+      console.log('✅ Expo MediaLibrary modülü başarıyla yüklendi');
+      return MediaLibrary;
+    }
+  } catch (error: any) {
+    const errorMessage = error?.message || 'Unknown error';
+    if (errorMessage.includes('Cannot find native module') || errorMessage.includes('ExpoMediaLibrary')) {
+      console.log('ℹ️ Expo MediaLibrary modülü mevcut değil (Development build gerekli: npx expo run:ios veya npx expo run:android)');
+    } else {
+      console.warn('⚠️ Expo MediaLibrary modülü yüklenemedi:', errorMessage);
+    }
+  }
+  
+  return null;
+};
 import { formatFileSize, getFileTypeIcon } from '../utils/fileValidation';
 
 const { width, height } = Dimensions.get('window');
@@ -252,24 +286,31 @@ const UploadModal: React.FC<UploadModalProps> = ({
   const [isPickingDocument, setIsPickingDocument] = useState(false);
   
   // Son 10 fotoğraf state'i
-  const [recentPhotos, setRecentPhotos] = useState<MediaLibrary.Asset[]>([]);
+  const [recentPhotos, setRecentPhotos] = useState<any[]>([]);
   const [isLoadingPhotos, setIsLoadingPhotos] = useState(false);
 
   // Son 10 fotoğrafı yükle
   const loadRecentPhotos = async () => {
+    const mediaLibraryModule = loadMediaLibraryModule();
+    if (!mediaLibraryModule) {
+      console.log('ℹ️ MediaLibrary modülü mevcut değil, son fotoğraflar yüklenemiyor');
+      setIsLoadingPhotos(false);
+      return;
+    }
+
     try {
       console.log('🔄 Son fotoğraflar yükleniyor...');
       setIsLoadingPhotos(true);
       
       // İzin kontrolü ve isteme
-      const { status } = await MediaLibrary.requestPermissionsAsync();
+      const { status } = await mediaLibraryModule.requestPermissionsAsync();
       console.log('📱 Medya kütüphanesi izni:', status);
       
       if (status === 'granted') {
         console.log('✅ Medya kütüphanesi izni verildi, fotoğraflar yükleniyor...');
         
         // Tüm fotoğrafları al
-        const assets = await MediaLibrary.getAssetsAsync({
+        const assets = await mediaLibraryModule.getAssetsAsync({
           first: 20,
           mediaType: 'photo',
           sortBy: 'creationTime',
@@ -281,9 +322,9 @@ const UploadModal: React.FC<UploadModalProps> = ({
         
         // Her fotoğraf için gerçek URI'yı al
         const photosWithRealUri = await Promise.all(
-          assets.assets.slice(0, 10).map(async (asset) => {
+          assets.assets.slice(0, 10).map(async (asset: any) => {
             try {
-              const assetInfo = await MediaLibrary.getAssetInfoAsync(asset);
+              const assetInfo = await mediaLibraryModule.getAssetInfoAsync(asset);
               const isHEIC = asset.filename?.toLowerCase().includes('heic') || asset.filename?.toLowerCase().includes('heif');
 
               // React Native otomatik olarak HEIC'leri destekler
