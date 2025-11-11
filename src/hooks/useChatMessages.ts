@@ -28,6 +28,17 @@ export const useChatMessages = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const activeStreamRef = useRef<ActiveStreamState | null>(null);
+  const thinkingMessageIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Dinamik "düşünüyor" mesajları
+  const thinkingMessages = [
+    'Düşünüyorum',
+    'İnceliyorum',
+    'Analiz ediyorum',
+    'Hazırlıyorum',
+    'Değerlendiriyorum',
+    'İşliyorum'
+  ];
   const backendApiService = BackendApiService.getInstance();
 
   const sendMessage = useCallback(async (
@@ -444,15 +455,47 @@ export const useChatMessages = () => {
             if (!streamingAIMessageId) {
               streamingAIMessageId = `ai-streaming-${Date.now()}`;
               streamingAIMessageText = '';
+              
+              // Closure için thinkingMessageIndex'i ref olarak tut
+              const thinkingIndexRef = { current: 0 };
+              
               const aiPlaceholderMessage: ChatMessage = {
                 id: streamingAIMessageId,
-                text: '',
+                text: thinkingMessages[0], // İlk mesaj
                 isUser: false,
                 timestamp: new Date(),
-                isStreaming: true // Streaming başladı
+                isStreaming: true, // Streaming başladı
+                isThinking: true // İlk chunk gelene kadar "düşünüyor" durumu
               };
               // updateMessage kullan - mesaj varsa günceller, yoksa ekler
               updateMessage(conversationId, aiPlaceholderMessage);
+
+              // Dinamik mesaj değiştirme - her 2 saniyede bir mesaj değişsin
+              thinkingMessageIntervalRef.current = setInterval(() => {
+                // Closure'dan güncel değerleri al
+                const currentStreamingId = streamingAIMessageId;
+                const currentStreamingText = streamingAIMessageText;
+                
+                if (currentStreamingId && !currentStreamingText) {
+                  // İlk chunk gelmediyse mesajı değiştir
+                  thinkingIndexRef.current = (thinkingIndexRef.current + 1) % thinkingMessages.length;
+                  const updatedMessage: ChatMessage = {
+                    id: currentStreamingId,
+                    text: thinkingMessages[thinkingIndexRef.current],
+                    isUser: false,
+                    timestamp: new Date(),
+                    isStreaming: true,
+                    isThinking: true
+                  };
+                  updateMessage(conversationId, updatedMessage);
+                } else {
+                  // İlk chunk geldi, interval'i temizle
+                  if (thinkingMessageIntervalRef.current) {
+                    clearInterval(thinkingMessageIntervalRef.current);
+                    thinkingMessageIntervalRef.current = null;
+                  }
+                }
+              }, 2000); // 2 saniyede bir değiş
 
               if (activeStreamRef.current) {
                 activeStreamRef.current.streamingMessageId = streamingAIMessageId;
@@ -465,6 +508,12 @@ export const useChatMessages = () => {
           },
           // onAIChunk - ChatGPT gibi gerçek zamanlı yazma efekti
           (chunk: string, fullContent: string) => {
+            // İlk chunk geldiğinde thinking mesaj interval'ini temizle
+            if (thinkingMessageIntervalRef.current) {
+              clearInterval(thinkingMessageIntervalRef.current);
+              thinkingMessageIntervalRef.current = null;
+            }
+            
             if (!firstChunkTime) {
               firstChunkTime = Date.now();
               const timeToFirstChunk = firstChunkTime - messageStartTime;
@@ -495,7 +544,8 @@ export const useChatMessages = () => {
                 text: fullContent,
                 isUser: false,
                 timestamp: new Date(),
-                isStreaming: true // Streaming devam ediyor
+                isStreaming: true, // Streaming devam ediyor
+                isThinking: false // İlk chunk geldi, artık düşünmüyor
               };
               // updateMessage kullan - mesaj varsa günceller, yoksa ekler
               updateMessage(conversationId, updatedAIMessage);
@@ -582,6 +632,12 @@ export const useChatMessages = () => {
             }
             streamingAIMessageId = null;
             
+            // Thinking mesaj interval'ini temizle
+            if (thinkingMessageIntervalRef.current) {
+              clearInterval(thinkingMessageIntervalRef.current);
+              thinkingMessageIntervalRef.current = null;
+            }
+            
             // Loading state'ini temizle - AI cevabı tamamlandı
             setIsLoading(false);
             console.log('✅ Loading state temizlendi (AI complete)');
@@ -591,6 +647,12 @@ export const useChatMessages = () => {
           },
           // onError
           (error: string) => {
+            // Thinking mesaj interval'ini temizle
+            if (thinkingMessageIntervalRef.current) {
+              clearInterval(thinkingMessageIntervalRef.current);
+              thinkingMessageIntervalRef.current = null;
+            }
+            
             if (streamState.cancelledByUser) {
               console.log('ℹ️ AI cevabı kullanıcı tarafından durduruldu:', error);
               if (streamingAIMessageId) {

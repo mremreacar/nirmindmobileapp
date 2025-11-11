@@ -12,6 +12,7 @@ export interface ChatMessage {
   images?: string[];
   files?: any[];
   isStreaming?: boolean; // Streaming mesajları için flag
+  isThinking?: boolean; // İlk chunk gelene kadar "düşünüyor" durumu (UX iyileştirmesi)
 }
 
 export interface ChatConversation {

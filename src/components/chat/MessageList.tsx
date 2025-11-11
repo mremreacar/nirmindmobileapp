@@ -1,5 +1,5 @@
-import React, { useState, memo, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Alert, Modal, Linking, Dimensions } from 'react-native';
+import React, { useState, memo, useMemo, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Alert, Modal, Linking, Dimensions, Animated } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { ChatMessage } from '@/src/lib/mock/types';
 import { useChat } from '@/src/lib/context/ChatContext';
@@ -7,6 +7,74 @@ import { WebView } from 'react-native-webview';
 import { getFileTypeIcon, formatFileSize } from '@/src/utils/fileValidation';
 
 const { width, height } = Dimensions.get('window');
+
+// Animasyonlu Thinking Dots Component
+const ThinkingDots: React.FC = () => {
+  const dot1 = useRef(new Animated.Value(0)).current;
+  const dot2 = useRef(new Animated.Value(0)).current;
+  const dot3 = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const animateDot = (dot: Animated.Value, delay: number) => {
+      return Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(dot, {
+            toValue: -8,
+            duration: 400,
+            useNativeDriver: true,
+          }),
+          Animated.timing(dot, {
+            toValue: 0,
+            duration: 400,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+    };
+
+    const animations = [
+      animateDot(dot1, 0),
+      animateDot(dot2, 150),
+      animateDot(dot3, 300),
+    ];
+
+    animations.forEach(anim => anim.start());
+
+    return () => {
+      animations.forEach(anim => anim.stop());
+    };
+  }, []);
+
+  return (
+    <View style={styles.thinkingDots}>
+      <Animated.View
+        style={[
+          styles.thinkingDot,
+          {
+            transform: [{ translateY: dot1 }],
+          },
+        ]}
+      />
+      <Animated.View
+        style={[
+          styles.thinkingDot,
+          {
+            transform: [{ translateY: dot2 }],
+          },
+        ]}
+      />
+      <Animated.View
+        style={[
+          styles.thinkingDot,
+          {
+            transform: [{ translateY: dot3 }],
+          },
+        ]}
+      />
+    </View>
+  );
+};
 
 interface MessageListProps {
   messages: ChatMessage[];
@@ -306,8 +374,18 @@ const MessageList: React.FC<MessageListProps> = ({
                   </View>
                 )}
                 
-                {/* Mesaj metni */}
-                {message.text && typeof message.text === 'string' && message.text.trim() && (
+                {/* Thinking state - İlk chunk gelene kadar özel görünüm */}
+                {message.isThinking && (
+                  <View style={styles.thinkingContainer}>
+                    <Text allowFontScaling={false} style={styles.thinkingText}>
+                      Düşünüyorum
+                    </Text>
+                    <ThinkingDots />
+                  </View>
+                )}
+                
+                {/* Mesaj metni - thinking değilse normal göster */}
+                {!message.isThinking && message.text && typeof message.text === 'string' && message.text.trim() && (
                   message.isUser ? (
                     <Text allowFontScaling={false} style={[
                       styles.messageText,
@@ -323,8 +401,8 @@ const MessageList: React.FC<MessageListProps> = ({
                     </Markdown>
                   )
                 )}
-                {/* Streaming cursor - sadece text yoksa ve streaming ise */}
-                {!message.text && message.isStreaming && (
+                {/* Streaming cursor - sadece text yoksa ve streaming ise (thinking değilse) */}
+                {!message.isThinking && !message.text && message.isStreaming && (
                   <Markdown
                     style={markdownStyles}
                   >
@@ -562,6 +640,34 @@ const styles = StyleSheet.create({
   },
   loadingDot3: {
     opacity: 1,
+  },
+  // Thinking state styles - Temaya uygun
+  thinkingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  thinkingText: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 16,
+    lineHeight: 24,
+    color: '#FFFFFF',
+    opacity: 0.9,
+    letterSpacing: 0.2,
+  },
+  thinkingDots: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 20,
+    justifyContent: 'center',
+  },
+  thinkingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FFFFFF',
+    opacity: 0.7,
   },
   imagesContainer: {
     marginBottom: 8,

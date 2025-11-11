@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Backend API URL - Nircore backend
+// Production URL - Local development için __DEV__ kontrolü kaldırıldı
 const API_BASE_URL = 'https://nircore.io/api';
 
 interface ApiResponse<T = any> {

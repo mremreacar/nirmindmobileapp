@@ -52,7 +52,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     updateResearchMode,
     loadingMessagesConversationIds,
   } = useChat();
-  const { isLoading, sendMessage, sendQuickSuggestion } = useChatMessages();
+  const { isLoading, isStreaming, sendMessage, sendQuickSuggestion, cancelStreamingResponse } = useChatMessages();
   const activeConversationId = useMemo(() => currentConversation?.id || conversationId || null, [currentConversation?.id, conversationId]);
   const isConversationDataLoading = useMemo(() => {
     if (!activeConversationId) {
@@ -613,6 +613,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             isDictating={dictationState.isDictating}
             isProcessing={dictationState.isProcessing}
             isLoading={isLoading}
+            isStreaming={isStreaming}
+            onCancelStreaming={cancelStreamingResponse}
             isInputFocused={isInputFocused}
             setIsInputFocused={setIsInputFocused}
             textInputRef={textInputRef}

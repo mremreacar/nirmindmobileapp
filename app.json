@@ -27,16 +27,7 @@
         "NSMicrophoneUsageDescription": "Bu uygulama, dikte özelliğini kullanabilmeniz için mikrofon erişimine ihtiyaç duyar.",
         "NSSpeechRecognitionUsageDescription": "Bu uygulama, sesle komut veya dikte özelliğini kullanabilmeniz için ses tanıma erişimine ihtiyaç duyar.",
         "NSAppTransportSecurity": {
-          "NSAllowsLocalNetworking": true,
-          "NSExceptionDomains": {
-            "localhost": {
-              "NSExceptionAllowsInsecureHTTPLoads": true
-            },
-            "192.168.0.186": {
-              "NSExceptionAllowsInsecureHTTPLoads": true,
-              "NSIncludesSubdomains": true
-            }
-          }
+          "NSAllowsLocalNetworking": false
         },
         "CFBundleURLTypes": [
           {
