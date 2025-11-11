@@ -140,29 +140,46 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   const inputClearedRef = useRef(false);
 
   // Dikte feature hooks
-  const { dictationState, toggleDictation } = useDictation({
+  const { dictationState, toggleDictation: originalToggleDictation } = useDictation({
     onTextUpdate: (text: string) => {
-      // Hızlı text güncelleme - console log'ları kaldırdık
-      // Wrapper fonksiyonu kullan (flag reset için)
-      const currentText = inputText;
-      const newText = currentText + text;
-      if (newText.length > 0) {
-        inputClearedRef.current = false;
-      }
-      setInputText(newText);
+      // Hızlı text güncelleme - functional update kullan (closure sorununu önler)
+      console.log('📝 [ChatScreen] onTextUpdate çağrıldı, text:', text);
+      setInputText((prev) => {
+        const newText = prev + text;
+        console.log('📝 [ChatScreen] Yeni text:', newText);
+        if (newText.length > 0) {
+          inputClearedRef.current = false;
+        }
+        return newText;
+      });
     },
     onError: (error: string) => {
-      console.error('Chat dikte hatası:', error);
+      console.error('❌ [ChatScreen] Chat dikte hatası:', error);
       // Kullanıcıya bilgilendirme mesajı göster
       Alert.alert('Bilgi', error, [{ text: 'Tamam' }]);
     },
     onStart: () => {
-      console.log('Chat dikte başlatıldı');
+      console.log('✅ [ChatScreen] Chat dikte başlatıldı');
     },
     onStop: () => {
-      console.log('Chat dikte durduruldu');
+      console.log('🛑 [ChatScreen] Chat dikte durduruldu');
     },
   });
+
+  // Dikte tuşuna basma logları için wrapper
+  const toggleDictation = useCallback(async () => {
+    console.log('🎤 [ChatScreen] Dikte tuşuna basıldı (toggleDictation wrapper)', {
+      currentState: {
+        isDictating: dictationState.isDictating,
+        isListening: dictationState.isListening,
+        isProcessing: dictationState.isProcessing,
+        currentMessage: dictationState.currentMessage,
+      },
+      inputTextLength: inputText.length,
+      timestamp: new Date().toISOString()
+    });
+    await originalToggleDictation();
+  }, [originalToggleDictation, dictationState, inputText.length]);
 
   const { animations: waveAnimations } = useWaveAnimation(dictationState.isDictating);
 
@@ -726,3 +743,4 @@ const styles = StyleSheet.create({
 });
 
 export default ChatScreen;
+

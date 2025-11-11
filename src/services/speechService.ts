@@ -1,10 +1,113 @@
 import { Platform, Alert, AppState } from 'react-native';
 import { Audio } from 'expo-av';
 
-// Conditional import for expo-speech (not available in Expo Go)
-// Lazy loading: Module will only be loaded when needed
-// Note: This will show an error in Expo Go, but it's expected behavior
-// The module will only work in development builds (npx expo run:ios or npx expo run:android)
+// React Native Voice - Cihazın kendi speech recognition'ını kullan (speech-to-text)
+let Voice: any = null;
+let voiceModuleLoadingAttempted = false;
+
+const loadVoiceModule = (): any => {
+  if (Voice !== null) {
+    return Voice;
+  }
+  
+  if (voiceModuleLoadingAttempted) {
+    console.log('ℹ️ React Native Voice modülü daha önce yüklenmeye çalışıldı ama başarısız oldu');
+    return null;
+  }
+  
+  voiceModuleLoadingAttempted = true;
+  
+  try {
+    // Try to require @react-native-voice/voice module
+    console.log('🔍 React Native Voice modülü yüklenmeye çalışılıyor...');
+    const voiceModuleRaw = require('@react-native-voice/voice');
+    
+    if (voiceModuleRaw) {
+      console.log('📦 Voice modülü require edildi, metodları kontrol ediliyor...');
+      console.log('📦 Voice modülü raw keys:', Object.keys(voiceModuleRaw));
+      
+      // Default export kontrolü - React Native Voice modülü default export olarak geliyor
+      // Modül yapısı: export default new RCTVoice();
+      // Bu yüzden voiceModuleRaw.default kullanmalıyız
+      let voiceModule: any = null;
+      
+      // Önce default export'u kontrol et (modül default export olarak geliyor)
+      if (voiceModuleRaw.default) {
+        console.log('📦 Voice modülü default export var, default kullanılıyor');
+        voiceModule = voiceModuleRaw.default;
+        console.log('📦 Default export keys:', Object.keys(voiceModule || {}));
+        console.log('📦 Default export tipi:', typeof voiceModule);
+      } else {
+        // Default export yoksa direkt raw'ı kullan
+        console.log('📦 Voice modülü default export yok, raw kullanılıyor');
+        voiceModule = voiceModuleRaw;
+      }
+      
+      // Voice modülünün gerekli metodlarını kontrol et
+      // onSpeechResults, onSpeechError gibi property'ler başlangıçta undefined olabilir, 
+      // bu yüzden sadece start ve stop metodlarını kontrol ediyoruz
+      if (voiceModule && typeof voiceModule.start === 'function' && 
+          typeof voiceModule.stop === 'function') {
+        Voice = voiceModule;
+        console.log('✅ React Native Voice modülü başarıyla yüklendi ve hazır');
+        console.log('✅ Voice modülü metodları:', {
+          hasStart: typeof voiceModule.start === 'function',
+          hasStop: typeof voiceModule.stop === 'function',
+          hasIsAvailable: typeof voiceModule.isAvailable === 'function',
+          hasDestroy: typeof voiceModule.destroy === 'function',
+          hasCancel: typeof voiceModule.cancel === 'function',
+          allKeys: Object.keys(voiceModule).slice(0, 20) // İlk 20 key'i göster
+        });
+        return Voice;
+      } else {
+        // Detaylı debug bilgisi
+        console.warn('⚠️ Voice modülü yüklendi ama gerekli metodlar eksik');
+        console.warn('⚠️ Debug bilgileri:', {
+          voiceModuleExists: !!voiceModule,
+          hasStart: voiceModule ? typeof voiceModule.start : 'N/A',
+          hasStop: voiceModule ? typeof voiceModule.stop : 'N/A',
+          moduleKeys: voiceModule ? Object.keys(voiceModule).slice(0, 20) : [],
+          moduleType: typeof voiceModule,
+          defaultExists: !!voiceModuleRaw.default,
+          defaultType: typeof voiceModuleRaw.default,
+          rawKeys: Object.keys(voiceModuleRaw).slice(0, 10)
+        });
+        
+        // Eğer default export varsa ama metodlar yoksa, default'un prototype'ını kontrol et
+        if (voiceModuleRaw.default && voiceModule === voiceModuleRaw.default) {
+          const defaultModule = voiceModuleRaw.default;
+          console.log('🔍 Default modül prototype kontrolü...');
+          if (defaultModule.__proto__) {
+            console.log('📦 Default modül prototype keys:', Object.keys(defaultModule.__proto__).slice(0, 10));
+          }
+        }
+      }
+    } else {
+      console.warn('⚠️ Voice modülü require edildi ama null/undefined döndü');
+    }
+  } catch (error: any) {
+    // Module not available
+    const errorMessage = error?.message || 'Unknown error';
+    console.error('❌ React Native Voice modülü yüklenemedi:', errorMessage);
+    console.error('❌ Hata detayları:', {
+      message: errorMessage,
+      code: error?.code,
+      name: error?.name,
+      stack: error?.stack?.substring(0, 200)
+    });
+    
+    // Expo Go'da çalışmıyor olabilir
+    if (errorMessage.includes('Cannot find native module') || 
+        errorMessage.includes('Native module') ||
+        errorMessage.includes('expo-dev-client')) {
+      console.warn('⚠️ React Native Voice native modül gerektirir. Development build gerekli: npx expo run:ios veya npx expo run:android');
+    }
+  }
+  
+  return null;
+};
+
+// Expo Speech - Text-to-speech için (speak fonksiyonları)
 let Speech: any = null;
 let speechModuleLoadingAttempted = false;
 
@@ -29,7 +132,6 @@ const loadSpeechModule = (): any => {
     }
   } catch (error: any) {
     // Module not available (e.g., in Expo Go)
-    // This is expected in Expo Go - the module requires a development build
     const errorMessage = error?.message || 'Unknown error';
     if (errorMessage.includes('Cannot find native module') || errorMessage.includes('ExpoSpeech')) {
       console.log('ℹ️ Expo Speech modülü mevcut değil (Development build gerekli: npx expo run:ios veya npx expo run:android)');
@@ -79,9 +181,12 @@ class SpeechService {
     options: SpeechRecognitionOptions = {}
   ): Promise<boolean> {
     try {
-      if (this.isListening) {
-        console.log('Speech recognition already listening');
-        return false;
+      // Eğer zaten listening ise, önce durdur ve temizle
+      if (this.isListening || this.recording) {
+        console.log('⚠️ Speech recognition zaten aktif, önce durduruluyor...');
+        await this.stopListening();
+        // Kısa bir bekleme - temizleme işleminin tamamlanması için
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
 
       // Callback'leri sakla
@@ -129,8 +234,13 @@ class SpeechService {
                 this.appStateSubscription = null;
               }
               
-              // Recording başlat
-              this.startWhisperRecognition(options).then(resolve);
+              // Speech recognition başlat
+              const voiceModule = loadVoiceModule();
+              if (voiceModule) {
+                this.startVoiceRecognition(options).then(resolve);
+              } else {
+                this.startWhisperRecognition(options).then(resolve);
+              }
             }
           };
           
@@ -152,10 +262,18 @@ class SpeechService {
       }
 
       this.isListening = true;
-      console.log('Starting speech recognition with OpenAI Whisper...');
+      console.log('Starting speech recognition...');
 
-      // OpenAI Whisper API ile ses kaydı ve speech recognition
-      return this.startWhisperRecognition(options);
+      // Önce React Native Voice ile deneyelim (cihazın kendi speech recognition'ı)
+      const voiceModule = loadVoiceModule();
+      if (voiceModule) {
+        console.log('✅ React Native Voice kullanılıyor (cihazın kendi speech recognition\'ı)');
+        return this.startVoiceRecognition(options);
+      } else {
+        // Voice modülü yoksa, fallback olarak Whisper API kullan (backend'e gönder)
+        console.log('⚠️ React Native Voice mevcut değil, Whisper API kullanılıyor (backend\'e gönderilecek)');
+        return this.startWhisperRecognition(options);
+      }
     } catch (error) {
       console.error('Speech recognition start error:', error);
       this.isListening = false;
@@ -164,6 +282,143 @@ class SpeechService {
     }
   }
 
+  // React Native Voice ile cihazın kendi speech recognition'ını kullan
+  private async startVoiceRecognition(options: SpeechRecognitionOptions = {}): Promise<boolean> {
+    try {
+      const voiceModule = loadVoiceModule();
+      if (!voiceModule) {
+        console.warn('⚠️ React Native Voice modülü mevcut değil, Whisper API\'ye fallback yapılıyor');
+        console.warn('⚠️ NOT: React Native Voice native modül gerektirir. Development build gerekli: npx expo run:ios veya npx expo run:android');
+        this.onErrorCallback?.('Dikte özelliği şu anda kullanılamıyor. React Native Voice modülü yüklenemedi. Lütfen uygulamayı development build ile çalıştırın.');
+        return this.startWhisperRecognition(options);
+      }
+
+      console.log('🎤 React Native Voice ile speech recognition başlatılıyor...');
+
+      // Önce mevcut listener'ları temizle
+      try {
+        if (typeof voiceModule.removeAllListeners === 'function') {
+          voiceModule.removeAllListeners();
+        }
+      } catch (cleanupError) {
+        console.warn('⚠️ Listener temizleme hatası (devam ediliyor):', cleanupError);
+      }
+
+      // Voice event listener'ları
+      voiceModule.onSpeechStart = () => {
+        // Eğer listening durdurulmuşsa, event'leri ignore et
+        if (!this.isListening) {
+          console.log('⚠️ onSpeechStart event geldi ama listening durdurulmuş, ignore ediliyor');
+          return;
+        }
+        console.log('✅ Speech recognition başladı (Voice)');
+      };
+
+      voiceModule.onSpeechEnd = () => {
+        // Eğer listening durdurulmuşsa, event'leri ignore et
+        if (!this.isListening) {
+          console.log('⚠️ onSpeechEnd event geldi ama listening durdurulmuş, ignore ediliyor');
+          return;
+        }
+        console.log('✅ Speech recognition bitti (Voice)');
+      };
+
+      voiceModule.onSpeechResults = (e: any) => {
+        // Eğer listening durdurulmuşsa, event'leri ignore et
+        if (!this.isListening) {
+          console.log('⚠️ onSpeechResults event geldi ama listening durdurulmuş, ignore ediliyor');
+          return;
+        }
+        
+        console.log('📝 Voice onSpeechResults event:', e);
+        if (e.value && e.value.length > 0) {
+          const text = e.value[0];
+          console.log('📝 Speech recognition sonucu:', text);
+          
+          if (this.onResultCallback && text && text.trim()) {
+            // Final result için callback çağır
+            // React Native Voice'da onSpeechResults genellikle final result'tur
+            const trimmedText = text.trim();
+            console.log('✅ Final result callback çağrılıyor:', trimmedText);
+            this.onResultCallback({
+              text: trimmedText,
+              confidence: 0.9,
+              isFinal: true
+            });
+          }
+        }
+      };
+
+      voiceModule.onSpeechPartialResults = (e: any) => {
+        // Eğer listening durdurulmuşsa, event'leri ignore et
+        if (!this.isListening) {
+          console.log('⚠️ onSpeechPartialResults event geldi ama listening durdurulmuş, ignore ediliyor');
+          return;
+        }
+        
+        if (e.value && e.value.length > 0 && options.interimResults) {
+          const text = e.value[0];
+          console.log('📝 Speech recognition ara sonuç:', text);
+          
+          if (this.onResultCallback && text && text.trim()) {
+            this.onResultCallback({
+              text: text.trim(),
+              confidence: 0.7,
+              isFinal: false
+            });
+          }
+        }
+      };
+
+      voiceModule.onSpeechError = (e: any) => {
+        // Eğer listening durdurulmuşsa, error event'lerini ignore et (normal durdurma hatası olabilir)
+        if (!this.isListening) {
+          console.log('⚠️ onSpeechError event geldi ama listening durdurulmuş, ignore ediliyor:', e.error?.message || e.error?.code);
+          return;
+        }
+        
+        console.error('❌ Speech recognition hatası (Voice):', e);
+        const errorMessage = e.error?.message || e.error?.code || 'Speech recognition hatası';
+        console.error('❌ Voice error detayları:', {
+          error: e.error,
+          message: errorMessage
+        });
+        this.onErrorCallback?.(errorMessage);
+      };
+
+      // Speech recognition başlat
+      const language = options.language || 'tr-TR';
+      console.log('🎤 Voice.start() çağrılıyor, dil:', language);
+      try {
+        await voiceModule.start(language);
+        console.log('✅ React Native Voice başarıyla başlatıldı:', language);
+        return true;
+      } catch (startError: any) {
+        console.error('❌ Voice start hatası:', startError);
+        console.error('❌ Start error detayları:', {
+          message: startError?.message,
+          code: startError?.code,
+          name: startError?.name
+        });
+        const errorMsg = startError?.message || 'Speech recognition başlatılamadı';
+        this.onErrorCallback?.(errorMsg);
+        this.isListening = false;
+        
+        // Hata durumunda Whisper API'ye fallback yap
+        console.warn('⚠️ Voice başlatılamadı, Whisper API\'ye fallback yapılıyor');
+        return this.startWhisperRecognition(options);
+      }
+
+    } catch (error) {
+      console.error('❌ Voice recognition start error:', error);
+      this.isListening = false;
+      this.onErrorCallback?.(error instanceof Error ? error.message : 'Voice recognition failed');
+      
+      // Hata durumunda Whisper API'ye fallback yap
+      console.log('⚠️ Voice recognition başarısız, Whisper API\'ye fallback yapılıyor');
+      return this.startWhisperRecognition(options);
+    }
+  }
 
   private async startWhisperRecognition(options: SpeechRecognitionOptions = {}): Promise<boolean> {
     try {
@@ -249,12 +504,18 @@ class SpeechService {
   }
 
   async stopListening(): Promise<void> {
-    // Eğer zaten listening değilse ve recording yoksa, işlem yapma
-    if (!this.isListening && !this.recording) {
-      return;
-    }
-
+    console.log('🛑 stopListening çağrıldı, isListening:', this.isListening, 'recording:', !!this.recording);
+    
+    // Önce state'i false yap (diğer işlemler için) - her zaman yap
+    const wasListening = this.isListening;
     this.isListening = false;
+    console.log('✅ isListening false yapıldı (wasListening:', wasListening, ')');
+    
+    // Eğer zaten listening değilse ve recording yoksa, sadece temizlik yap
+    if (!wasListening && !this.recording) {
+      console.log('ℹ️ Zaten durdurulmuş, sadece temizlik yapılıyor');
+      // Yine de temizlik yap
+    }
     
     // AppState subscription'ı temizle
     if (this.appStateSubscription) {
@@ -265,6 +526,68 @@ class SpeechService {
     if (this.recognitionTimeout) {
       clearTimeout(this.recognitionTimeout);
       this.recognitionTimeout = null;
+    }
+
+    // React Native Voice'u durdur
+    try {
+      const voiceModule = loadVoiceModule();
+      if (voiceModule) {
+        try {
+          console.log('🛑 React Native Voice durduruluyor...');
+          // Önce cancel dene (eğer varsa) - bu daha agresif bir durdurma
+          if (typeof voiceModule.cancel === 'function') {
+            try {
+              await voiceModule.cancel();
+              console.log('✅ Voice cancel edildi');
+            } catch (cancelError) {
+              console.warn('⚠️ Voice cancel hatası (devam ediliyor):', cancelError);
+            }
+          }
+          
+          // Sonra stop dene
+          if (typeof voiceModule.stop === 'function') {
+            try {
+              await voiceModule.stop();
+              console.log('✅ Voice stop edildi');
+            } catch (stopError) {
+              console.warn('⚠️ Voice stop hatası (devam ediliyor):', stopError);
+            }
+          }
+          
+          // removeAllListeners metodu varsa çağır
+          if (typeof voiceModule.removeAllListeners === 'function') {
+            voiceModule.removeAllListeners();
+            console.log('✅ Voice listeners temizlendi (removeAllListeners)');
+          } else {
+            // removeAllListeners yoksa, event listener'ları manuel temizle
+            voiceModule.onSpeechStart = undefined;
+            voiceModule.onSpeechEnd = undefined;
+            voiceModule.onSpeechResults = undefined;
+            voiceModule.onSpeechPartialResults = undefined;
+            voiceModule.onSpeechError = undefined;
+            console.log('✅ Voice listeners manuel temizlendi');
+          }
+          console.log('✅ React Native Voice tamamen durduruldu');
+        } catch (stopError) {
+          console.warn('⚠️ Voice stop hatası (devam ediliyor):', stopError);
+          // Hata olsa bile listener'ları temizle
+          try {
+            if (typeof voiceModule.removeAllListeners === 'function') {
+              voiceModule.removeAllListeners();
+            } else {
+              voiceModule.onSpeechStart = undefined;
+              voiceModule.onSpeechEnd = undefined;
+              voiceModule.onSpeechResults = undefined;
+              voiceModule.onSpeechPartialResults = undefined;
+              voiceModule.onSpeechError = undefined;
+            }
+          } catch (cleanupError) {
+            console.warn('⚠️ Listener temizleme hatası:', cleanupError);
+          }
+        }
+      }
+    } catch (voiceError) {
+      console.warn('⚠️ Voice durdurma hatası (devam ediliyor):', voiceError);
     }
 
     try {
@@ -324,9 +647,9 @@ class SpeechService {
         
         this.recording = null;
       }
-      console.log('Whisper recognition stopped');
+      console.log('✅ Whisper recognition stopped');
     } catch (error) {
-      console.error('Error stopping whisper recognition:', error);
+      console.error('❌ Error stopping whisper recognition:', error);
       // Hata durumunda recording'i null yap
       this.recording = null;
     }
@@ -334,6 +657,10 @@ class SpeechService {
     // Callback'leri temizle
     this.onResultCallback = null;
     this.onErrorCallback = null;
+    
+    // State'i kesinlikle false yap
+    this.isListening = false;
+    console.log('✅ stopListening tamamlandı, tüm state temizlendi');
   }
 
   isCurrentlyListening(): boolean {
@@ -403,8 +730,11 @@ class SpeechService {
         // Transcription başarısız oldu
         let errorMessage = response.error || response.message || 'Desifre başarısız';
         
-        // Permission denied gibi teknik hataları kullanıcı dostu mesajlara çevir
-        if (errorMessage.includes('EACCES') || errorMessage.includes('permission denied')) {
+        // OpenAI API key hatası için özel mesaj
+        if (errorMessage.includes('OpenAI API key is not configured') || 
+            errorMessage.includes('Dikte özelliği şu anda kullanılamıyor')) {
+          errorMessage = 'Dikte özelliği şu anda kullanılamıyor. Lütfen metin olarak yazın.';
+        } else if (errorMessage.includes('EACCES') || errorMessage.includes('permission denied')) {
           errorMessage = 'Sunucu izin hatası. Lütfen daha sonra tekrar deneyin.';
         } else if (errorMessage.includes('Failed to transcribe audio')) {
           errorMessage = 'Ses dosyası işlenirken bir hata oluştu. Lütfen tekrar deneyin.';
@@ -421,8 +751,11 @@ class SpeechService {
       if (error instanceof Error) {
         errorMessage = error.message;
         
-        // Permission denied gibi teknik hataları kullanıcı dostu mesajlara çevir
-        if (errorMessage.includes('EACCES') || errorMessage.includes('permission denied')) {
+        // OpenAI API key hatası için özel mesaj
+        if (errorMessage.includes('OpenAI API key is not configured') || 
+            errorMessage.includes('Dikte özelliği şu anda kullanılamıyor')) {
+          errorMessage = 'Dikte özelliği şu anda kullanılamıyor. Lütfen metin olarak yazın.';
+        } else if (errorMessage.includes('EACCES') || errorMessage.includes('permission denied')) {
           errorMessage = 'Sunucu izin hatası. Lütfen daha sonra tekrar deneyin.';
         } else if (errorMessage.includes('Failed to transcribe audio')) {
           errorMessage = 'Ses dosyası işlenirken bir hata oluştu. Lütfen tekrar deneyin.';

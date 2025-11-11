@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { TouchableOpacity, Text, StyleSheet, Animated, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SvgXml } from 'react-native-svg';
@@ -27,6 +27,16 @@ const DictationButton: React.FC<DictationButtonProps> = ({
     ? ['#9CA3AF', '#6B7280'] 
     : ['#5B57D2', '#2F2D6C']; // Kapalıyken gradient
 
+  const handlePress = useCallback(() => {
+    console.log('🎤 [DictationButton] Dikte butonuna basıldı', {
+      isDictating,
+      isProcessing,
+      isDisabled,
+      timestamp: new Date().toISOString()
+    });
+    onPress();
+  }, [onPress, isDictating, isProcessing, isDisabled]);
+
   return (
     <TouchableOpacity
       style={[
@@ -34,7 +44,7 @@ const DictationButton: React.FC<DictationButtonProps> = ({
         style,
         isDisabled && styles.disabledButton
       ]}
-      onPress={isDisabled ? undefined : onPress}
+      onPress={isDisabled ? undefined : handlePress}
       disabled={isDisabled}
       accessible={true}
       accessibilityLabel={

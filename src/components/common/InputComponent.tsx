@@ -716,53 +716,66 @@ const InputComponent: React.FC<InputComponentProps> = ({
 
 
       {/* Microphone/Send Button */}
-      {isStreaming ? (
-      <TouchableOpacity
+      {/* Öncelik sırası: 1. Dikte aktifse dikte butonu, 2. AI cevap yazıyorsa AI durdurma butonu, 3. Mesaj gönderilebilir durumda gönder butonu, 4. Değilse dikte başlatma butonu */}
+      {isDictating || isProcessing ? (
+        // Dikte aktifse veya işleniyorsa → Dikte butonu (durdurma/başlatma)
+        <DictationButton
+          isDictating={isDictating}
+          isProcessing={isProcessing}
+          onPress={onDictate}
+          waveAnimations={waveAnimations || []}
+          style={[styles.micButton, buttonStyle]}
+        />
+      ) : isStreaming ? (
+        // AI cevap yazıyorsa → AI cevabını durdurma butonu
+        <TouchableOpacity
           style={[styles.cancelButton, buttonStyle]}
           onPress={onCancelStreaming}
           accessible={true}
           accessibilityLabel="Yanıtı durdur"
           accessibilityHint="Devam eden AI yanıtını durdurmak için dokunun"
           accessibilityRole="button"
-      >
-        <LinearGradient
-            colors={["#7E7AE9", "#4C46B3"]}
-          locations={[0, 1]}
-          style={styles.cancelButtonGradient}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0, y: 1 }}
         >
-          <SvgXml 
-            xml={SVG_ICONS.stop}
-            width="22"
-            height="22"
-          />
-        </LinearGradient>
-      </TouchableOpacity>
+          <LinearGradient
+            colors={["#7E7AE9", "#4C46B3"]}
+            locations={[0, 1]}
+            style={styles.cancelButtonGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0, y: 1 }}
+          >
+            <SvgXml 
+              xml={SVG_ICONS.stop}
+              width="22"
+              height="22"
+            />
+          </LinearGradient>
+        </TouchableOpacity>
       ) : shouldShowSendButton ? (
-      <TouchableOpacity
+        // Mesaj gönderilebilir durumda → Gönder butonu
+        <TouchableOpacity
           style={[styles.micButton, buttonStyle]}
           onPress={handleSendPress}
-        accessible={true}
+          accessible={true}
           accessibilityLabel="Mesaj gönder"
           accessibilityHint="Mesajı göndermek için dokunun"
-        accessibilityRole="button"
-      >
-        <LinearGradient
-            colors={["#7E7AE9", "#3532A8"]}
-          locations={[0, 1]}
-          style={styles.micButtonGradient}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0, y: 1 }}
+          accessibilityRole="button"
         >
-          <SvgXml 
+          <LinearGradient
+            colors={["#7E7AE9", "#3532A8"]}
+            locations={[0, 1]}
+            style={styles.micButtonGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0, y: 1 }}
+          >
+            <SvgXml 
               xml={SVG_ICONS.send}
-            width="24"
-            height="24"
-          />
-        </LinearGradient>
-      </TouchableOpacity>
+              width="24"
+              height="24"
+            />
+          </LinearGradient>
+        </TouchableOpacity>
       ) : (
+        // Mesaj gönderilemez durumda → Dikte başlatma butonu
         <DictationButton
           isDictating={isDictating}
           isProcessing={isProcessing}
