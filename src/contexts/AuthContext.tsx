@@ -119,6 +119,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       console.log('🔐 Nirmind - Auth callback işleniyor...');
       setIsLoading(true);
 
+      // Token'ı console'a logla
+      console.log('🔑 Nirmind - Token:', token);
+      console.log('🔑 Nirmind - Token (full):', {
+        tokenLength: token.length,
+        tokenPreview: token.substring(0, 30) + '...' + token.substring(token.length - 20),
+        tokenStart: token.substring(0, 50),
+        tokenEnd: token.substring(token.length - 50)
+      });
+
       // Save token
       await backendApiService.setAuthToken(token);
       await AsyncStorage.setItem('authToken', token);

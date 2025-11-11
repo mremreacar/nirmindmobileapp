@@ -171,13 +171,23 @@ const LoginMethodScreen = ({
       if (result.success && result.token) {
         console.log(`✅ ${provider === 'google' ? 'Google' : 'Apple'} login başarılı`);
         
+        // Token'ı console'a logla
+        const token = result.token.accessToken;
+        console.log(`🔑 Nirmind - ${provider === 'google' ? 'Google' : 'Apple'} Login Token:`, token);
+        console.log(`🔑 Nirmind - ${provider === 'google' ? 'Google' : 'Apple'} Login Token (full):`, {
+          tokenLength: token.length,
+          tokenPreview: token.substring(0, 30) + '...' + token.substring(token.length - 20),
+          tokenStart: token.substring(0, 50),
+          tokenEnd: token.substring(token.length - 50)
+        });
+        
         // Token'ı kaydet ve kullanıcıyı giriş yaptır
         try {
           // Backend'den gelen user bilgisini kullan
           if (result.user) {
             // Token'ı backend service'e set et
             try {
-              await backendApiService.setAuthToken(result.token.accessToken);
+              await backendApiService.setAuthToken(token);
             } catch (tokenError: any) {
               console.error(`❌ Token set hatası:`, tokenError);
               throw new Error('Token kaydedilemedi');
@@ -185,7 +195,7 @@ const LoginMethodScreen = ({
             
             // AsyncStorage'a token kaydet - hata yönetimi ile
             try {
-              await AsyncStorage.setItem('authToken', result.token.accessToken);
+              await AsyncStorage.setItem('authToken', token);
             } catch (storageError: any) {
               console.error(`❌ AsyncStorage token kaydetme hatası:`, storageError);
               // AsyncStorage hatası kritik değil, devam et
@@ -465,11 +475,22 @@ const LoginMethodScreen = ({
         const parsed = parseTokenFromUrl(url);
 
         if (parsed.token) {
-          console.log("✅ Token bulundu:", parsed.token.substring(0, 20) + '...');
+          const token = parsed.token;
+          console.log("✅ Token bulundu:", token.substring(0, 20) + '...');
+          
+          // Token'ı console'a logla
+          console.log('🔑 Nirmind - WebView Login Token:', token);
+          console.log('🔑 Nirmind - WebView Login Token (full):', {
+            tokenLength: token.length,
+            tokenPreview: token.substring(0, 30) + '...' + token.substring(token.length - 20),
+            tokenStart: token.substring(0, 50),
+            tokenEnd: token.substring(token.length - 50)
+          });
+          
           setShowWebView(false);
 
           try {
-            await handleAuthCallback(parsed.token);
+            await handleAuthCallback(token);
             onLoginSuccess();
           } catch (error: any) {
             console.error("❌ Auth callback hatası:", error);

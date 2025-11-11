@@ -87,7 +87,16 @@ class CrossAppAuthService {
       const data = await response.json();
       
       if (data.success && data.data?.token?.accessToken) {
-        return { success: true, token: data.data.token.accessToken };
+        const token = data.data.token.accessToken;
+        // Token'ı console'a logla
+        console.log('🔑 Nirmind - Direct API Login Token:', token);
+        console.log('🔑 Nirmind - Direct API Login Token (full):', {
+          tokenLength: token.length,
+          tokenPreview: token.substring(0, 30) + '...' + token.substring(token.length - 20),
+          tokenStart: token.substring(0, 50),
+          tokenEnd: token.substring(token.length - 50)
+        });
+        return { success: true, token: token };
       } else {
         return { success: false, error: data.error || 'Login failed' };
       }

@@ -63,6 +63,15 @@ class BackendApiService {
   async setAuthToken(token: string) {
     this.authToken = token;
     await AsyncStorage.setItem('authToken', token);
+    
+    // Token'ı console'a logla
+    console.log('🔑 Nirmind BackendApiService - Token set edildi:', token);
+    console.log('🔑 Nirmind BackendApiService - Token (full):', {
+      tokenLength: token.length,
+      tokenPreview: token.substring(0, 30) + '...' + token.substring(token.length - 20),
+      tokenStart: token.substring(0, 50),
+      tokenEnd: token.substring(token.length - 50)
+    });
   }
 
   async getAuthToken(): Promise<string | null> {
@@ -115,20 +124,66 @@ class BackendApiService {
       // React Native fetch otomatik User-Agent ekler
 
       if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
+        // Token'ı temizle (başında/sonunda boşluk varsa kaldır)
+        const cleanToken = token.trim();
+        headers['Authorization'] = `Bearer ${cleanToken}`;
+        
+        // Token'ı console'a logla (debug için)
+        console.log('🔑 Nirmind BackendApiService - Token gönderiliyor:', {
+          tokenLength: cleanToken.length,
+          tokenPreview: cleanToken.substring(0, 30) + '...' + cleanToken.substring(cleanToken.length - 20),
+          hasBearer: headers['Authorization'].startsWith('Bearer '),
+          endpoint: endpoint
+        });
+      } else {
+        console.warn('⚠️ Nirmind BackendApiService - Token yok!');
       }
 
       const fullUrl = `${API_BASE_URL}${endpoint}`;
-      console.log('🌐 API Request:', options.method || 'GET', fullUrl);
-      console.log('📤 Request Headers:', JSON.stringify(headers, null, 2));
       
-      // Request body varsa logla (ilk 200 karakter)
+      // Backend'e gönderilen tüm bilgileri logla
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('📤 NIRMIND - Backend\'e Gönderilen İstek:');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('🌐 Method:', options.method || 'GET');
+      console.log('🌐 URL:', fullUrl);
+      console.log('🌐 Endpoint:', endpoint);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('📋 Headers:');
+      console.log(JSON.stringify(headers, null, 2));
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      
+      // Request body varsa logla (tam içerik)
       if (options.body) {
-        const bodyPreview = typeof options.body === 'string' 
-          ? options.body.substring(0, 200) + (options.body.length > 200 ? '...' : '')
-          : JSON.stringify(options.body).substring(0, 200);
-        console.log('📤 Request Body Preview:', bodyPreview);
-        console.log('📤 Request Body Size:', typeof options.body === 'string' ? options.body.length : JSON.stringify(options.body).length, 'bytes');
+        let bodyString: string;
+        let bodyObject: any = null;
+        
+        if (typeof options.body === 'string') {
+          bodyString = options.body;
+          try {
+            bodyObject = JSON.parse(bodyString);
+          } catch (e) {
+            // JSON değilse string olarak bırak
+          }
+        } else {
+          bodyString = JSON.stringify(options.body, null, 2);
+          bodyObject = options.body;
+        }
+        
+        console.log('📦 Body (String):');
+        console.log(bodyString);
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        
+        if (bodyObject) {
+          console.log('📦 Body (Parsed):');
+          console.log(JSON.stringify(bodyObject, null, 2));
+        }
+        
+        console.log('📦 Body Size:', bodyString.length, 'bytes');
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      } else {
+        console.log('📦 Body: (yok)');
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       }
       
       // Fetch options - Network timeout ve retry için optimize edilmiş
@@ -187,6 +242,15 @@ class BackendApiService {
           }
           
           clearTimeout(timeoutId);
+          
+          // Response bilgilerini logla
+          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+          console.log('📥 NIRMIND - Backend\'den Gelen Yanıt:');
+          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+          console.log('📊 Status:', response.status, response.statusText);
+          console.log('📊 OK:', response.ok);
+          console.log('📊 URL:', response.url);
+          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
           
           // Rate limit hatası kontrolü - response başarılı geldi ama status 429 olabilir
           if (response.status === 429) {
@@ -282,12 +346,15 @@ class BackendApiService {
         };
       }
       
-      console.log('📥 Response Status:', response.status, response.statusText);
+      // Response headers'ı topla
       const responseHeaders: Record<string, string> = {};
       response.headers.forEach((value, key) => {
         responseHeaders[key] = value;
       });
-      console.log('📥 Response Headers:', JSON.stringify(responseHeaders, null, 2));
+      
+      console.log('📥 Response Headers:');
+      console.log(JSON.stringify(responseHeaders, null, 2));
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
       // Handle 429 Too Many Requests (Rate Limit)
       if (response.status === 429) {
@@ -329,10 +396,32 @@ class BackendApiService {
       
       let data: any;
       if (isJson) {
-        data = await response.json();
+        // Response'u clone et ki body'yi hem loglayalım hem de parse edelim
+        const responseClone = response.clone();
+        const textData = await responseClone.text();
+        
+        try {
+          data = JSON.parse(textData);
+          
+          // Response body'yi logla
+          console.log('📦 Response Body (JSON):');
+          console.log(JSON.stringify(data, null, 2));
+          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        } catch (parseError) {
+          // JSON parse hatası
+          console.error('❌ JSON parse hatası:', parseError);
+          console.log('📦 Response Body (Raw):', textData.substring(0, 500));
+          data = await response.json(); // Orijinal response'u kullan
+        }
       } else {
         // HTML veya başka bir format döndüyse
         const text = await response.text();
+        
+        // Response body'yi logla
+        console.log('📦 Response Body (Text):');
+        console.log(text.length > 1000 ? text.substring(0, 1000) + '... (truncated)' : text);
+        console.log('📦 Response Body Size:', text.length, 'bytes');
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         
         // Rate limit hatası HTML olarak dönebilir
         if (response.status === 429 || text.includes('Too many requests') || text.includes('rate limit')) {
