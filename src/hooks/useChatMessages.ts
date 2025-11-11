@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { Alert } from 'react-native';
+import { Alert, AppState, AppStateStatus } from 'react-native';
 import { useChat } from '@/src/lib/context/ChatContext';
 import { ChatMessage } from '@/src/lib/mock/types';
 import BackendApiService from '../services/BackendApiService';
@@ -602,9 +602,50 @@ export const useChatMessages = () => {
               return;
             }
 
+            // AppState kontrolü - ekran kapalıyken hata mesajlarını UI'da gösterme
+            const appState = AppState.currentState;
+            const isAppInBackground = appState !== 'active';
+            
+            if (isAppInBackground) {
+              console.log('ℹ️ Uygulama background\'da, hata mesajı UI\'da gösterilmeyecek:', error);
+              // Hata durumunda optimistic mesajı ve streaming mesajını kaldır
+              if (conversationId) {
+                removeMessage(conversationId, tempUserMessageId);
+                if (streamingAIMessageId) {
+                  removeMessage(conversationId, streamingAIMessageId);
+                }
+              }
+              setIsStreaming(false);
+              setIsLoading(false);
+              return; // UI'da gösterme
+            }
+
             streamingFailed = true;
             const errorTime = Date.now();
             const errorDuration = errorTime - messageStartTime;
+            
+            // Bağlantı hatası kontrolü - ekran kapalıyken normal bir durum
+            const isConnectionError = error.includes('Bağlantı hatası') || 
+                                    error.includes('bağlanılamadı') || 
+                                    error.includes('bağlanışamadı') ||
+                                    error.includes('Sunucuya bağlanılamadı') ||
+                                    error.includes('Sunucuya bağlanışamadı') ||
+                                    error.includes('connection') ||
+                                    error.includes('Network');
+            
+            if (isConnectionError) {
+              console.log('ℹ️ Bağlantı hatası - ekran kapalıyken normal bir durum, UI\'da gösterilmeyecek:', error);
+              // Hata durumunda optimistic mesajı ve streaming mesajını kaldır
+              if (conversationId) {
+                removeMessage(conversationId, tempUserMessageId);
+                if (streamingAIMessageId) {
+                  removeMessage(conversationId, streamingAIMessageId);
+                }
+              }
+              setIsStreaming(false);
+              setIsLoading(false);
+              return; // UI'da gösterme
+            }
             
             // Timeout hataları - UI'da gösterilmesin, sadece log'la ve fallback yap
             const isTimeoutError = error.includes('zaman aşımına uğradı') || 
@@ -981,7 +1022,26 @@ export const useChatMessages = () => {
         timestamp: new Date().toISOString()
       });
       
+      // AppState kontrolü - ekran kapalıyken hata mesajlarını UI'da gösterme
+      const appState = AppState.currentState;
+      const isAppInBackground = appState !== 'active';
+      
       const errorText = error.message || 'Bağlantı hatası. Lütfen internet bağlantınızı kontrol edin.';
+      
+      // Bağlantı hatası kontrolü - ekran kapalıyken normal bir durum
+      const isConnectionError = errorText.includes('Bağlantı hatası') || 
+                                errorText.includes('bağlanılamadı') || 
+                                errorText.includes('bağlanışamadı') ||
+                                errorText.includes('Sunucuya bağlanılamadı') ||
+                                errorText.includes('Sunucuya bağlanışamadı') ||
+                                errorText.includes('connection') ||
+                                errorText.includes('Network');
+      
+      if (isConnectionError && isAppInBackground) {
+        console.log('ℹ️ Bağlantı hatası - ekran kapalıyken normal bir durum, UI\'da gösterilmeyecek:', errorText);
+        setIsLoading(false);
+        return; // UI'da gösterme
+      }
       
       // Görsel yükleme hatası kontrolü - Alert göster
       if (errorText.includes('Görsel') || 
@@ -1040,6 +1100,13 @@ export const useChatMessages = () => {
         );
         setIsLoading(false);
         return; // Bu hatada mesajı chat'e ekleme
+      }
+      
+      // Bağlantı hatası kontrolü - ekran kapalıyken normal bir durum, UI'da gösterme
+      if (isConnectionError && isAppInBackground) {
+        console.log('ℹ️ Bağlantı hatası - ekran kapalıyken normal bir durum, hata mesajı chat\'e eklenmeyecek:', errorText);
+        setIsLoading(false);
+        return; // UI'da gösterme
       }
       
       const errorMessage: ChatMessage = {
