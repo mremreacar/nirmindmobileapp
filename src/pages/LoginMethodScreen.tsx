@@ -65,6 +65,9 @@ const LoginMethodScreen = ({
   const { handleAuthCallback, setUser } = useAuth();
   const insets = useSafeAreaInsets();
   const crossAppAuthService = CrossAppAuthService.getInstance();
+  
+  // Race condition önleme - aynı anda birden fazla login denemesi engelle
+  const loginInProgressRef = useRef<boolean>(false);
 
   // Modal açıldığında URL'i hazırla
   useEffect(() => {
@@ -101,11 +104,30 @@ const LoginMethodScreen = ({
   });
 
   const handleSocialLogin = async (provider: 'google' | 'apple') => {
+    // Race condition kontrolü - eğer zaten bir login işlemi devam ediyorsa engelle
+    if (loginInProgressRef.current) {
+      console.log(`⚠️ ${provider} login zaten devam ediyor, yeni istek engellendi`);
+      return;
+    }
+    
     const setLoading = provider === 'google' ? setIsGoogleLoading : setIsAppleLoading;
     
     try {
+      loginInProgressRef.current = true;
       setLoading(true);
       console.log(`🔵 ${provider === 'google' ? 'Google' : 'Apple'} login başlatılıyor...`);
+
+      // Platform kontrolü
+      if (provider === 'apple' && Platform.OS !== 'ios') {
+        setLoading(false);
+        loginInProgressRef.current = false;
+        Alert.alert(
+          "Desteklenmiyor",
+          "Apple ile giriş sadece iOS cihazlarda kullanılabilir.",
+          [{ text: "Tamam" }]
+        );
+        return;
+      }
 
       let result;
       try {
@@ -117,9 +139,23 @@ const LoginMethodScreen = ({
       } catch (authError: any) {
         console.error(`❌ ${provider} auth service error:`, authError);
         setLoading(false);
+        loginInProgressRef.current = false;
+        
+        // Spesifik hata mesajları
+        let errorMessage = "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.";
+        
+        if (authError.message?.includes('network') || authError.message?.includes('Network')) {
+          errorMessage = "İnternet bağlantınızı kontrol edin ve tekrar deneyin.";
+        } else if (authError.message?.includes('timeout') || authError.message?.includes('Timeout')) {
+          errorMessage = "Bağlantı zaman aşımına uğradı. Lütfen tekrar deneyin.";
+        } else if (authError.code === 'ERR_REQUEST_CANCELED' || authError.message?.includes('canceled')) {
+          // Kullanıcı iptal ettiyse sessizce çık
+          return;
+        }
+        
         Alert.alert(
           "Giriş Başarısız",
-          "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+          errorMessage,
           [{ text: "Tamam" }]
         );
         return;
@@ -139,10 +175,27 @@ const LoginMethodScreen = ({
         try {
           // Backend'den gelen user bilgisini kullan
           if (result.user) {
-            await backendApiService.setAuthToken(result.token.accessToken);
-            await AsyncStorage.setItem('authToken', result.token.accessToken);
+            // Token'ı backend service'e set et
+            try {
+              await backendApiService.setAuthToken(result.token.accessToken);
+            } catch (tokenError: any) {
+              console.error(`❌ Token set hatası:`, tokenError);
+              throw new Error('Token kaydedilemedi');
+            }
             
-            // User bilgisini kaydet
+            // AsyncStorage'a token kaydet - hata yönetimi ile
+            try {
+              await AsyncStorage.setItem('authToken', result.token.accessToken);
+            } catch (storageError: any) {
+              console.error(`❌ AsyncStorage token kaydetme hatası:`, storageError);
+              // AsyncStorage hatası kritik değil, devam et
+              // Ama kullanıcıyı bilgilendir
+              if (storageError.message?.includes('quota') || storageError.message?.includes('storage')) {
+                throw new Error('Cihaz depolama alanı dolu. Lütfen alan açın ve tekrar deneyin.');
+              }
+            }
+            
+            // User bilgilerini kaydet
             const userData = {
               id: result.user.id,
               email: result.user.email,
@@ -155,29 +208,70 @@ const LoginMethodScreen = ({
               permissions: {}
             };
             
-            await AsyncStorage.setItem('user', JSON.stringify(userData));
+            // AsyncStorage'a user kaydet - hata yönetimi ile
+            try {
+              await AsyncStorage.setItem('user', JSON.stringify(userData));
+            } catch (storageError: any) {
+              console.error(`❌ AsyncStorage user kaydetme hatası:`, storageError);
+              if (storageError.message?.includes('quota') || storageError.message?.includes('storage')) {
+                throw new Error('Cihaz depolama alanı dolu. Lütfen alan açın ve tekrar deneyin.');
+              }
+              // Diğer storage hataları için devam et
+            }
             
             // AuthContext'i güncelle
-            setUser(userData);
+            try {
+              setUser(userData);
+            } catch (contextError: any) {
+              console.error(`❌ AuthContext setUser hatası:`, contextError);
+              // Context hatası kritik değil, devam et
+            }
             
             console.log(`✅ ${provider === 'google' ? 'Google' : 'Apple'} kullanıcı bilgileri kaydedildi`);
             setLoading(false);
+            loginInProgressRef.current = false;
+            
+            // Login başarılı - callback'i çağır
+            onLoginSuccess();
           } else {
             // Fallback: handleAuthCallback kullan
-            await handleAuthCallback(result.token.accessToken);
-            setLoading(false);
+            try {
+              await handleAuthCallback(result.token.accessToken);
+              setLoading(false);
+              loginInProgressRef.current = false;
+              onLoginSuccess();
+            } catch (callbackError: any) {
+              console.error(`❌ handleAuthCallback hatası:`, callbackError);
+              setLoading(false);
+              loginInProgressRef.current = false;
+              throw callbackError;
+            }
           }
         } catch (error: any) {
           console.error(`❌ User kaydetme hatası:`, error);
           setLoading(false);
+          loginInProgressRef.current = false;
+          
+          // Spesifik hata mesajları
+          let errorMessage = "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.";
+          
+          if (error.message?.includes('depolama') || error.message?.includes('storage') || error.message?.includes('quota')) {
+            errorMessage = "Cihaz depolama alanı dolu. Lütfen alan açın ve tekrar deneyin.";
+          } else if (error.message?.includes('Token')) {
+            errorMessage = "Kimlik doğrulama hatası. Lütfen tekrar deneyin.";
+          } else if (error.message) {
+            errorMessage = error.message;
+          }
+          
           Alert.alert(
             "Giriş Başarısız",
-            "Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.",
+            errorMessage,
             [{ text: "Tamam" }]
           );
         }
       } else {
         setLoading(false);
+        loginInProgressRef.current = false;
         // Kullanıcı iptal etmediyse uyarı göster
         if (result.error !== 'CANCELLED' && result.error !== 'USER_CANCELLED') {
           console.log(`❌ ${provider} login başarısız:`, result.error || result.message);
@@ -218,8 +312,14 @@ const LoginMethodScreen = ({
     } catch (error: any) {
       console.error(`❌ ${provider === 'google' ? 'Google' : 'Apple'} login hatası:`, error);
       setLoading(false);
+      loginInProgressRef.current = false;
       
       const errorMessage = error.message || 'Giriş işlemi tamamlanamadı.';
+      
+      // Kullanıcı iptal ettiyse sessizce çık
+      if (error.code === 'ERR_REQUEST_CANCELED' || error.message?.includes('canceled')) {
+        return;
+      }
       
       // Rate limit hatası kontrolü
       if (errorMessage.includes('Çok fazla istek') || 
@@ -235,16 +335,22 @@ const LoginMethodScreen = ({
       }
       
       // Özel hata mesajları
-      if (errorMessage.includes('Network') || errorMessage.includes('502') || errorMessage.includes('Sunucu hatası')) {
+      if (errorMessage.includes('Network') || errorMessage.includes('network') || errorMessage.includes('502') || errorMessage.includes('Sunucu hatası')) {
         Alert.alert(
           "Bağlantı Hatası",
           "Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edin ve tekrar deneyin.",
           [{ text: "Tamam" }]
         );
-      } else if (errorMessage.includes('JSON Parse error')) {
+      } else if (errorMessage.includes('JSON Parse error') || errorMessage.includes('JSON')) {
         Alert.alert(
           "Sunucu Hatası",
           "Sunucudan beklenmeyen bir yanıt alındı. Lütfen daha sonra tekrar deneyin.",
+          [{ text: "Tamam" }]
+        );
+      } else if (errorMessage.includes('timeout') || errorMessage.includes('Timeout')) {
+        Alert.alert(
+          "Zaman Aşımı",
+          "Bağlantı zaman aşımına uğradı. Lütfen tekrar deneyin.",
           [{ text: "Tamam" }]
         );
       } else {
@@ -780,9 +886,8 @@ const styles = StyleSheet.create({
   logoIconContainer: {
     position: "absolute",
     top: 217,
-    left: -12,
+    left: 0,
     right: 0,
-    width: "100%",
     height: 82,
     justifyContent: "center",
     alignItems: "center",

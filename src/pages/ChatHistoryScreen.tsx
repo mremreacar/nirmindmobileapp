@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -111,7 +111,7 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
     return null;
   }
 
-  // Konuşmaları yükle
+  // Konuşmaları yükle - sadece mount'ta çalış, loadConversations dependency'si infinite loop'a neden oluyor
   useEffect(() => {
     let isMounted = true;
 
@@ -135,21 +135,16 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [loadConversations]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Sadece mount'ta çalış - loadConversations dependency'si infinite loop'a neden oluyor
 
   // Arama metni değiştiğinde tümünü göster durumunu sıfırla
   useEffect(() => {
     setVisibleConversationCount(MAX_CONVERSATIONS_DISPLAY);
   }, [searchText]);
 
-  // Filtrelenmiş konuşmalar
-  const filteredConversations = conversations.filter(conv => {
-    const title = conv.title || '';
-    const search = searchText || '';
-    return title.toLowerCase().includes(search.toLowerCase());
-  });
-
-  const getConversationMessageCount = (conversation: typeof conversations[number]) => {
+  // getConversationMessageCount fonksiyonunu useCallback ile memoize et
+  const getConversationMessageCount = useCallback((conversation: typeof conversations[number]) => {
     if (typeof conversation.totalMessageCount === 'number') {
       return conversation.totalMessageCount;
     }
@@ -166,36 +161,47 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
     }
 
     return 0;
-  };
+  }, []);
 
-  // Mesajı olmayan konuşmaları gösterme
-  const messageEligibleConversations = filteredConversations.filter(conv => {
-    const messageCount = getConversationMessageCount(conv);
-    if (messageCount > 0) {
-      return true;
-    }
+  // Filtrelenmiş konuşmalar - useMemo ile memoize et
+  const filteredConversations = useMemo(() => {
+    return conversations.filter(conv => {
+      const title = conv.title || '';
+      const search = searchText || '';
+      return title.toLowerCase().includes(search.toLowerCase());
+    });
+  }, [conversations, searchText]);
 
-    const hasLocalMessages = Array.isArray(conv.messages) && conv.messages.length > 0;
-    if (hasLocalMessages) {
-      return true;
-    }
-
-    const hasBackendLastMessage = Boolean((conv as any)?.lastMessage || (conv as any)?.latestMessage || (conv as any)?.lastMessageText);
-    if (hasBackendLastMessage) {
-      return true;
-    }
-
-    const updatedAt = conv.updatedAt instanceof Date ? conv.updatedAt : new Date(conv.updatedAt);
-    const createdAt = conv.createdAt instanceof Date ? conv.createdAt : new Date(conv.createdAt);
-    if (!Number.isNaN(updatedAt.getTime()) && !Number.isNaN(createdAt.getTime())) {
-      const diff = Math.abs(updatedAt.getTime() - createdAt.getTime());
-      if (diff >= 2000) {
+  // Mesajı olmayan konuşmaları gösterme - useMemo ile memoize et
+  const messageEligibleConversations = useMemo(() => {
+    return filteredConversations.filter(conv => {
+      const messageCount = getConversationMessageCount(conv);
+      if (messageCount > 0) {
         return true;
       }
-    }
 
-    return false;
-  });
+      const hasLocalMessages = Array.isArray(conv.messages) && conv.messages.length > 0;
+      if (hasLocalMessages) {
+        return true;
+      }
+
+      const hasBackendLastMessage = Boolean((conv as any)?.lastMessage || (conv as any)?.latestMessage || (conv as any)?.lastMessageText);
+      if (hasBackendLastMessage) {
+        return true;
+      }
+
+      const updatedAt = conv.updatedAt instanceof Date ? conv.updatedAt : new Date(conv.updatedAt);
+      const createdAt = conv.createdAt instanceof Date ? conv.createdAt : new Date(conv.createdAt);
+      if (!Number.isNaN(updatedAt.getTime()) && !Number.isNaN(createdAt.getTime())) {
+        const diff = Math.abs(updatedAt.getTime() - createdAt.getTime());
+        if (diff >= 2000) {
+          return true;
+        }
+      }
+
+      return false;
+    });
+  }, [filteredConversations, getConversationMessageCount]);
 
   const conversationsForDisplay = messageEligibleConversations.length > 0 ? messageEligibleConversations : filteredConversations;
 
@@ -233,31 +239,49 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
       .finally(() => {
         autoLoadingRef.current = false;
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isInitialLoading,
     isLoadingConversations,
     isLoadingMore,
     visibleConversationCount,
-    messageEligibleConversations,
+    messageEligibleConversations.length, // Sadece length'i kullan - array memoize edildi ama yine de length daha güvenli
     hasMoreConversations,
-    loadConversations,
+    // loadConversations dependency'sini kaldırdık - infinite loop'a neden oluyor
   ]);
 
   const handleConversationSelect = async (conversationId: string) => {
-    // Klavyeyi kapat
+    // Klavyeyi kapat - hem hemen hem de navigation öncesi
     Keyboard.dismiss();
+    
+    // Eğer zaten yükleniyorsa tekrar tıklamayı engelle
+    if (loadingConversationId) {
+      console.log('⚠️ Conversation zaten yükleniyor, tekrar tıklama engellendi');
+      return;
+    }
     
     console.log('📥 Geçmiş sohbetten conversation seçiliyor:', conversationId);
     setLoadingConversationId(conversationId);
     
     try {
+      // selectConversation'ı await et - cache'den yükleme durumunda state'in güncellenmesini bekle
       await selectConversation(conversationId);
+      
+      // State update'in tamamlanması için kısa bir delay (cache'den yükleme durumunda)
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
       console.log("✅ Conversation ChatContext'te seçildi:", conversationId);
 
       if (onSelectConversation) {
         onSelectConversation(conversationId);
       }
 
+      // onBack() çağrılmadan önce state'in güncellenmesini bekle ve klavyeyi tekrar kapat
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      // Navigation öncesi klavyeyi tekrar kapat (garanti için)
+      Keyboard.dismiss();
+      
       onBack();
     } catch (error: any) {
       console.error('❌ Conversation seçilirken hata:', error);

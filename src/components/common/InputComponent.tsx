@@ -26,6 +26,10 @@ const SVG_ICONS = {
 <path d="M22 2L11 13" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
 <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>`,
+  stop: `<svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect x="2" y="2" width="18" height="18" rx="5" fill="rgba(255,255,255,0.16)" stroke="white" stroke-width="1.5"/>
+<rect x="6.5" y="6.5" width="9" height="9" rx="2" fill="white"/>
+</svg>`,
 } as const;
 
 // Responsive functions
@@ -56,6 +60,7 @@ interface InputComponentProps {
   isDictating: boolean;
   isProcessing?: boolean; // Yeni prop: desifre durumu
   isLoading?: boolean; // Loading state
+  isStreaming?: boolean;
   isInputFocused: boolean;
   setIsInputFocused: (focused: boolean) => void;
   
@@ -98,6 +103,7 @@ interface InputComponentProps {
   onTextInput?: (event: any) => void;
   onScroll?: (event: any) => void;
   onLayout?: (event: any) => void;
+  onCancelStreaming?: () => void;
   
   // Accessibility
   testID?: string;
@@ -127,6 +133,7 @@ const InputComponent: React.FC<InputComponentProps> = ({
   isDictating,
   isProcessing = false, // Default değer
   isLoading = false, // Loading state
+  isStreaming = false,
   isInputFocused,
   setIsInputFocused,
   
@@ -169,6 +176,7 @@ const InputComponent: React.FC<InputComponentProps> = ({
   onTextInput,
   onScroll,
   onLayout,
+  onCancelStreaming = () => {},
   
   // Accessibility
   testID = 'input-component',
@@ -205,8 +213,8 @@ const InputComponent: React.FC<InputComponentProps> = ({
   
   // Constants for dynamic sizing - Daha iyi genişleme
   const MIN_INPUT_HEIGHT = getResponsiveInputMinHeight() + 10; // 10px daha yüksek (daha dengeli)
-  const MAX_INPUT_HEIGHT = isTablet ? 240 : (isLargeScreen ? 200 : 180);
-  const SCROLL_THRESHOLD = MAX_INPUT_HEIGHT - 24;
+  const MAX_INPUT_HEIGHT = isTablet ? 260 : (isLargeScreen ? 220 : 200);
+  const SCROLL_THRESHOLD = MAX_INPUT_HEIGHT - 16;
   const CHARACTER_LIMIT_WARNING = Math.floor(maxLength * 0.8); // 80% of max length
   const CHARACTER_LIMIT_DANGER = Math.floor(maxLength * 0.95); // 95% of max length
 
@@ -233,7 +241,7 @@ const InputComponent: React.FC<InputComponentProps> = ({
       return;
     }
 
-    const hasScrollableContent = contentHeight > visibleHeight + 6;
+    const hasScrollableContent = contentHeight > visibleHeight + 20;
     setCanScrollDown(hasScrollableContent);
   }, [contentHeight, visibleHeight, isScrollable]);
 
@@ -305,7 +313,7 @@ const InputComponent: React.FC<InputComponentProps> = ({
 
   const handleSendPress = () => {
     // Loading guard - eğer mesaj işleniyorsa gönderme
-    if (isLoading) {
+    if (isLoading || isStreaming) {
       console.log('⚠️ Mesaj işleniyor, yeni mesaj gönderilemiyor');
       return;
     }
@@ -338,10 +346,11 @@ const InputComponent: React.FC<InputComponentProps> = ({
 
   const handleContentSizeChange = (event: any) => {
     const { height } = event.nativeEvent.contentSize;
-    const boundedHeight = Math.max(MIN_INPUT_HEIGHT, Math.min(Math.ceil(height), MAX_INPUT_HEIGHT));
+    const adjustedHeight = height + 22; // Alt satırın kesilmemesi için fazladan boşluk
+    const boundedHeight = Math.max(MIN_INPUT_HEIGHT, Math.min(Math.ceil(adjustedHeight), MAX_INPUT_HEIGHT));
     setInputHeight(boundedHeight);
-    setIsScrollable(height >= SCROLL_THRESHOLD);
-    setContentHeight(height);
+    setIsScrollable(adjustedHeight >= SCROLL_THRESHOLD);
+    setContentHeight(adjustedHeight);
     onContentSizeChange?.(event);
   };
 
@@ -351,7 +360,7 @@ const InputComponent: React.FC<InputComponentProps> = ({
     const layoutHeight = event.nativeEvent.layoutMeasurement?.height || 0;
     const totalHeight = event.nativeEvent.contentSize?.height || 0;
     setCanScrollUp(offsetY > 4);
-    setCanScrollDown(offsetY + layoutHeight < totalHeight - 6);
+    setCanScrollDown(offsetY + layoutHeight < totalHeight - 18);
     onScroll?.(event);
   };
 
@@ -389,21 +398,23 @@ const InputComponent: React.FC<InputComponentProps> = ({
 
   // Smart scroll to bottom - Geliştirilmiş versiyon
   const scrollToBottom = useCallback(() => {
-    if (scrollViewRef.current && isScrollable) {
-      scrollViewRef.current.scrollToEnd({ animated: true });
-      return;
-    }
+    if (!scrollViewRef.current) return;
+
+    scrollViewRef.current.scrollTo({
+      y: Number.MAX_SAFE_INTEGER,
+      animated: true,
+    });
 
     if (textInputRef.current) {
       try {
         textInputRef.current.setNativeProps({
-          selection: { start: inputText.length, end: inputText.length }
+          selection: { start: inputText.length, end: inputText.length },
         });
       } catch (error) {
         console.log('Scroll to bottom error:', error);
       }
     }
-  }, [inputText.length, isScrollable]);
+  }, [inputText.length]);
 
   // Auto scroll to bottom when typing - Geliştirilmiş versiyon
   useEffect(() => {
@@ -431,7 +442,7 @@ const InputComponent: React.FC<InputComponentProps> = ({
     return `${characterCount}/${maxLength}`;
   };
 
-  const shouldShowSendButton = inputText.trim() || hasSelectedFiles;
+  const shouldShowSendButton = !isStreaming && (inputText.trim() || hasSelectedFiles);
 
   return (
     <View style={[styles.inputSectionContainer, containerStyle]}>
@@ -504,7 +515,6 @@ const InputComponent: React.FC<InputComponentProps> = ({
                         source={{ uri: imageUri }} 
                         style={styles.attachmentImage}
                         resizeMode="cover"
-                        cache="force-cache"
                       />
                     </TouchableOpacity>
                     <TouchableOpacity 
@@ -706,7 +716,30 @@ const InputComponent: React.FC<InputComponentProps> = ({
 
 
       {/* Microphone/Send Button */}
-      {shouldShowSendButton ? (
+      {isStreaming ? (
+      <TouchableOpacity
+          style={[styles.cancelButton, buttonStyle]}
+          onPress={onCancelStreaming}
+          accessible={true}
+          accessibilityLabel="Yanıtı durdur"
+          accessibilityHint="Devam eden AI yanıtını durdurmak için dokunun"
+          accessibilityRole="button"
+      >
+        <LinearGradient
+            colors={["#7E7AE9", "#4C46B3"]}
+          locations={[0, 1]}
+          style={styles.cancelButtonGradient}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
+        >
+          <SvgXml 
+            xml={SVG_ICONS.stop}
+            width="22"
+            height="22"
+          />
+        </LinearGradient>
+      </TouchableOpacity>
+      ) : shouldShowSendButton ? (
       <TouchableOpacity
           style={[styles.micButton, buttonStyle]}
           onPress={handleSendPress}
@@ -826,6 +859,21 @@ const styles = StyleSheet.create({
     borderRadius: isSmallScreen ? 38 : 42,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  cancelButton: {
+    width: isSmallScreen ? 52 : 58,
+    height: isSmallScreen ? 52 : 58,
+    borderRadius: 16,
+    borderWidth: 1.6,
+    borderColor: 'rgba(126, 122, 233, 0.6)',
+    overflow: 'hidden',
+  },
+  cancelButtonGradient: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 16,
   },
   // Attachment Preview Styles
   attachmentPreview: {
@@ -1345,8 +1393,9 @@ const styles = StyleSheet.create({
     maxHeight: 320,
   },
   textScrollViewContent: {
-    paddingRight: 4,
+    paddingRight: 6,
     paddingVertical: 2,
+    paddingBottom: 8,
   },
   scrollFade: {
     position: 'absolute',

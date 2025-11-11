@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, memo, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Alert, Modal, Linking, Dimensions } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { ChatMessage } from '@/src/lib/mock/types';
@@ -32,7 +32,12 @@ const MessageList: React.FC<MessageListProps> = ({
   const { deleteMessage } = useChat();
   const [previewFile, setPreviewFile] = useState<{ uri: string; name: string; mimeType?: string } | null>(null);
 
+  // Skeleton sadece mesajlar yüklenirken gösterilmeli
+  // Eğer mesaj yoksa ve yükleme tamamlandıysa skeleton gösterilmemeli
   const shouldShowSkeleton = isDataLoading && messages.length === 0;
+  
+  // Eğer mesaj yoksa ve yükleme tamamlandıysa hiçbir şey gösterme
+  const shouldShowEmpty = !isDataLoading && messages.length === 0;
 
   const renderSkeletonMessages = () => {
     return Array.from({ length: 4 }).map((_, index) => {
@@ -94,13 +99,14 @@ const MessageList: React.FC<MessageListProps> = ({
   };
 
   const handleFilePress = (file: { name: string; uri?: string }) => {
-    if (!file.uri) {
+    if (!file || !file.uri) {
       Alert.alert('Hata', 'Dosya URL\'si bulunamadı');
       return;
     }
 
     // Dosya uzantısına göre MIME type belirle
-    const fileExtension = file.name.toLowerCase().split('.').pop() || '';
+    const fileName = file.name || 'Dosya';
+    const fileExtension = fileName.toLowerCase().split('.').pop() || '';
     let mimeType = 'application/octet-stream';
     
     if (['pdf'].includes(fileExtension)) {
@@ -115,7 +121,7 @@ const MessageList: React.FC<MessageListProps> = ({
 
     setPreviewFile({
       uri: file.uri,
-      name: file.name,
+      name: fileName,
       mimeType
     });
   };
@@ -188,7 +194,6 @@ const MessageList: React.FC<MessageListProps> = ({
       removeClippedSubviews={false}
       directionalLockEnabled={false}
       canCancelContentTouches={true}
-      delaysContentTouches={false}
       keyboardDismissMode="on-drag"
       maintainVisibleContentPosition={{
         minIndexForVisible: 0,
@@ -214,8 +219,18 @@ const MessageList: React.FC<MessageListProps> = ({
     >
       {shouldShowSkeleton ? (
         renderSkeletonMessages()
+      ) : shouldShowEmpty ? (
+        // Mesaj yoksa ve yükleme tamamlandıysa hiçbir şey gösterme
+        null
       ) : (
-        messages.map((message) => (
+        Array.isArray(messages) && messages.length > 0 ? (
+          messages.map((message) => {
+            // Message validation - geçersiz mesajları filtrele
+            if (!message || !message.id) {
+              console.warn('⚠️ Geçersiz mesaj filtrelendi:', message);
+              return null;
+            }
+            return (
           <TouchableOpacity
             key={message.id}
             onLongPress={() => handleDeleteMessage(message)}
@@ -256,10 +271,11 @@ const MessageList: React.FC<MessageListProps> = ({
                 {message.files && message.files.length > 0 && (
                   <View style={styles.filesContainer}>
                     {message.files.map((file, index) => {
-                      const fileExtension = file.name.toLowerCase().split('.').pop() || '';
-                      const fileIcon = getFileTypeIcon(file.mimeType || null, file.name);
-                      const fileSize = file.size ? formatFileSize(file.size) : null;
-                      const fileTypeColor = getFileTypeColor(fileExtension, file.mimeType);
+                      const fileName = file?.name || 'Dosya';
+                      const fileExtension = fileName.toLowerCase().split('.').pop() || '';
+                      const fileIcon = getFileTypeIcon(file?.mimeType || null, fileName);
+                      const fileSize = file?.size ? formatFileSize(file.size) : null;
+                      const fileTypeColor = getFileTypeColor(fileExtension, file?.mimeType);
                       
                       return (
                       <TouchableOpacity 
@@ -273,7 +289,7 @@ const MessageList: React.FC<MessageListProps> = ({
                           </View>
                           <View style={styles.fileInfoContainer}>
                             <Text allowFontScaling={false} style={styles.fileName} numberOfLines={1}>
-                              {file.name}
+                              {fileName}
                             </Text>
                             {fileSize && (
                               <Text allowFontScaling={false} style={styles.fileSize}>
@@ -291,7 +307,7 @@ const MessageList: React.FC<MessageListProps> = ({
                 )}
                 
                 {/* Mesaj metni */}
-                {message.text && (
+                {message.text && typeof message.text === 'string' && message.text.trim() && (
                   message.isUser ? (
                     <Text allowFontScaling={false} style={[
                       styles.messageText,
@@ -302,9 +318,8 @@ const MessageList: React.FC<MessageListProps> = ({
                   ) : (
                     <Markdown
                       style={markdownStyles}
-                      allowFontScaling={false}
                     >
-                      {message.text + (message.isStreaming ? ' ▊' : '')}
+                      {message.text + (message.isStreaming ? ' |' : '')}
                     </Markdown>
                   )
                 )}
@@ -312,7 +327,6 @@ const MessageList: React.FC<MessageListProps> = ({
                 {!message.text && message.isStreaming && (
                   <Markdown
                     style={markdownStyles}
-                    allowFontScaling={false}
                   >
                     ▊
                   </Markdown>
@@ -322,19 +336,26 @@ const MessageList: React.FC<MessageListProps> = ({
                 styles.messageTime,
                 message.isUser ? styles.userMessageTime : styles.aiMessageTime
               ]}>
-                {new Date(message.timestamp).toLocaleTimeString('tr-TR', {
-                  hour: '2-digit',
-                  minute: '2-digit'
-                })}
+                {message.timestamp 
+                  ? new Date(message.timestamp).toLocaleTimeString('tr-TR', {
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })
+                  : '--:--'}
               </Text>
             </View>
             </View>
           </TouchableOpacity>
-        ))
+            );
+          }).filter(Boolean) // null değerleri filtrele
+        ) : (
+          // Mesaj yoksa boş state göster (opsiyonel)
+          null
+        )
       )}
       
       {/* Loading indicator - sadece streaming mesajı yoksa göster */}
-      {isLoading && !messages.some(msg => !msg.isUser && msg.isStreaming) && (
+      {isLoading && Array.isArray(messages) && !messages.some(msg => msg && !msg.isUser && msg.isStreaming) && (
         <View style={[styles.messageContainer, styles.aiMessage]}>
           <View style={[styles.messageWrapper, styles.aiMessageWrapper]}>
             <View style={[styles.messageBubble, styles.aiBubble]}>
@@ -805,4 +826,39 @@ const markdownStyles = StyleSheet.create({
   },
 });
 
-export default MessageList;
+// Memoize MessageList to prevent unnecessary re-renders
+// Messages array reference comparison - eğer reference aynıysa re-render yok
+export default memo(MessageList, (prevProps, nextProps) => {
+  // Custom comparison function for better performance
+  // Messages array reference değişmediyse ve diğer props aynıysa re-render yapma
+  if (prevProps.messages === nextProps.messages &&
+      prevProps.isLoading === nextProps.isLoading &&
+      prevProps.isKeyboardVisible === nextProps.isKeyboardVisible &&
+      prevProps.keyboardHeight === nextProps.keyboardHeight &&
+      prevProps.conversationId === nextProps.conversationId &&
+      prevProps.isDataLoading === nextProps.isDataLoading) {
+    return true; // Props aynı, re-render yapma
+  }
+  
+  // Eğer messages array reference değiştiyse ama içerik aynıysa kontrol et
+  if (prevProps.messages.length !== nextProps.messages.length) {
+    return false; // Length farklı, re-render yap
+  }
+  
+  // Length aynıysa, son mesajın ID'sini kontrol et (daha hızlı)
+  const prevLastMessage = prevProps.messages[prevProps.messages.length - 1];
+  const nextLastMessage = nextProps.messages[nextProps.messages.length - 1];
+  
+  if (prevLastMessage?.id !== nextLastMessage?.id) {
+    return false; // Son mesaj farklı, re-render yap
+  }
+  
+  // Diğer props kontrolü
+  return (
+    prevProps.isLoading === nextProps.isLoading &&
+    prevProps.isKeyboardVisible === nextProps.isKeyboardVisible &&
+    prevProps.keyboardHeight === nextProps.keyboardHeight &&
+    prevProps.conversationId === nextProps.conversationId &&
+    prevProps.isDataLoading === nextProps.isDataLoading
+  );
+});

@@ -59,8 +59,8 @@ import {
 } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 import * as ImagePicker from 'expo-image-picker';
-import * as DocumentPicker from 'expo-document-picker';
 import * as MediaLibrary from 'expo-media-library';
+import type { ChatSelectedFile } from '@/src/types/chat';
 import { formatFileSize, getFileTypeIcon } from '../utils/fileValidation';
 
 const { width, height } = Dimensions.get('window');
@@ -161,8 +161,8 @@ interface UploadModalProps {
   panHandlers: any;
   /** Seçilen resimlerin URI listesi */
   selectedImages: string[];
-  /** Seçilen dosyaların listesi (DocumentPicker tipinde) */
-  selectedFiles: DocumentPicker.DocumentPickerAsset[];
+  /** Seçilen dosyaların listesi */
+  selectedFiles: ChatSelectedFile[];
   /** Fotoğraf seçme callback fonksiyonu */
   onPickImage: () => void;
   /** Son fotoğraflardan seçim callback fonksiyonu */

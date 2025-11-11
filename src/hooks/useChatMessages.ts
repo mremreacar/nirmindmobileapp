@@ -1,9 +1,19 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { Alert } from 'react-native';
 import { useChat } from '@/src/lib/context/ChatContext';
 import { ChatMessage } from '@/src/lib/mock/types';
 import BackendApiService from '../services/BackendApiService';
 import * as FileSystem from 'expo-file-system/legacy';
+
+type ActiveStreamState = {
+  abort?: (() => void) | null;
+  conversationId: string;
+  streamingMessageId?: string | null;
+  streamingText?: string;
+  state?: {
+    cancelledByUser?: boolean;
+  };
+};
 
 export const useChatMessages = () => {
   const { 
@@ -16,6 +26,8 @@ export const useChatMessages = () => {
   } = useChat();
   
   const [isLoading, setIsLoading] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const activeStreamRef = useRef<ActiveStreamState | null>(null);
   const backendApiService = BackendApiService.getInstance();
 
   const sendMessage = useCallback(async (
@@ -67,6 +79,16 @@ export const useChatMessages = () => {
     // tempUserMessageId'yi try bloğunun dışına taşı (catch bloğunda kullanılabilmesi için)
     const tempUserMessageId = `temp-${Date.now()}`;
     
+    let streamState: any = null;
+    let messageStartTime = Date.now();
+    let userMessageReceivedTime: number | null = null;
+    let aiStartTime: number | null = null;
+    let firstChunkTime: number | null = null;
+    let aiCompleteTime: number | null = null;
+    let abortStream: (() => void) | null = null;
+    let abortFunction: (() => void) | null = null;
+    let streamingFailed = false;
+
     try {
       // Mesajı hazırla (boş bırakılabilir, sadece görsel/dosya gönderilebilir)
       const finalMessage = messageText.trim();
@@ -278,11 +300,10 @@ export const useChatMessages = () => {
       // Eğer streaming endpoint bulunamazsa normal endpoint'e fallback yap
       let streamingAIMessageId: string | null = null;
       let streamingAIMessageText = '';
-      let streamingFailed = false;
       let aiStartCalled = false; // onAIStart'ın sadece bir kez çağrılmasını sağla
       
       // Performans takibi ve cleanup için bir obje kullan (scope sorunlarını önlemek için)
-      const state = {
+      streamState = {
         messageStartTime: Date.now(),
         userMessageReceivedTime: null as number | null,
         aiStartTime: null as number | null,
@@ -290,16 +311,25 @@ export const useChatMessages = () => {
         aiCompleteTime: null as number | null,
         abortStream: null as (() => void) | null,
         abortFunction: null as (() => void) | null,
+        cancelledByUser: false,
+      };
+
+      activeStreamRef.current = {
+        conversationId,
+        streamingMessageId: null,
+        streamingText: '',
+        abort: null,
+        state: streamState,
       };
       
       // Eski kodlarla uyumluluk için değişkenleri de tanımla
-      const messageStartTime = state.messageStartTime;
-      let userMessageReceivedTime = state.userMessageReceivedTime;
-      let aiStartTime = state.aiStartTime;
-      let firstChunkTime = state.firstChunkTime;
-      let aiCompleteTime = state.aiCompleteTime;
-      let abortStream = state.abortStream;
-      let abortFunction = state.abortFunction;
+      messageStartTime = streamState.messageStartTime;
+      userMessageReceivedTime = streamState.userMessageReceivedTime;
+      aiStartTime = streamState.aiStartTime;
+      firstChunkTime = streamState.firstChunkTime;
+      aiCompleteTime = streamState.aiCompleteTime;
+      abortStream = streamState.abortStream;
+      abortFunction = streamState.abortFunction;
       
       console.log('🚀 Mesaj gonderimi basladi:', {
         conversationId,
@@ -312,13 +342,19 @@ export const useChatMessages = () => {
       try {
         // sendMessageStream artık abort fonksiyonu döndürüyor (Promise döndürüyor, resolve değeri abort fonksiyonu)
         try {
-          state.abortFunction = await backendApiService.sendMessageStream(
+          streamState.abortFunction = await backendApiService.sendMessageStream(
           conversationId,
           finalMessage,
           attachments,
           finalPromptType,
           // onUserMessage
           (userMessage: any) => {
+            // UserMessage validation
+            if (!userMessage || !userMessage.id) {
+              console.error('❌ Geçersiz userMessage (streaming):', userMessage);
+              return;
+            }
+            
             userMessageReceivedTime = Date.now();
             const userMessageDuration = userMessageReceivedTime - messageStartTime;
             console.log('✅ Kullanici mesaji alindi:', {
@@ -329,25 +365,44 @@ export const useChatMessages = () => {
             });
             
             // Backend'den gelen gerçek userMessage ile optimistic mesajı değiştir
-            const backendImages = userMessage.attachments
-              ?.filter((att: any) => att.type === 'IMAGE')
-              .map((att: any) => att.url) || [];
+            const attachments = userMessage.attachments || [];
+            const backendImages = attachments
+              .filter((att: any) => att && (att.type === 'IMAGE' || att.type === 'image') && att.url)
+              .map((att: any) => att.url);
             
-            const backendFiles = userMessage.attachments
-              ?.filter((att: any) => att.type === 'FILE' || att.type === 'AUDIO' || att.type === 'VIDEO')
+            const backendFiles = attachments
+              .filter((att: any) => att && (att.type === 'FILE' || att.type === 'file' || att.type === 'AUDIO' || att.type === 'VIDEO') && att.url)
               .map((att: any) => ({
-                name: att.filename || '',
+                name: att.filename || 'Dosya',
                 uri: att.url
-              })) || [];
+              }));
 
             const finalImages = backendImages.length > 0 ? backendImages : (uploadedImageUrls.length > 0 ? uploadedImageUrls : undefined);
-            const finalFiles = backendFiles.length > 0 ? backendFiles : (uploadedFileUrls.length > 0 ? uploadedFileUrls.map(url => ({ name: '', uri: url })) : undefined);
+            const finalFiles = backendFiles.length > 0 ? backendFiles : (uploadedFileUrls.length > 0 ? uploadedFileUrls.map(url => ({ name: 'Dosya', uri: url })) : undefined);
+
+            // Timestamp validation
+            let timestamp: Date;
+            try {
+              const tsValue = userMessage.timestamp || userMessage.createdAt;
+              if (tsValue) {
+                timestamp = new Date(tsValue);
+                if (isNaN(timestamp.getTime())) {
+                  console.warn('⚠️ Geçersiz userMessage timestamp (streaming), şu anki zaman kullanılıyor');
+                  timestamp = new Date();
+                }
+              } else {
+                timestamp = new Date();
+              }
+            } catch (error) {
+              console.error('❌ Timestamp parse hatası (streaming):', error);
+              timestamp = new Date();
+            }
 
             const userChatMessage: ChatMessage = {
               id: userMessage.id,
-              text: userMessage.text,
+              text: userMessage.text || '',
               isUser: true,
-              timestamp: new Date(userMessage.timestamp || userMessage.createdAt),
+              timestamp,
               images: finalImages,
               files: finalFiles
             };
@@ -398,7 +453,15 @@ export const useChatMessages = () => {
               };
               // updateMessage kullan - mesaj varsa günceller, yoksa ekler
               updateMessage(conversationId, aiPlaceholderMessage);
+
+              if (activeStreamRef.current) {
+                activeStreamRef.current.streamingMessageId = streamingAIMessageId;
+                activeStreamRef.current.streamingText = '';
+                activeStreamRef.current.state = streamState;
+              }
             }
+
+            setIsStreaming(true);
           },
           // onAIChunk - ChatGPT gibi gerçek zamanlı yazma efekti
           (chunk: string, fullContent: string) => {
@@ -437,9 +500,25 @@ export const useChatMessages = () => {
               // updateMessage kullan - mesaj varsa günceller, yoksa ekler
               updateMessage(conversationId, updatedAIMessage);
             }
+
+            if (activeStreamRef.current) {
+              activeStreamRef.current.streamingText = fullContent;
+            }
           },
           // onAIComplete
           (aiMessage: any) => {
+            // AI Message validation
+            if (!aiMessage || !aiMessage.id) {
+              console.error('❌ Geçersiz aiMessage:', aiMessage);
+              if (streamingAIMessageId) {
+                removeMessage(conversationId, streamingAIMessageId);
+              }
+              streamingAIMessageId = null;
+              setIsLoading(false);
+              setIsStreaming(false);
+              return;
+            }
+            
             aiCompleteTime = Date.now();
             const totalDuration = aiCompleteTime - messageStartTime;
             const aiResponseDuration = aiStartTime ? (aiCompleteTime - aiStartTime) : totalDuration;
@@ -469,26 +548,60 @@ export const useChatMessages = () => {
             
             // AI cevabı tamamlandı - backend'den gelen gerçek mesajı kullan
             // Streaming mesajını kaldır ve gerçek mesajı ekle/güncelle
-            if (streamingAIMessageId) {
-              removeMessage(conversationId, streamingAIMessageId);
+            if (!streamState.cancelledByUser) {
+              if (streamingAIMessageId) {
+                removeMessage(conversationId, streamingAIMessageId);
+              }
+              
+              // Timestamp validation
+              let timestamp: Date;
+              try {
+                const tsValue = aiMessage.timestamp || aiMessage.createdAt;
+                if (tsValue) {
+                  timestamp = new Date(tsValue);
+                  if (isNaN(timestamp.getTime())) {
+                    console.warn('⚠️ Geçersiz aiMessage timestamp, şu anki zaman kullanılıyor');
+                    timestamp = new Date();
+                  }
+                } else {
+                  timestamp = new Date();
+                }
+              } catch (error) {
+                console.error('❌ Timestamp parse hatası:', error);
+                timestamp = new Date();
+              }
+              
+              const aiChatMessage: ChatMessage = {
+                id: aiMessage.id,
+                text: aiMessage.text || '',
+                isUser: false,
+                timestamp,
+                isStreaming: false // Streaming tamamlandı
+              };
+              updateMessage(conversationId, aiChatMessage);
             }
-            const aiChatMessage: ChatMessage = {
-              id: aiMessage.id,
-              text: aiMessage.text,
-              isUser: false,
-              timestamp: new Date(aiMessage.timestamp || aiMessage.createdAt),
-              isStreaming: false // Streaming tamamlandı
-            };
-            // updateMessage kullan - mesaj varsa günceller, yoksa ekler
-            updateMessage(conversationId, aiChatMessage);
             streamingAIMessageId = null;
             
             // Loading state'ini temizle - AI cevabı tamamlandı
             setIsLoading(false);
             console.log('✅ Loading state temizlendi (AI complete)');
+
+            activeStreamRef.current = null;
+            setIsStreaming(false);
           },
           // onError
           (error: string) => {
+            if (streamState.cancelledByUser) {
+              console.log('ℹ️ AI cevabı kullanıcı tarafından durduruldu:', error);
+              if (streamingAIMessageId) {
+                removeMessage(conversationId, streamingAIMessageId);
+              }
+              streamingAIMessageId = null;
+              setIsStreaming(false);
+              setIsLoading(false);
+              return;
+            }
+
             streamingFailed = true;
             const errorTime = Date.now();
             const errorDuration = errorTime - messageStartTime;
@@ -584,16 +697,21 @@ export const useChatMessages = () => {
             // Loading state'ini temizle - hata durumunda
             setIsLoading(false);
             console.log('✅ Loading state temizlendi (streaming error)');
+            setIsStreaming(false);
+            activeStreamRef.current = null;
           }
         );
         
         // abortFunction'ı kontrol et ve abortStream'e ata
         // abortFunction her zaman olmalı (sendMessageStream her durumda abort fonksiyonu döndürür)
-        abortFunction = state.abortFunction;
+        abortFunction = streamState.abortFunction;
         if (abortFunction && typeof abortFunction === 'function') {
           abortStream = abortFunction;
-          state.abortStream = abortFunction; // state objesine de kaydet
+          streamState.abortStream = abortFunction; // state objesine de kaydet
           console.log('✅ abortStream başarıyla atandı');
+          if (activeStreamRef.current) {
+            activeStreamRef.current.abort = abortFunction;
+          }
         } else {
           console.warn('⚠️ abortFunction geçersiz veya fonksiyon değil:', abortFunction);
           // abortFunction yoksa bile devam et (abortStream null kalacak, finally'de kontrol edilecek)
@@ -610,7 +728,7 @@ export const useChatMessages = () => {
         
         streamingFailed = false; // Başarılı oldu
         abortStream = null; // Cleanup
-        state.abortStream = null; // state objesinde de temizle
+        streamState.abortStream = null; // state objesinde de temizle
         } catch (streamingInitError: any) {
           // sendMessageStream çağrısında hata (örneğin token yok veya abort fonksiyonu alınamadı)
           console.error('❌ sendMessageStream başlatılamadı:', {
@@ -618,6 +736,8 @@ export const useChatMessages = () => {
             stack: streamingInitError?.stack
           });
           // Hata'yı yukarı fırlat - normal endpoint'e fallback yapılacak
+          setIsStreaming(false);
+          activeStreamRef.current = null;
           throw streamingInitError;
         }
       } catch (streamingError: any) {
@@ -633,15 +753,18 @@ export const useChatMessages = () => {
           timestamp: new Date().toISOString()
         });
         
+        setIsStreaming(false);
+        activeStreamRef.current = null;
+        
         // Cleanup on error - abortStream'in geçerli olduğundan emin ol
         // state objesi üzerinden kontrol et
-        if (state && state.abortStream && typeof state.abortStream === 'function') {
+        if (streamState && streamState.abortStream && typeof streamState.abortStream === 'function') {
           try {
-            state.abortStream();
+            streamState.abortStream();
           } catch (abortError) {
             console.error('❌ abortStream çağrılırken hata:', abortError);
           }
-          state.abortStream = null;
+          streamState.abortStream = null;
           abortStream = null; // eski değişkeni de temizle
         } else if (abortStream && typeof abortStream === 'function') {
           // Fallback: eğer state objesi yoksa direkt abortStream'i kullan
@@ -690,26 +813,45 @@ export const useChatMessages = () => {
           const { userMessage, aiMessage } = response.data;
           
           // Backend'den dönen gerçek userMessage ile optimistic mesajı değiştir
-          if (userMessage) {
-            const backendImages = userMessage.attachments
-              ?.filter((att: any) => att.type === 'IMAGE')
-              .map((att: any) => att.url) || [];
+          if (userMessage && userMessage.id) {
+            const attachments = userMessage.attachments || [];
+            const backendImages = attachments
+              .filter((att: any) => att && (att.type === 'IMAGE' || att.type === 'image') && att.url)
+              .map((att: any) => att.url);
             
-            const backendFiles = userMessage.attachments
-              ?.filter((att: any) => att.type === 'FILE' || att.type === 'AUDIO' || att.type === 'VIDEO')
+            const backendFiles = attachments
+              .filter((att: any) => att && (att.type === 'FILE' || att.type === 'file' || att.type === 'AUDIO' || att.type === 'VIDEO') && att.url)
               .map((att: any) => ({
-                name: att.filename || '',
+                name: att.filename || 'Dosya',
                 uri: att.url
-              })) || [];
+              }));
 
             const finalImages = backendImages.length > 0 ? backendImages : (uploadedImageUrls.length > 0 ? uploadedImageUrls : undefined);
-            const finalFiles = backendFiles.length > 0 ? backendFiles : (uploadedFileUrls.length > 0 ? uploadedFileUrls.map(url => ({ name: '', uri: url })) : undefined);
+            const finalFiles = backendFiles.length > 0 ? backendFiles : (uploadedFileUrls.length > 0 ? uploadedFileUrls.map(url => ({ name: 'Dosya', uri: url })) : undefined);
+
+            // Timestamp validation
+            let timestamp: Date;
+            try {
+              const tsValue = userMessage.timestamp || userMessage.createdAt;
+              if (tsValue) {
+                timestamp = new Date(tsValue);
+                if (isNaN(timestamp.getTime())) {
+                  console.warn('⚠️ Geçersiz userMessage timestamp (fallback), şu anki zaman kullanılıyor');
+                  timestamp = new Date();
+                }
+              } else {
+                timestamp = new Date();
+              }
+            } catch (error) {
+              console.error('❌ Timestamp parse hatası (fallback):', error);
+              timestamp = new Date();
+            }
 
             const userChatMessage: ChatMessage = {
               id: userMessage.id,
-              text: userMessage.text,
+              text: userMessage.text || '',
               isUser: true,
-              timestamp: new Date(userMessage.timestamp || userMessage.createdAt),
+              timestamp,
               images: finalImages,
               files: finalFiles
             };
@@ -724,12 +866,30 @@ export const useChatMessages = () => {
           }
           
           // AI cevabını ekle
-          if (aiMessage) {
+          if (aiMessage && aiMessage.id) {
+            // Timestamp validation
+            let timestamp: Date;
+            try {
+              const tsValue = aiMessage.timestamp || aiMessage.createdAt;
+              if (tsValue) {
+                timestamp = new Date(tsValue);
+                if (isNaN(timestamp.getTime())) {
+                  console.warn('⚠️ Geçersiz aiMessage timestamp (fallback), şu anki zaman kullanılıyor');
+                  timestamp = new Date();
+                }
+              } else {
+                timestamp = new Date();
+              }
+            } catch (error) {
+              console.error('❌ Timestamp parse hatası (fallback):', error);
+              timestamp = new Date();
+            }
+            
             const aiChatMessage: ChatMessage = {
               id: aiMessage.id,
-              text: aiMessage.text,
+              text: aiMessage.text || '',
               isUser: false,
-              timestamp: new Date(aiMessage.timestamp || aiMessage.createdAt),
+              timestamp,
               isStreaming: false // Fallback endpoint'te streaming yok
             };
             try {
@@ -906,9 +1066,9 @@ export const useChatMessages = () => {
       
       // messageStartTime'a state objesi üzerinden erişim
       try {
-        if (typeof state !== 'undefined' && state && typeof state.messageStartTime === 'number') {
+        if (streamState && typeof streamState.messageStartTime === 'number') {
           const finalTime = Date.now();
-          finalDuration = finalTime - state.messageStartTime;
+          finalDuration = finalTime - streamState.messageStartTime;
         } else {
           // state objesi yoksa messageStartTime değişkenini kullan
           const finalTime = Date.now();
@@ -921,14 +1081,14 @@ export const useChatMessages = () => {
       
       // abortStream'i state objesi üzerinden kontrol et ve temizle
       try {
-        if (typeof state !== 'undefined' && state && state.abortStream && typeof state.abortStream === 'function') {
+        if (streamState && streamState.abortStream && typeof streamState.abortStream === 'function') {
           try {
-            state.abortStream();
+            streamState.abortStream();
           } catch (abortCallError) {
             // abortStream çağrılırken hata oluşursa sessizce devam et
             console.warn('⚠️ abortStream çağrılırken hata (non-critical):', abortCallError);
           }
-          state.abortStream = null;
+          streamState.abortStream = null;
         } else if (abortStream && typeof abortStream === 'function') {
           // Fallback: state objesi yoksa direkt abortStream'i kullan
           try {
@@ -955,7 +1115,18 @@ export const useChatMessages = () => {
         console.log('🏁 Mesaj islemi tamamlandi');
       }
       
-      setIsLoading(false);
+      const active = activeStreamRef.current;
+      const isSameConversation = active && active.conversationId === conversationId;
+      const isCancelled = !!streamState?.cancelledByUser || !!active?.state?.cancelledByUser;
+      const stillStreaming = active && isSameConversation && !isCancelled;
+
+      if (!stillStreaming) {
+        setIsLoading(false);
+        setIsStreaming(false);
+        if (!active || isSameConversation) {
+          activeStreamRef.current = null;
+        }
+      }
     }
   }, [currentConversation, addMessage, updateMessage, removeMessage, isLoading, selectConversation]);
 
@@ -988,10 +1159,41 @@ export const useChatMessages = () => {
     }
   }, [currentConversation, createNewConversation, selectConversation, sendMessage]);
 
+  const cancelStreamingResponse = useCallback((): boolean => {
+    const active = activeStreamRef.current;
+
+    if (!active || typeof active.abort !== 'function') {
+      console.log('ℹ️ Aktif bir AI yanıtı bulunamadı veya yanıt zaten tamamlandı.');
+      return false;
+    }
+
+    try {
+      if (active.state) {
+        active.state.cancelledByUser = true;
+      }
+
+      active.abort();
+    } catch (error) {
+      console.error('❌ AI yanıtı durdurulurken hata oluştu:', error);
+    }
+
+    if (active.conversationId && active.streamingMessageId) {
+      removeMessage(active.conversationId, active.streamingMessageId);
+    }
+
+    activeStreamRef.current = null;
+    setIsStreaming(false);
+    setIsLoading(false);
+
+    return true;
+  }, [updateMessage]);
+
   return {
     isLoading,
+    isStreaming,
     sendMessage,
     sendQuickSuggestion,
+    cancelStreamingResponse,
     currentConversation
   };
 };

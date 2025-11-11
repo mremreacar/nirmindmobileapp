@@ -13,6 +13,7 @@ interface HomeChatModalProps {
   visible: boolean;
   onRequestClose: () => void;
   chatBackdropOpacity: Animated.Value;
+  chatScreenOpacity?: Animated.Value; // ChatScreen opacity animasyonu
   translateX: Animated.Value;
   onOpenChatHistory: () => void;
   conversationId?: string;
@@ -30,6 +31,7 @@ const HomeChatModal: React.FC<HomeChatModalProps> = ({
   visible,
   onRequestClose,
   chatBackdropOpacity,
+  chatScreenOpacity,
   translateX,
   onOpenChatHistory,
   conversationId,
@@ -54,18 +56,26 @@ const HomeChatModal: React.FC<HomeChatModalProps> = ({
           pointerEvents="none"
           style={[styles.backdrop, { opacity: chatBackdropOpacity }, backdropStyle]}
         />
-        <ChatScreen
-          translateX={translateX}
-          onClose={onRequestClose}
-          onOpenChatHistory={onOpenChatHistory}
-          conversationId={conversationId}
-          initialArastirmaModu={initialArastirmaModu}
-          initialUploadModalOpen={initialUploadModalOpen}
-          initialMessage={initialMessage}
-          initialPromptType={initialPromptType}
-          initialImages={initialImages}
-          initialFiles={initialFiles}
-        />
+        {/* ChatScreen'i opacity animasyonu ile sarmala - smooth fade out için */}
+        <Animated.View
+          style={[
+            styles.chatScreenWrapper,
+            chatScreenOpacity ? { opacity: chatScreenOpacity } : undefined,
+          ]}
+        >
+          <ChatScreen
+            translateX={translateX}
+            onClose={onRequestClose}
+            onOpenChatHistory={onOpenChatHistory}
+            conversationId={conversationId}
+            initialArastirmaModu={initialArastirmaModu}
+            initialUploadModalOpen={initialUploadModalOpen}
+            initialMessage={initialMessage}
+            initialPromptType={initialPromptType}
+            initialImages={initialImages}
+            initialFiles={initialFiles}
+          />
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -79,6 +89,9 @@ const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(2, 2, 10, 0.68)",
+  },
+  chatScreenWrapper: {
+    flex: 1,
   },
 });
 

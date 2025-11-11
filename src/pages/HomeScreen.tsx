@@ -60,6 +60,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   const translateXChat = useRef(new Animated.Value(-width)).current;
   const textInputRef = useRef<TextInput>(null);
   const chatBackdropOpacity = useRef(new Animated.Value(0)).current;
+  const chatScreenOpacity = useRef(new Animated.Value(1)).current; // ChatScreen opacity için
   const homeScale = useRef(new Animated.Value(1)).current;
   const heroReveal = useRef(new Animated.Value(1)).current;
   const homeDimOpacity = useMemo(
@@ -73,6 +74,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   );
 
   const runChatEntrance = useCallback(() => {
+    // ChatScreen opacity'yi 1'e set et (görünür)
+    chatScreenOpacity.setValue(1);
+    
     Animated.parallel([
       Animated.timing(translateXChat, {
         toValue: 0,
@@ -86,6 +90,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
+      Animated.timing(chatScreenOpacity, {
+        toValue: 1,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
       Animated.spring(homeScale, {
         toValue: 0.97,
         speed: 16,
@@ -93,36 +103,53 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
         useNativeDriver: true,
       }),
     ]).start();
-  }, [chatBackdropOpacity, homeScale, translateXChat]);
+  }, [chatBackdropOpacity, homeScale, translateXChat, chatScreenOpacity]);
 
   const runChatExit = useCallback(
     (onComplete?: () => void) => {
+      // Smooth, fark edilmeyen geçiş için:
+      // 1. translateX'i arka planda sessizce yap (kullanıcı fark etmez)
+      // 2. Fade out kullan (opacity) - ana geçiş efekti
+      // 3. Home scale'i yumuşak yap
+      // Animasyon sürelerini optimize ettik - kasma olmaması için
       Animated.parallel([
+        // translateX'i arka planda sessizce yap - kullanıcı fark etmez (fade out ile maskelenmiş)
         Animated.timing(translateXChat, {
           toValue: -width,
-          duration: 180,
-          easing: Easing.in(Easing.cubic),
+          duration: 250, // 200'den 250'ye çıkarıldı - daha smooth, kasma yok
+          easing: Easing.bezier(0.25, 0.1, 0.25, 1), // Daha yumuşak bezier curve
           useNativeDriver: true,
         }),
+        // ChatScreen fade out - ana geçiş efekti (kullanıcı bunu görür)
+        Animated.timing(chatScreenOpacity, {
+          toValue: 0,
+          duration: 250, // 200'den 250'ye çıkarıldı - daha smooth
+          easing: Easing.bezier(0.25, 0.1, 0.25, 1), // Daha yumuşak bezier curve
+          useNativeDriver: true,
+        }),
+        // Backdrop fade out - senkronize
         Animated.timing(chatBackdropOpacity, {
           toValue: 0,
-          duration: 200,
-          easing: Easing.in(Easing.cubic),
+          duration: 250, // 200'den 250'ye çıkarıldı - senkronize
+          easing: Easing.bezier(0.25, 0.1, 0.25, 1), // Daha yumuşak bezier curve
           useNativeDriver: true,
         }),
+        // Home scale - yumuşak geri dönüş
         Animated.spring(homeScale, {
           toValue: 1,
-          speed: 18,
+          speed: 16, // 18'den 16'ya düşürüldü - daha yumuşak
           bounciness: 0,
           useNativeDriver: true,
         }),
       ]).start(({ finished }) => {
         if (finished) {
+          // Opacity'yi reset et
+          chatScreenOpacity.setValue(1);
           onComplete?.();
         }
       });
     },
-    [chatBackdropOpacity, homeScale, translateXChat]
+    [chatBackdropOpacity, homeScale, translateXChat, chatScreenOpacity]
   );
 
   // Dikte feature hooks
@@ -465,27 +492,23 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     runChatEntrance,
   ]);
 
-  // Handle selected conversation - Optimized with smooth transition
-  const handleConversationSelect = useCallback(async () => {
+  // Handle selected conversation - ChatHistoryScreen zaten selectConversation çağırdığı için
+  // burada sadece chat ekranını açıyoruz, duplicate selectConversation çağrısı yapmıyoruz
+  useEffect(() => {
     if (selectedConversationId) {
-      console.log('📥 Geçmiş sohbetten conversation seçildi:', selectedConversationId);
+      console.log('📥 Geçmiş sohbetten conversation seçildi (HomeScreen):', selectedConversationId);
       
-      // Conversation'ı ChatContext'te seç
-      await selectConversation(selectedConversationId);
+      // Klavyeyi kapat - geçmiş mesajlardan açıldığında klavye açık olmamalı
+      Keyboard.dismiss();
       
-      // Chat ekranını aç
+      // ChatHistoryScreen zaten selectConversation çağırmış, burada sadece chat ekranını aç
+      // Duplicate selectConversation çağrısı yapmıyoruz - bu request deduplication ile önlendi
       setShowChatScreen(true);
       runChatEntrance();
       
-      console.log('✅ Chat ekranı açıldı, conversation yüklendi');
+      console.log('✅ Chat ekranı açıldı, conversation ChatHistoryScreen tarafından zaten yüklendi');
     }
-  }, [runChatEntrance, selectConversation, selectedConversationId]);
-
-  useEffect(() => {
-    if (selectedConversationId) {
-      handleConversationSelect();
-    }
-  }, [selectedConversationId, handleConversationSelect]);
+  }, [selectedConversationId, runChatEntrance]);
 
   useEffect(() => {
     const isChatVisible = showChatScreen;
@@ -620,6 +643,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
             visible={showChatScreen}
             onRequestClose={closeChatScreen}
             chatBackdropOpacity={chatBackdropOpacity}
+            chatScreenOpacity={chatScreenOpacity}
             translateX={translateXChat}
             onOpenChatHistory={onOpenChatHistory}
             conversationId={selectedConversationId || createdConversationId}

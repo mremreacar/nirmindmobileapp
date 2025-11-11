@@ -145,7 +145,7 @@ class BackendApiService {
       const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 saniye timeout (artırıldı)
       fetchOptions.signal = controller.signal;
       
-      let response: Response;
+      let response: Response | undefined;
       let lastError: any = null;
       const maxRetries = 3; // Toplam 4 deneme (1 ilk + 3 retry)
       let rateLimitDetected = false; // Rate limit hatası tespit edildi mi?
@@ -274,7 +274,7 @@ class BackendApiService {
         }
       }
       
-      if (!response!) {
+      if (!response) {
         return {
           success: false,
           error: 'Bağlantı hatası',
@@ -758,7 +758,18 @@ class BackendApiService {
                 
                 eventCount++;
                 try {
+                  // JSON parse öncesi validation
+                  if (!eventData || typeof eventData !== 'string' || !eventData.trim()) {
+                    continue; // Boş data, atla
+                  }
+                  
                   const data = JSON.parse(eventData);
+                  
+                  // Data validation
+                  if (!data || typeof data !== 'object') {
+                    console.warn('⚠️ Geçersiz SSE data formatı:', eventType);
+                    continue;
+                  }
                   
                   if (eventCount <= 5) {
                     console.log(`📨 SSE event alindi: ${eventType} (${eventCount}. event)`);
@@ -767,8 +778,14 @@ class BackendApiService {
                   switch (eventType) {
                     case 'user_message':
                       if (data.success && data.data?.userMessage) {
+                        // UserMessage validation
+                        const userMsg = data.data.userMessage;
+                        if (!userMsg || !userMsg.id) {
+                          console.error('❌ Geçersiz userMessage:', userMsg);
+                          break;
+                        }
                         console.log('✅ User message event isleniyor');
-                        onUserMessage(data.data.userMessage);
+                        onUserMessage(userMsg);
                       }
                       break;
                     case 'ai_start':
@@ -776,11 +793,14 @@ class BackendApiService {
                       onAIStart();
                       break;
                     case 'ai_chunk':
-                      if (data.content && data.fullContent) {
+                      // Content validation
+                      if (data && typeof data.content === 'string' && typeof data.fullContent === 'string') {
                         if (eventCount <= 3) {
                           console.log(`📝 AI chunk alindi (${data.content.length} karakter)`);
                         }
                         onAIChunk(data.content, data.fullContent);
+                      } else {
+                        console.warn('⚠️ Geçersiz ai_chunk data:', data);
                       }
                       break;
                     case 'ai_complete':
@@ -796,7 +816,17 @@ class BackendApiService {
                         streamTimeout = null;
                       }
                       if (data.success && data.data?.aiMessage) {
-                        onAIComplete(data.data.aiMessage);
+                        // AIMessage validation
+                        const aiMsg = data.data.aiMessage;
+                        if (!aiMsg || !aiMsg.id) {
+                          console.error('❌ Geçersiz aiMessage:', aiMsg);
+                          onError('AI mesajı geçersiz format');
+                          break;
+                        }
+                        onAIComplete(aiMsg);
+                      } else {
+                        console.error('❌ Geçersiz ai_complete data:', data);
+                        onError('AI cevabı alınamadı');
                       }
                       const totalDuration = Date.now() - requestStartTime;
                       console.log('✅ SSE stream tamamlandi:', {
@@ -819,12 +849,17 @@ class BackendApiService {
                         clearTimeout(streamTimeout);
                         streamTimeout = null;
                       }
-                      console.error('❌ SSE error event:', data.message || data.error);
-                      onError(data.message || data.error || 'Bir hata oluştu');
+                      const errorMsg = data?.message || data?.error || 'Bir hata oluştu';
+                      console.error('❌ SSE error event:', errorMsg);
+                      onError(errorMsg);
                       if (!isResolved && !isAborted) {
                         isResolved = true;
                       }
                       return;
+                    default:
+                      // Bilinmeyen event type
+                      console.warn('⚠️ Bilinmeyen SSE event type:', eventType);
+                      break;
                   }
                 } catch (parseError) {
                   // JSON parse hatası - data muhtemelen tamamlanmamış veya geçersiz
