@@ -33,6 +33,7 @@ function AppContent() {
   const [currentScreen, setCurrentScreen] = useState<Screen>(Screen.SPLASH);
   const [selectedConversationId, setSelectedConversationId] = useState<string | undefined>();
   const [profileCompleteData, setProfileCompleteData] = useState<any>(null);
+  const [previousScreen, setPreviousScreen] = useState<Screen | null>(null); // Chat History'ye gelmeden önceki ekran
   const timerRef = useRef<NodeJS.Timeout | undefined>(undefined);
   const { user, isLoading } = useAuth();
   const backendApiService = BackendApiService.getInstance();
@@ -123,17 +124,24 @@ function AppContent() {
 
   const handleOpenChatHistory = useCallback(() => {
     console.log('🔙 Chat history açılıyor...');
+    // Mevcut ekranı previousScreen olarak kaydet
+    setPreviousScreen(currentScreen);
     performSmoothTransition(Screen.CHAT_HISTORY);
-  }, [performSmoothTransition]);
+  }, [performSmoothTransition, currentScreen]);
 
-  const handleBackToHome = useCallback(() => {
+  const handleBackFromChatHistory = useCallback(() => {
     RNKeyboard.dismiss(); // Klavyeyi kapat
-    performSmoothTransition(Screen.HOME);
-  }, [performSmoothTransition]);
+    // Eğer previousScreen varsa oraya dön, yoksa Home'a dön
+    const targetScreen = previousScreen || Screen.HOME;
+    setPreviousScreen(null); // previousScreen'i temizle
+    performSmoothTransition(targetScreen);
+  }, [performSmoothTransition, previousScreen]);
 
   const handleSelectConversation = useCallback((conversationId: string) => {
     RNKeyboard.dismiss(); // Klavyeyi kapat
     setSelectedConversationId(conversationId);
+    // previousScreen'i temizle çünkü conversation seçildiğinde Home'a gidiyoruz
+    setPreviousScreen(null);
     performSmoothTransition(Screen.HOME);
   }, [performSmoothTransition]);
 
@@ -191,7 +199,7 @@ function AppContent() {
         />;
       case Screen.CHAT_HISTORY:
         return <ChatHistoryScreen 
-          onBack={handleBackToHome} 
+          onBack={handleBackFromChatHistory} 
           onSelectConversation={handleSelectConversation}
           onOpenProfile={handleOpenProfile}
         />;
@@ -210,7 +218,7 @@ function AppContent() {
       default:
         return <SplashScreen />;
     }
-  }, [currentScreen, selectedConversationId, profileCompleteData, handleOnboardingNext, handleLoginBack, handleLoginSuccess, handleProfileComplete, handleOpenChatHistory, handleBackToHome, handleSelectConversation, handleOpenProfile, handleBackFromProfile, handleChatFromProfile, handleOpenHelpCenter, handleBackFromHelpCenter, handleChatFromHelpCenter]);
+  }, [currentScreen, selectedConversationId, profileCompleteData, handleOnboardingNext, handleLoginBack, handleLoginSuccess, handleProfileComplete, handleOpenChatHistory, handleBackFromChatHistory, handleSelectConversation, handleOpenProfile, handleBackFromProfile, handleChatFromProfile, handleOpenHelpCenter, handleBackFromHelpCenter, handleChatFromHelpCenter]);
 
   return (
     <ErrorBoundary>

@@ -210,9 +210,10 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
             setCurrentConversation(foundConversation);
           }
         } else {
-          // Hala yükleniyor, devam et ama tekrar yükleme
-          console.log('⚠️ Conversation hala yükleniyor, mesaj ekleniyor ama conversation yüklenene kadar bekleniyor');
-          return; // Mesaj ekleme işlemini iptal et
+          // Hala yükleniyor, ama mesaj eklenebilmeli (conversation zaten var, sadece yükleniyor)
+          console.log('⚠️ Conversation hala yükleniyor, mesaj ekleniyor (conversation yüklenene kadar bekleniyor)');
+          // Return etme, mesaj eklenebilmeli
+          // Conversation yoksa fallback olarak oluşturulacak (aşağıdaki kod)
         }
       } else {
         // Yükleme işlemini başlat
@@ -437,6 +438,8 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       return;
     }
 
+    let updatedConversation: ChatConversation | null = null;
+
     setConversations(prev => {
       const conversation = prev.find(conv => conv.id === conversationId);
       if (!conversation) {
@@ -450,39 +453,85 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
           createdAt: new Date(),
           updatedAt: new Date()
         };
+        updatedConversation = tempConversation;
         return [...prev, tempConversation];
       }
       
-      // Mesajı güncelle veya ekle (duplicate kontrolü yok - streaming için önemli)
+      // Mesajı güncelle veya ekle
+      // Duplicate kontrolü: Eğer mesaj zaten varsa ve aynıysa, tekrar ekleme
       const messageIndex = conversation.messages.findIndex(msg => msg.id === message.id);
-      const updatedMessages = messageIndex >= 0
-        ? conversation.messages.map((msg, idx) => idx === messageIndex ? message : msg)
-        : [...conversation.messages, message];
+      if (messageIndex >= 0) {
+        // Mesaj zaten var, güncelle
+        const existingMessage = conversation.messages[messageIndex];
+        // Eğer mesaj aynıysa (text ve timestamp aynı), güncelleme yapma
+        if (existingMessage.text === message.text && 
+            existingMessage.isStreaming === message.isStreaming &&
+            existingMessage.isUser === message.isUser) {
+          // Mesaj aynı, güncelleme yapma (duplicate önleme)
+          updatedConversation = conversation;
+          return prev;
+        }
+        // Mesaj farklı, güncelle
+        const updatedMessages = conversation.messages.map((msg, idx) => idx === messageIndex ? message : msg);
+        updatedConversation = {
+          ...conversation,
+          messages: updatedMessages,
+          updatedAt: new Date()
+        };
+        return prev.map(conv =>
+          conv.id === conversationId ? updatedConversation! : conv
+        );
+      }
+      // Mesaj yok, ekle
+      const updatedMessages = [...conversation.messages, message];
+      
+      updatedConversation = {
+        ...conversation,
+        messages: updatedMessages,
+        updatedAt: new Date()
+      };
       
       return prev.map(conv =>
-        conv.id === conversationId
-          ? {
-              ...conv,
-              messages: updatedMessages,
-              updatedAt: new Date()
-            }
-          : conv
+        conv.id === conversationId ? updatedConversation! : conv
       );
     });
     
     // currentConversation'ı da güncelle
-    if (currentConversation?.id === conversationId) {
-      setCurrentConversation(prev => {
-        if (!prev) return null;
-        const messageIndex = prev.messages.findIndex(msg => msg.id === message.id);
-        const updatedMessages = messageIndex >= 0
-          ? prev.messages.map((msg, idx) => idx === messageIndex ? message : msg)
-          : [...prev.messages, message];
-        return {
-          ...prev,
-          messages: updatedMessages,
-          updatedAt: new Date()
-        };
+    // Eğer currentConversation bu conversation'a işaret ediyorsa güncelle
+    // Eğer currentConversation undefined veya farklı conversation'a işaret ediyorsa,
+    // güncellenmiş conversation'ı set et
+    if (updatedConversation) {
+      setCurrentConversation(prevConv => {
+        if (prevConv?.id === conversationId) {
+          // Aynı conversation, mesajı güncelle
+          const messageIndex = prevConv.messages.findIndex(msg => msg.id === message.id);
+          if (messageIndex >= 0) {
+            // Mesaj zaten var, duplicate kontrolü yap
+            const existingMessage = prevConv.messages[messageIndex];
+            // Eğer mesaj aynıysa, güncelleme yapma
+            if (existingMessage.text === message.text && 
+                existingMessage.isStreaming === message.isStreaming &&
+                existingMessage.isUser === message.isUser) {
+              return prevConv; // Mesaj aynı, güncelleme yapma
+            }
+            // Mesaj farklı, güncelle
+            const updatedMessages = prevConv.messages.map((msg, idx) => idx === messageIndex ? message : msg);
+            return {
+              ...prevConv,
+              messages: updatedMessages,
+              updatedAt: new Date()
+            };
+          }
+          // Mesaj yok, ekle
+          return {
+            ...prevConv,
+            messages: [...prevConv.messages, message],
+            updatedAt: new Date()
+          };
+        } else {
+          // Farklı conversation veya undefined, güncellenmiş conversation'ı kullan
+          return updatedConversation;
+        }
       });
     }
   }, [currentConversation]);

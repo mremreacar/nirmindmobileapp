@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -12,13 +12,16 @@ import {
   Keyboard,
   ActivityIndicator,
   RefreshControl,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFonts } from 'expo-font';
 import { SvgXml } from 'react-native-svg';
 import { useChat } from '@/src/lib/context/ChatContext';
+import { ChatConversation } from '@/src/lib/mock/types';
 import Header from '../components/Header';
 import { useAuth } from '../contexts/AuthContext';
+import { useKeyboardHandling } from '../hooks/useKeyboardHandling';
 
 const { width, height } = Dimensions.get('window');
 
@@ -87,6 +90,27 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const autoLoadingRef = useRef(false);
+  const scrollViewRef = useRef<ScrollView>(null);
+  
+  // Keyboard handling
+  const {
+    keyboardHeight,
+    isKeyboardVisible,
+    dismissKeyboard,
+    handleScreenPress,
+    getScrollOffset,
+  } = useKeyboardHandling();
+  
+  // Klavye açıldığında scroll'u yukarı kaydır (search alanı görünür olsun)
+  useEffect(() => {
+    if (isKeyboardVisible && keyboardHeight > 0) {
+      // Kısa bir delay ile scroll yap (klavye animasyonu tamamlanana kadar bekle)
+      const timer = setTimeout(() => {
+        scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isKeyboardVisible, keyboardHeight]);
   
   // Kullanıcı adının baş harflerini al
   const getInitials = () => {
@@ -140,7 +164,7 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
   }, [searchText]);
 
   // getConversationMessageCount fonksiyonunu useCallback ile memoize et
-  const getConversationMessageCount = useCallback((conversation: typeof conversations[number]) => {
+  const getConversationMessageCount = useCallback((conversation: ChatConversation) => {
     if (typeof conversation.totalMessageCount === 'number') {
       return conversation.totalMessageCount;
     }
@@ -161,7 +185,7 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
 
   // Filtrelenmiş konuşmalar - useMemo ile memoize et
   const filteredConversations = useMemo(() => {
-    return conversations.filter(conv => {
+    return conversations.filter((conv: ChatConversation) => {
       const title = conv.title || '';
       const search = searchText || '';
       return title.toLowerCase().includes(search.toLowerCase());
@@ -170,7 +194,7 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
 
   // Mesajı olmayan konuşmaları gösterme - useMemo ile memoize et
   const messageEligibleConversations = useMemo(() => {
-    return filteredConversations.filter(conv => {
+    return filteredConversations.filter((conv: ChatConversation) => {
       const messageCount = getConversationMessageCount(conv);
       if (messageCount > 0) {
         return true;
@@ -345,43 +369,39 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
 
   return (
     <View style={styles.chatHistoryContainer}>
-      <LinearGradient
-        colors={['#02020A', '#16163C']}
-        locations={[0.1827, 1.0]}
-        style={styles.chatHistoryGradient}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-      >
+      <TouchableWithoutFeedback onPress={handleScreenPress} accessible={false}>
+        <LinearGradient
+          colors={['#02020A', '#16163C']}
+          locations={[0.1827, 1.0]}
+          style={styles.chatHistoryGradient}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
+        >
         {/* Header */}
         <Header
           onBackPress={onBack}
-          onChatPress={onBack}
-          onLogoPress={onBack}
           showBackButton={true}
-          showChatButton={true}
+          showChatButton={false}
+          showLogo={false}
+          showSearch={true}
+          searchValue={searchText}
+          onSearchChange={setSearchText}
+          searchPlaceholder="Ara"
+          reverseLayout={true}
         />
-
-        {/* Search Bar */}
-        <View style={styles.searchSection}>
-          <View style={styles.searchBar}>
-            <SvgXml 
-              xml={searchIcon}
-              width="16"
-              height="16"
-            />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Ara"
-              placeholderTextColor="#9CA3AF"
-              value={searchText}
-              onChangeText={setSearchText}
-            />
-          </View>
-        </View>
 
         {/* Chat History Content */}
         <ScrollView
+          ref={scrollViewRef}
           style={styles.chatHistoryContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          showsVerticalScrollIndicator={true}
+          contentContainerStyle={[
+            isKeyboardVisible && {
+              paddingBottom: keyboardHeight > 0 ? keyboardHeight * 0.3 : 0,
+            },
+          ]}
           refreshControl={
             <RefreshControl
               refreshing={isRefreshing}
@@ -428,7 +448,6 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
                 <View key={`skeleton-${index}`} style={styles.conversationItem}>
                   <View style={[styles.chatItem, styles.chatItemSkeleton]}>
                     <View style={styles.skeletonTitle} />
-                    <View style={styles.skeletonDate} />
                   </View>
                 </View>
               ))
@@ -444,14 +463,6 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
                   >
                     <View style={styles.chatItemContent}>
                       <Text allowFontScaling={false} style={styles.chatText}>{conversation.title || 'Sohbet'}</Text>
-                      <Text allowFontScaling={false} style={styles.chatDate}>
-                        {new Date(conversation.updatedAt).toLocaleDateString('tr-TR', {
-                          day: 'numeric',
-                          month: 'short',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                      </Text>
                     </View>
                   </TouchableOpacity>
                 </View>
@@ -513,6 +524,7 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
           </TouchableOpacity>
         </View>
       </LinearGradient>
+      </TouchableWithoutFeedback>
     </View>
   );
 };
@@ -641,13 +653,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     lineHeight: 20,
   },
-  chatDate: {
-    fontFamily: 'Poppins-Regular',
-    fontSize: 12,
-    fontWeight: '400',
-    color: '#9CA3AF',
-    marginTop: 4,
-  },
   bottomBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -743,14 +748,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     width: '70%',
     marginLeft: 33,
-  },
-  skeletonDate: {
-    height: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderRadius: 6,
-    width: '40%',
-    marginLeft: 33,
-    marginTop: 10,
   },
 });
 

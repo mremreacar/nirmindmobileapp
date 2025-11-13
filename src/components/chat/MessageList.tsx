@@ -1,80 +1,13 @@
 import React, { useState, memo, useMemo, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Alert, Modal, Linking, Dimensions, Animated } from 'react-native';
+import { View, Text, ScrollView, Image, TouchableOpacity, Alert, Modal, Linking, Dimensions } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { ChatMessage } from '@/src/lib/mock/types';
 import { useChat } from '@/src/lib/context/ChatContext';
 import { WebView } from 'react-native-webview';
 import { getFileTypeIcon, formatFileSize } from '@/src/utils/fileValidation';
+import { messageStyles, markdownStyles } from '@/src/styles/messageStyles';
 
 const { width, height } = Dimensions.get('window');
-
-// Animasyonlu Thinking Dots Component
-const ThinkingDots: React.FC = () => {
-  const dot1 = useRef(new Animated.Value(0)).current;
-  const dot2 = useRef(new Animated.Value(0)).current;
-  const dot3 = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const animateDot = (dot: Animated.Value, delay: number) => {
-      return Animated.loop(
-        Animated.sequence([
-          Animated.delay(delay),
-          Animated.timing(dot, {
-            toValue: -8,
-            duration: 400,
-            useNativeDriver: true,
-          }),
-          Animated.timing(dot, {
-            toValue: 0,
-            duration: 400,
-            useNativeDriver: true,
-          }),
-        ])
-      );
-    };
-
-    const animations = [
-      animateDot(dot1, 0),
-      animateDot(dot2, 150),
-      animateDot(dot3, 300),
-    ];
-
-    animations.forEach(anim => anim.start());
-
-    return () => {
-      animations.forEach(anim => anim.stop());
-    };
-  }, []);
-
-  return (
-    <View style={styles.thinkingDots}>
-      <Animated.View
-        style={[
-          styles.thinkingDot,
-          {
-            transform: [{ translateY: dot1 }],
-          },
-        ]}
-      />
-      <Animated.View
-        style={[
-          styles.thinkingDot,
-          {
-            transform: [{ translateY: dot2 }],
-          },
-        ]}
-      />
-      <Animated.View
-        style={[
-          styles.thinkingDot,
-          {
-            transform: [{ translateY: dot3 }],
-          },
-        ]}
-      />
-    </View>
-  );
-};
 
 interface MessageListProps {
   messages: ChatMessage[];
@@ -85,6 +18,7 @@ interface MessageListProps {
   onScrollToEnd?: () => void;
   conversationId?: string;
   isDataLoading?: boolean;
+  aiBubbleColor?: string; // Home ekranı için özel AI balon rengi
 }
 
 const MessageList: React.FC<MessageListProps> = ({ 
@@ -96,6 +30,7 @@ const MessageList: React.FC<MessageListProps> = ({
   onScrollToEnd,
   conversationId,
   isDataLoading = false,
+  aiBubbleColor,
 }) => {
   const { deleteMessage } = useChat();
   const [previewFile, setPreviewFile] = useState<{ uri: string; name: string; mimeType?: string } | null>(null);
@@ -209,9 +144,9 @@ const MessageList: React.FC<MessageListProps> = ({
   return (
     <ScrollView
       ref={scrollViewRef}
-      style={styles.messagesContainer}
+      style={messageStyles.messagesContainer}
       contentContainerStyle={[
-        styles.messagesContent,
+        messageStyles.messagesContent,
         isKeyboardVisible && { paddingBottom: 10 }
       ]}
       showsVerticalScrollIndicator={true}
@@ -266,26 +201,43 @@ const MessageList: React.FC<MessageListProps> = ({
           >
             <View
               style={[
-                styles.messageContainer,
-                message.isUser ? styles.userMessage : styles.aiMessage
+                messageStyles.messageContainer,
+                message.isUser ? messageStyles.userMessage : messageStyles.aiMessage
               ]}
             >
             <View style={[
-              styles.messageWrapper,
-              message.isUser ? styles.userMessageWrapper : styles.aiMessageWrapper
+              messageStyles.messageWrapper,
+              message.isUser ? messageStyles.userMessageWrapper : messageStyles.aiMessageWrapper
             ]}>
               <View style={[
-                styles.messageBubble,
-                message.isUser ? styles.userBubble : styles.aiBubble
+                messageStyles.messageBubble,
+                message.isUser ? messageStyles.userBubble : messageStyles.aiBubble,
+                // Home ekranı için özel AI balon rengi
+                !message.isUser && aiBubbleColor && {
+                  backgroundColor: aiBubbleColor,
+                },
+                // Dev Mode: AI mesajlarına kırmızı border ekle
+                !message.isUser && __DEV__ && {
+                  borderWidth: 2,
+                  borderColor: '#FF0000',
+                },
+                // Dev Mode: Kullanıcı mesajlarına position relative ekle (beyaz nokta için)
+                message.isUser && __DEV__ && {
+                  position: 'relative',
+                }
               ]}>
+                {/* Dev Mode: Kullanıcı mesaj balonuna beyaz nokta ekle */}
+                {message.isUser && __DEV__ && (
+                  <View style={messageStyles.devUserDot} />
+                )}
                 {/* Resimler varsa göster */}
                 {message.images && message.images.length > 0 && (
-                  <View style={styles.imagesContainer}>
+                  <View style={messageStyles.imagesContainer}>
                     {message.images.map((imageUri, index) => (
                       <Image
                         key={`${message.id}-image-${index}`}
                         source={{ uri: imageUri }}
-                        style={styles.messageImage}
+                        style={messageStyles.messageImage}
                         resizeMode="cover"
                         onError={(error) => {
                           console.error('❌ Image yüklenemedi:', imageUri, error.nativeEvent.error);
@@ -297,7 +249,7 @@ const MessageList: React.FC<MessageListProps> = ({
                 
                 {/* Dosyalar varsa göster */}
                 {message.files && message.files.length > 0 && (
-                  <View style={styles.filesContainer}>
+                  <View style={messageStyles.filesContainer}>
                     {message.files.map((file, index) => {
                       const fileName = file?.name || 'Dosya';
                       const fileExtension = fileName.toLowerCase().split('.').pop() || '';
@@ -308,25 +260,25 @@ const MessageList: React.FC<MessageListProps> = ({
                       return (
                       <TouchableOpacity 
                         key={index} 
-                          style={[styles.fileItem, { borderLeftColor: fileTypeColor }]}
+                          style={[messageStyles.fileItem, { borderLeftColor: fileTypeColor }]}
                         onPress={() => handleFilePress(file)}
                         activeOpacity={0.7}
                       >
-                          <View style={[styles.fileIconContainer, { backgroundColor: fileTypeColor + '20' }]}>
-                            <Text allowFontScaling={false} style={styles.fileIcon}>{fileIcon}</Text>
+                          <View style={[messageStyles.fileIconContainer, { backgroundColor: fileTypeColor + '20' }]}>
+                            <Text allowFontScaling={false} style={messageStyles.fileIcon}>{fileIcon}</Text>
                           </View>
-                          <View style={styles.fileInfoContainer}>
-                            <Text allowFontScaling={false} style={styles.fileName} numberOfLines={1}>
+                          <View style={messageStyles.fileInfoContainer}>
+                            <Text allowFontScaling={false} style={messageStyles.fileName} numberOfLines={1}>
                               {fileName}
                             </Text>
                             {fileSize && (
-                              <Text allowFontScaling={false} style={styles.fileSize}>
+                              <Text allowFontScaling={false} style={messageStyles.fileSize}>
                                 {fileSize} • {fileExtension.toUpperCase()}
                               </Text>
                             )}
                           </View>
-                          <View style={styles.fileArrowContainer}>
-                            <Text allowFontScaling={false} style={styles.fileArrow}>›</Text>
+                          <View style={messageStyles.fileArrowContainer}>
+                            <Text allowFontScaling={false} style={messageStyles.fileArrow}>›</Text>
                           </View>
                       </TouchableOpacity>
                       );
@@ -336,11 +288,14 @@ const MessageList: React.FC<MessageListProps> = ({
                 
                 {/* Thinking state - İlk chunk gelene kadar özel görünüm */}
                 {message.isThinking && (
-                  <View style={styles.thinkingContainer}>
-                    <Text allowFontScaling={false} style={styles.thinkingText}>
+                  <View style={messageStyles.thinkingContainer}>
+                    {/* Dev Mode: Thinking animasyonuna renk alanı */}
+                    {__DEV__ && (
+                      <View style={messageStyles.devAiAnimationOverlay} />
+                    )}
+                    <Text allowFontScaling={false} style={messageStyles.thinkingText}>
                       Düşünüyorum
                     </Text>
-                    <ThinkingDots />
                   </View>
                 )}
                 
@@ -348,31 +303,43 @@ const MessageList: React.FC<MessageListProps> = ({
                 {!message.isThinking && message.text && typeof message.text === 'string' && message.text.trim() && (
                   message.isUser ? (
                     <Text allowFontScaling={false} style={[
-                      styles.messageText,
-                      styles.userMessageText
+                      messageStyles.messageText,
+                      messageStyles.userMessageText
                     ]}>
                       {message.text}
                     </Text>
                   ) : (
-                    <Markdown
-                      style={markdownStyles}
-                    >
-                      {message.text + (message.isStreaming ? ' |' : '')}
-                    </Markdown>
+                    <View style={__DEV__ ? messageStyles.devAiTextWrapper : undefined}>
+                      {/* Dev Mode: AI mesaj metni animasyonlarına renk alanı */}
+                      {__DEV__ && (
+                        <View style={messageStyles.devAiAnimationOverlay} />
+                      )}
+                      <Markdown
+                        style={markdownStyles}
+                      >
+                        {message.text + (message.isStreaming ? ' |' : '')}
+                      </Markdown>
+                    </View>
                   )
                 )}
                 {/* Streaming cursor - sadece text yoksa ve streaming ise (thinking değilse) */}
                 {!message.isThinking && !message.text && message.isStreaming && (
-                  <Markdown
-                    style={markdownStyles}
-                  >
-                    ▊
-                  </Markdown>
+                  <View style={__DEV__ ? messageStyles.devAiTextWrapper : undefined}>
+                    {/* Dev Mode: Streaming cursor animasyonuna renk alanı */}
+                    {__DEV__ && (
+                      <View style={messageStyles.devAiAnimationOverlay} />
+                    )}
+                    <Markdown
+                      style={markdownStyles}
+                    >
+                      ▊
+                    </Markdown>
+                  </View>
                 )}
               </View>
               <Text allowFontScaling={false} style={[
-                styles.messageTime,
-                message.isUser ? styles.userMessageTime : styles.aiMessageTime
+                messageStyles.messageTime,
+                message.isUser ? messageStyles.userMessageTime : messageStyles.aiMessageTime
               ]}>
                 {message.timestamp 
                   ? new Date(message.timestamp).toLocaleTimeString('tr-TR', {
@@ -392,23 +359,6 @@ const MessageList: React.FC<MessageListProps> = ({
         )
       )}
       
-      {/* Loading indicator - sadece streaming mesajı yoksa göster */}
-      {isLoading && Array.isArray(messages) && !messages.some(msg => msg && !msg.isUser && msg.isStreaming) && (
-        <View style={[styles.messageContainer, styles.aiMessage]}>
-          <View style={[styles.messageWrapper, styles.aiMessageWrapper]}>
-            <View style={[styles.messageBubble, styles.aiBubble]}>
-              <View style={styles.loadingContainer}>
-                <View style={styles.loadingDots}>
-                  <View style={[styles.loadingDot, styles.loadingDot1]} />
-                  <View style={[styles.loadingDot, styles.loadingDot2]} />
-                  <View style={[styles.loadingDot, styles.loadingDot3]} />
-                </View>
-              </View>
-            </View>
-          </View>
-        </View>
-      )}
-      
       {/* Dosya Önizleme Modalı */}
       <Modal
         visible={previewFile !== null}
@@ -416,47 +366,47 @@ const MessageList: React.FC<MessageListProps> = ({
         animationType="fade"
         onRequestClose={closePreview}
       >
-        <View style={styles.previewModalOverlay}>
+        <View style={messageStyles.previewModalOverlay}>
           <TouchableOpacity 
-            style={styles.previewModalCloseButton}
+            style={messageStyles.previewModalCloseButton}
             onPress={closePreview}
           >
-            <Text style={styles.previewModalCloseText}>✕</Text>
+            <Text style={messageStyles.previewModalCloseText}>✕</Text>
           </TouchableOpacity>
           
           {previewFile && (
             <>
-              <View style={styles.previewModalHeader}>
-                <Text style={styles.previewModalFileName} numberOfLines={2}>
+              <View style={messageStyles.previewModalHeader}>
+                <Text style={messageStyles.previewModalFileName} numberOfLines={2}>
                   {previewFile.name}
                 </Text>
               </View>
               
-              <View style={styles.previewModalContent}>
+              <View style={messageStyles.previewModalContent}>
                 {previewFile.mimeType?.startsWith('image/') ? (
                   <Image 
                     source={{ uri: previewFile.uri }} 
-                    style={styles.previewImage}
+                    style={messageStyles.previewImage}
                     resizeMode="contain"
                   />
                 ) : previewFile.mimeType === 'application/pdf' ? (
                   <WebView
                     source={{ uri: previewFile.uri }}
-                    style={styles.previewWebView}
+                    style={messageStyles.previewWebView}
                     startInLoadingState={true}
                     scalesPageToFit={true}
                   />
                 ) : (
-                  <View style={styles.previewUnsupportedContainer}>
-                    <Text style={styles.previewUnsupportedText}>📄</Text>
-                    <Text style={styles.previewUnsupportedLabel}>
+                  <View style={messageStyles.previewUnsupportedContainer}>
+                    <Text style={messageStyles.previewUnsupportedText}>📄</Text>
+                    <Text style={messageStyles.previewUnsupportedLabel}>
                       Bu dosya türü önizlenemiyor
                     </Text>
                     <TouchableOpacity 
-                      style={styles.previewOpenButton}
+                      style={messageStyles.previewOpenButton}
                       onPress={() => openFileInBrowser(previewFile.uri)}
                     >
-                      <Text style={styles.previewOpenButtonText}>Tarayıcıda Aç</Text>
+                      <Text style={messageStyles.previewOpenButtonText}>Tarayıcıda Aç</Text>
                     </TouchableOpacity>
                   </View>
                 )}
@@ -469,401 +419,6 @@ const MessageList: React.FC<MessageListProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  messagesContainer: {
-    flex: 1,
-    paddingHorizontal: 20,
-    backgroundColor: 'transparent',
-  },
-  messagesContent: {
-    paddingBottom: 20,
-    paddingTop: 10,
-    flexGrow: 1,
-    minHeight: '100%',
-  },
-  messageContainer: {
-    marginVertical: 6,
-    flexDirection: 'row',
-    width: '100%',
-  },
-  userMessage: {
-    justifyContent: 'flex-end',
-  },
-  aiMessage: {
-    justifyContent: 'flex-start',
-  },
-  messageWrapper: {
-    maxWidth: '90%',
-    minWidth: 'auto',
-  },
-  userMessageWrapper: {
-    alignItems: 'flex-end',
-  },
-  aiMessageWrapper: {
-    alignItems: 'flex-start',
-  },
-  messageBubble: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 20,
-    marginBottom: 4,
-  },
-  userBubble: {
-    backgroundColor: '#7E7AE9',
-    borderBottomRightRadius: 4,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    borderBottomLeftRadius: 20,
-  },
-  aiBubble: {
-    backgroundColor: '#3532A8',
-    borderBottomLeftRadius: 4,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    borderBottomRightRadius: 20,
-  },
-  messageText: {
-    fontFamily: 'Poppins-Regular',
-    fontSize: 16,
-    lineHeight: 24,
-    flexShrink: 1,
-    flexWrap: 'wrap',
-  },
-  userMessageText: {
-    color: '#FFFFFF',
-  },
-  aiMessageText: {
-    color: '#FFFFFF',
-  },
-  messageTime: {
-    fontSize: 11,
-    marginTop: 4,
-    opacity: 0.7,
-  },
-  userMessageTime: {
-    color: '#FFFFFF',
-    textAlign: 'right',
-  },
-  aiMessageTime: {
-    color: '#FFFFFF',
-    textAlign: 'left',
-  },
-  loadingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-  },
-  loadingDots: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  loadingDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#FFFFFF',
-  },
-  loadingDot1: {
-    opacity: 0.4,
-  },
-  loadingDot2: {
-    opacity: 0.7,
-  },
-  loadingDot3: {
-    opacity: 1,
-  },
-  // Thinking state styles - Temaya uygun
-  thinkingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  thinkingText: {
-    fontFamily: 'Poppins-Medium',
-    fontSize: 16,
-    lineHeight: 24,
-    color: '#FFFFFF',
-    opacity: 0.9,
-    letterSpacing: 0.2,
-  },
-  thinkingDots: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    height: 20,
-    justifyContent: 'center',
-  },
-  thinkingDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#FFFFFF',
-    opacity: 0.7,
-  },
-  imagesContainer: {
-    marginBottom: 8,
-    gap: 8,
-  },
-  messageImage: {
-    width: 200,
-    height: 200,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    minHeight: 200,
-  },
-  filesContainer: {
-    marginBottom: 8,
-    gap: 10,
-  },
-  fileItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    padding: 12,
-    borderRadius: 12,
-    borderLeftWidth: 4,
-    borderLeftColor: '#7F8C8D',
-    gap: 12,
-    minHeight: 64,
-  },
-  fileIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  fileIcon: {
-    fontSize: 24,
-  },
-  fileInfoContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    gap: 4,
-  },
-  fileName: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontFamily: 'Poppins-Medium',
-    lineHeight: 20,
-  },
-  fileSize: {
-    color: 'rgba(255, 255, 255, 0.6)',
-    fontSize: 12,
-    fontFamily: 'Poppins-Regular',
-    lineHeight: 16,
-  },
-  fileArrowContainer: {
-    width: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  fileArrow: {
-    color: 'rgba(255, 255, 255, 0.5)',
-    fontSize: 20,
-    fontWeight: '300',
-  },
-  // Dosya Önizleme Modal Stilleri
-  previewModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  previewModalCloseButton: {
-    position: 'absolute',
-    top: 50,
-    right: 20,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-  },
-  previewModalCloseText: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  previewModalHeader: {
-    position: 'absolute',
-    top: 50,
-    left: 20,
-    right: 70,
-    zIndex: 1000,
-  },
-  previewModalFileName: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontFamily: 'Poppins-Medium',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  previewModalContent: {
-    flex: 1,
-    width: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingTop: 100,
-    paddingBottom: 50,
-  },
-  previewImage: {
-    width: width * 0.9,
-    height: height * 0.7,
-    borderRadius: 12,
-  },
-  previewWebView: {
-    width: width * 0.9,
-    height: height * 0.7,
-    borderRadius: 12,
-    backgroundColor: '#FFFFFF',
-  },
-  previewUnsupportedContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 40,
-  },
-  previewUnsupportedText: {
-    fontSize: 64,
-    marginBottom: 20,
-  },
-  previewUnsupportedLabel: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontFamily: 'Poppins-Medium',
-    marginBottom: 30,
-    textAlign: 'center',
-  },
-  previewOpenButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  previewOpenButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontFamily: 'Poppins-Medium',
-  },
-});
-
-// Markdown stilleri
-const markdownStyles = StyleSheet.create({
-  body: {
-    fontFamily: 'Poppins-Regular',
-    fontSize: 16,
-    lineHeight: 24,
-    color: '#FFFFFF',
-  },
-  heading1: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 24,
-    lineHeight: 32,
-    color: '#FFFFFF',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  heading2: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 20,
-    lineHeight: 28,
-    color: '#FFFFFF',
-    marginTop: 14,
-    marginBottom: 6,
-  },
-  heading3: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 18,
-    lineHeight: 26,
-    color: '#FFFFFF',
-    marginTop: 12,
-    marginBottom: 6,
-  },
-  heading4: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 16,
-    lineHeight: 24,
-    color: '#FFFFFF',
-    marginTop: 10,
-    marginBottom: 4,
-  },
-  paragraph: {
-    marginTop: 8,
-    marginBottom: 8,
-    color: '#FFFFFF',
-  },
-  strong: {
-    fontFamily: 'Poppins-Bold',
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  em: {
-    fontStyle: 'italic',
-    color: '#FFFFFF',
-  },
-  link: {
-    color: '#FFFFFF',
-    textDecorationLine: 'underline',
-  },
-  listItem: {
-    marginTop: 4,
-    marginBottom: 4,
-    color: '#FFFFFF',
-  },
-  bullet_list: {
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  ordered_list: {
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  code_inline: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingHorizontal: 4,
-    paddingVertical: 2,
-    borderRadius: 4,
-    fontFamily: 'monospace',
-    fontSize: 14,
-    color: '#FFFFFF',
-  },
-  fence: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  code_block: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  blockquote: {
-    borderLeftWidth: 4,
-    borderLeftColor: 'rgba(255, 255, 255, 0.3)',
-    paddingLeft: 12,
-    marginTop: 8,
-    marginBottom: 8,
-    color: '#FFFFFF',
-  },
-  hr: {
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    height: 1,
-    marginTop: 16,
-    marginBottom: 16,
-  },
-});
 
 // Memoize MessageList to prevent unnecessary re-renders
 // Messages array reference comparison - eğer reference aynıysa re-render yok

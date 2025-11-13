@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import {
   View,
+  Text,
   StyleSheet,
   Dimensions,
   Animated,
@@ -17,9 +18,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useFonts } from "expo-font";
 import HeroSection from "../components/HeroSection";
 import Header from "../components/Header";
-import InputComponent from "../components/common/InputComponent";
 import MessageList from "../components/chat/MessageList";
-import ActionButtons from "../components/chat/ActionButtons";
+import ChatInputSection from "../components/chat/ChatInputSection";
 import UploadModal from "../components/UploadModal";
 import { useChat } from "../lib/context/ChatContext";
 import { useQuickSuggestions } from "../hooks/useQuickSuggestions";
@@ -31,7 +31,6 @@ import { useChatAttachments } from "../hooks/useChatAttachments";
 import { useChatMessaging } from "../hooks/useChatMessaging";
 import { useChatMessages } from "../hooks/useChatMessages";
 import { HomeScreenProps, QuickSuggestion } from "../types/homeScreen";
-import HomeChatModal from "../components/home/HomeChatModal";
 import HomeQuickSuggestionsModal from "../components/home/HomeQuickSuggestionsModal";
 import {
   getKeyboardAwarePaddingBottom,
@@ -59,7 +58,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     isLoadingSuggestions,
     handleOnerilerPress,
   } = useQuickSuggestions();
-  const [showChatScreen, setShowChatScreen] = useState(false);
   const [createdConversationId, setCreatedConversationId] = useState<
     string | undefined
   >();
@@ -106,6 +104,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   
   // Bottom position animasyonu - klavye açıldığında bottom section yukarı hareket etsin
   const bottomPosition = useRef(new Animated.Value(0)).current;
+  
+  // MessageList container paddingBottom animasyonu - klavye durumuna göre smooth geçiş
+  const messagesListPaddingBottom = useRef(new Animated.Value(180)).current; // Başlangıç: input section yüksekliği
 
   // Dikte feature hooks
   const { dictationState, toggleDictation: originalToggleDictation } = useDictation({
@@ -172,99 +173,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     setInputText,
   });
 
-  const translateXChat = useRef(new Animated.Value(-width)).current;
-  const chatBackdropOpacity = useRef(new Animated.Value(0)).current;
-  const chatScreenOpacity = useRef(new Animated.Value(1)).current; // ChatScreen opacity için
-  const homeScale = useRef(new Animated.Value(1)).current;
   const heroReveal = useRef(new Animated.Value(1)).current;
-  const homeDimOpacity = useMemo(
-    () =>
-      homeScale.interpolate({
-        inputRange: [0.94, 1],
-        outputRange: [0.82, 1],
-        extrapolate: "clamp",
-      }),
-    [homeScale]
-  );
-
-  const runChatEntrance = useCallback(() => {
-    // ChatScreen opacity'yi 1'e set et (görünür)
-    chatScreenOpacity.setValue(1);
-    
-    Animated.parallel([
-      Animated.timing(translateXChat, {
-        toValue: 0,
-        duration: 240,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-      Animated.timing(chatBackdropOpacity, {
-        toValue: 1,
-        duration: 220,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-      Animated.timing(chatScreenOpacity, {
-        toValue: 1,
-        duration: 220,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-      Animated.spring(homeScale, {
-        toValue: 0.97,
-        speed: 16,
-        bounciness: 4,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [chatBackdropOpacity, homeScale, translateXChat, chatScreenOpacity]);
-
-  const runChatExit = useCallback(
-    (onComplete?: () => void) => {
-      // Smooth, fark edilmeyen geçiş için:
-      // 1. translateX'i arka planda sessizce yap (kullanıcı fark etmez)
-      // 2. Fade out kullan (opacity) - ana geçiş efekti
-      // 3. Home scale'i yumuşak yap
-      // Animasyon sürelerini optimize ettik - kasma olmaması için
-      Animated.parallel([
-        // translateX'i arka planda sessizce yap - kullanıcı fark etmez (fade out ile maskelenmiş)
-        Animated.timing(translateXChat, {
-          toValue: -width,
-          duration: 250, // 200'den 250'ye çıkarıldı - daha smooth, kasma yok
-          easing: Easing.bezier(0.25, 0.1, 0.25, 1), // Daha yumuşak bezier curve
-          useNativeDriver: true,
-        }),
-        // ChatScreen fade out - ana geçiş efekti (kullanıcı bunu görür)
-        Animated.timing(chatScreenOpacity, {
-          toValue: 0,
-          duration: 250, // 200'den 250'ye çıkarıldı - daha smooth
-          easing: Easing.bezier(0.25, 0.1, 0.25, 1), // Daha yumuşak bezier curve
-          useNativeDriver: true,
-        }),
-        // Backdrop fade out - senkronize
-        Animated.timing(chatBackdropOpacity, {
-          toValue: 0,
-          duration: 250, // 200'den 250'ye çıkarıldı - senkronize
-          easing: Easing.bezier(0.25, 0.1, 0.25, 1), // Daha yumuşak bezier curve
-          useNativeDriver: true,
-        }),
-        // Home scale - yumuşak geri dönüş
-        Animated.spring(homeScale, {
-          toValue: 1,
-          speed: 16, // 18'den 16'ya düşürüldü - daha yumuşak
-          bounciness: 0,
-          useNativeDriver: true,
-        }),
-      ]).start(({ finished }) => {
-        if (finished) {
-          // Opacity'yi reset et
-          chatScreenOpacity.setValue(1);
-          onComplete?.();
-        }
-      });
-    },
-    [chatBackdropOpacity, homeScale, translateXChat, chatScreenOpacity]
-  );
 
   const [fontsLoaded, fontError] = useFonts({
     "Poppins-Regular": require("@assets/fonts/Poppins-Regular .ttf"),
@@ -287,18 +196,15 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
           return gestureState.dx > 50 && Math.abs(gestureState.dy) < 100;
         },
         onPanResponderGrant: () => {
-          console.log("👆 Swipe gesture başladı - soldan sağa çekme");
+          // Swipe gesture başladı
         },
         onPanResponderMove: (evt, gestureState) => {
           // Hareket sırasında herhangi bir animasyon yapma
           // Sadece gesture'ı takip et
         },
         onPanResponderRelease: (evt, gestureState) => {
-          console.log("👆 Swipe gesture bitti:", gestureState.dx);
-          
           // Eğer yeterince sağa çekildiyse chat history'yi aç
           if (gestureState.dx > 100) {
-            console.log("📱 Soldan sağa çekme ile chat history açılıyor");
             onOpenChatHistory();
           }
         },
@@ -307,31 +213,24 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   );
 
   const openModal = useCallback(async () => {
-    // "+" butonuna basıldığında direkt Chat ekranını aç
-    console.log("💬 Plus butonu tıklandı - Chat ekranı açılıyor");
-    
-    // Plus butonuna basıldığını işaretle
+    // "+" butonuna basıldığında boş bir conversation oluştur
     setPlusButtonPressed(true);
     
     // Boş bir conversation oluştur
     const conversationId = await createNewConversation("Yeni Sohbet", "");
     setCreatedConversationId(conversationId);
-    setShowChatScreen(true);
-    runChatEntrance();
-  }, [createNewConversation, runChatEntrance]);
+  }, [createNewConversation]);
 
   const openChatScreen = useCallback(async () => {
-    // Header'daki chat butonuna basıldığında Home ekranını sıfırla (ilk kez açılıyormuş gibi)
-    console.log("💬 Header chat butonu tıklandı - Home ekranı sıfırlanıyor");
-
-    // Eğer chat ekranı açıksa kapat
-    if (showChatScreen) {
-      runChatExit(() => {
-        setShowChatScreen(false);
-      });
-    }
-
-    // Conversation'ı temizle - Home ekranı başlangıç durumuna dönsün
+    // Header'daki chat butonuna basıldığında:
+    // 1. Mevcut conversation varsa ve mesajları varsa, zaten Chat history'ye eklenmiş olacak
+    //    (createNewConversation otomatik olarak conversations array'ine ekliyor)
+    // 2. Yeni sohbet hazırlığı başlat - conversation'ı sıfırla
+    // 3. Conversation ilk mesaj gönderildiğinde oluşturulacak
+    
+    // Mevcut conversation'ı sıfırla (Chat history'de zaten var)
+    // currentConversation'ı da sıfırlamak için selectConversation çağrısı yapmıyoruz
+    // çünkü yeni conversation hazırlığı yapıyoruz
     setCreatedConversationId(undefined);
     
     // Input'u temizle
@@ -344,17 +243,10 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     dismissKeyboard();
     
     // HeroSection otomatik olarak gösterilecek çünkü createdConversationId undefined olacak
-    // Bu sayede Home ekranı ilk kez açılıyormuş gibi görünecek
-  }, [dismissKeyboard, showChatScreen, runChatExit]);
+    // Bu sayede yeni sohbet için hazırlık yapılmış olacak
+    // İlk mesaj gönderildiğinde conversation oluşturulacak ve mesajlaşma alanı görünecek
+  }, [dismissKeyboard]);
 
-  const closeChatScreen = useCallback(() => {
-    runChatExit(() => {
-      setShowChatScreen(false);
-      setCreatedConversationId(undefined);
-      setPlusButtonPressed(false);
-      onConversationSelected();
-    });
-  }, [onConversationSelected, runChatExit]);
 
   const handleArastirmaPress = useCallback(() => {
     setArastirmaModu((prev) => !prev);
@@ -367,7 +259,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   const handleSendMessage = useCallback(async () => {
     // Eğer zaten bir mesaj gönderiliyorsa, duplicate çağrıyı engelle
     if (isSendingMessageRef.current) {
-      console.log('⚠️ Mesaj zaten gönderiliyor, duplicate çağrı engellendi');
       return;
     }
 
@@ -381,31 +272,35 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     try {
       let conversationId = createdConversationId;
       
-      // Eğer conversation yoksa oluştur
+      // Eğer conversation yoksa (yeni sohbet modu), ilk mesaj gönderildiğinde oluştur
+      // Bu sayede Chat ikonuna basıldığında sadece hazırlık yapılır, conversation oluşturulmaz
+      // Conversation sadece ilk mesaj gönderildiğinde backend'e kaydedilir
       if (!conversationId) {
         const title = inputText.trim().length > 30 
           ? inputText.trim().substring(0, 30) + "..." 
           : inputText.trim() || "Yeni Sohbet";
         
+        // İlk mesaj gönderildiğinde conversation oluştur ve backend'e kaydet
         conversationId = await createNewConversation(title);
         setCreatedConversationId(conversationId);
         
-        // Conversation'ı seç ve mesajların yüklenmesini bekle
-        await selectConversation(conversationId);
+        // createNewConversation zaten currentConversation'ı set ediyor,
+        // ama React state güncellemeleri asenkron olduğu için
+        // selectConversation çağrısını yaparak currentConversation'ın
+        // doğru conversation'ı içerdiğinden emin ol
+        try {
+          await selectConversation(conversationId);
+        } catch (selectError) {
+          console.error('❌ Conversation seçilirken hata:', selectError);
+          // Devam et, createNewConversation zaten currentConversation'ı set etti
+        }
         
         // Mesajların yüklenmesi için kısa bir bekleme
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, 50));
       }
       
-      // Mesaj gönder
+      // Mesaj gönder (conversation artık var, yeni mesajlar bu conversation içinde tutulacak)
       if (conversationId) {
-        console.log('📤 Home ekranından mesaj gönderiliyor:', {
-          conversationId,
-          messageText: inputText.trim().substring(0, 50),
-          hasImages: selectedImages.length > 0,
-          hasFiles: selectedFiles.length > 0,
-        });
-        
         await sendMessage(
           inputText.trim(),
           conversationId,
@@ -413,8 +308,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
           selectedImages,
           selectedFiles
         );
-        
-        console.log('✅ Mesaj gönderildi');
         
         // Mesaj gönderildikten sonra currentConversation'ın güncellenmesi için kısa bir bekleme
         // sendMessage zaten addMessage çağırıyor ve currentConversation'ı güncelliyor
@@ -434,36 +327,42 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
       // Mesaj gönderme flag'ini reset et
       isSendingMessageRef.current = false;
     }
-  }, [inputText, selectedImages, selectedFiles, createdConversationId, createNewConversation, selectConversation, sendMessage, arastirmaModu, dismissKeyboard, setIsInputFocused, currentConversation]);
+  }, [inputText, selectedImages, selectedFiles, createdConversationId, createNewConversation, sendMessage, arastirmaModu, dismissKeyboard, setIsInputFocused, currentConversation, selectConversation]);
 
   const handleQuickSuggestionSelect = useCallback(async (suggestion: QuickSuggestion) => {
-    console.log('🎯 Öneri seçildi:', suggestion);
-    
     try {
       setShowQuickSuggestions(false);
 
-      // Home ekranından geldiğinde her zaman yeni konuşma oluştur
+      // Öneri seçildiğinde, eğer conversation yoksa yeni conversation oluştur
+      // (Chat ikonuna basıldığında conversation sıfırlanmış olabilir)
       const title = suggestion.question.length > 30 ? suggestion.question.substring(0, 30) + '...' : suggestion.question;
-      console.log('📝 Yeni konuşma oluşturuluyor:', title);
       
       let conversationId = createdConversationId;
       
-      // Eğer conversation yoksa oluştur
+      // Eğer conversation yoksa (yeni sohbet modu), öneri seçildiğinde conversation oluştur
+      // Bu sayede öneri seçimi de ilk mesaj gönderme gibi davranır
       if (!conversationId) {
         conversationId = await createNewConversation(title);
-        console.log('✅ Konuşma oluşturuldu:', conversationId);
         setCreatedConversationId(conversationId);
         
-        // Conversation'ı seç ve mesajların yüklenmesini bekle
-        await selectConversation(conversationId);
+        // createNewConversation zaten currentConversation'ı set ediyor,
+        // ama React state güncellemeleri asenkron olduğu için
+        // selectConversation çağrısını yaparak currentConversation'ın
+        // doğru conversation'ı içerdiğinden emin ol
+        try {
+          await selectConversation(conversationId);
+        } catch (selectError) {
+          console.error('❌ Conversation seçilirken hata:', selectError);
+          // Devam et, createNewConversation zaten currentConversation'ı set etti
+        }
         
         // Mesajların yüklenmesi için kısa bir bekleme
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, 50));
       }
       
       // Mesaj gönder (Home ekranında mesajlaşma alanında gösterilecek)
+      // Sonraki mesajlar bu conversation içinde tutulacak
       if (conversationId) {
-        console.log('📤 Öneri mesajı gönderiliyor:', suggestion.question);
         await sendMessage(
           suggestion.question,
           conversationId,
@@ -472,7 +371,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
           [], // selectedFiles
           suggestion.promptType
         );
-        console.log('✅ Öneri işlemi tamamlandı - Home ekranında mesajlaşma alanında gösterilecek');
       } else {
         console.error('❌ Konuşma oluşturulamadı');
       }
@@ -480,50 +378,32 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
       console.error('❌ Öneri seçim hatası:', error);
       Alert.alert("Hata", "Öneri seçilirken bir hata oluştu.");
     }
-  }, [createdConversationId, createNewConversation, selectConversation, sendMessage]);
+  }, [createdConversationId, createNewConversation, sendMessage, selectConversation]);
 
-  // Handle selected conversation - ChatHistoryScreen zaten selectConversation çağırdığı için
-  // burada sadece chat ekranını açıyoruz, duplicate selectConversation çağrısı yapmıyoruz
+  // Handle selected conversation - ChatHistoryScreen'den seçilen conversation'ı kullan
   useEffect(() => {
     if (selectedConversationId) {
-      console.log('📥 Geçmiş sohbetten conversation seçildi (HomeScreen):', selectedConversationId);
-      
-      // ChatHistoryScreen zaten selectConversation çağırmış, burada sadece chat ekranını aç
-      // Duplicate selectConversation çağrısı yapmıyoruz - bu request deduplication ile önlendi
-      setShowChatScreen(true);
-      runChatEntrance();
-      
-      console.log('✅ Chat ekranı açıldı, conversation ChatHistoryScreen tarafından zaten yüklendi');
+      setCreatedConversationId(selectedConversationId);
     }
-  }, [selectedConversationId, runChatEntrance]);
+  }, [selectedConversationId]);
 
-  // Conversation oluşturulduğunda veya mesaj gönderildiğinde currentConversation'ı kontrol et
-  useEffect(() => {
-    if (createdConversationId) {
-      if (!currentConversation) {
-        // Conversation oluşturuldu ama henüz seçilmedi, seç
-        selectConversation(createdConversationId);
-      } else if (currentConversation.id !== createdConversationId) {
-        // Farklı bir conversation seçilmiş, doğru conversation'ı seç
-        selectConversation(createdConversationId);
-      }
-    }
-  }, [createdConversationId, currentConversation, selectConversation]);
+  // Conversation oluşturulduğunda createNewConversation zaten currentConversation'ı set ediyor,
+  // conversations array'inde arama yapmaya gerek yok
   
   // Mesaj gönderildikten sonra currentConversation'ın güncellenmesini bekle
   useEffect(() => {
     if (createdConversationId && currentConversation && currentConversation.id === createdConversationId) {
       // Conversation seçili ve doğru, mesajlar yüklenecek
-      console.log('✅ Home ekranında conversation seçili, mesaj sayısı:', currentConversation.messages?.length || 0);
+      // Log kaldırıldı - gereksiz render log'u
     }
   }, [createdConversationId, currentConversation]);
 
+  // HeroSection animasyonu - her zaman görünür
   useEffect(() => {
-    const isChatVisible = showChatScreen;
     const animation = Animated.timing(heroReveal, {
-      toValue: isChatVisible ? 0 : 1,
-      duration: isChatVisible ? 160 : 500,
-      delay: isChatVisible ? 0 : 180,
+      toValue: 1,
+      duration: 500,
+      delay: 180,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     });
@@ -533,7 +413,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     return () => {
       animation.stop();
     };
-  }, [heroReveal, showChatScreen]);
+  }, [heroReveal]);
 
   // Bottom padding ve position - klavye ile tam senkronize, animasyon yok direkt set
   useEffect(() => {
@@ -546,6 +426,23 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     bottomPosition.setValue(targetBottom);
     lastPaddingRef.current = targetPadding;
   }, [keyboardHeight, isKeyboardVisible, getKeyboardPadding, bottomPadding, bottomPosition]);
+
+  // MessageList container paddingBottom animasyonu - klavye durumuna göre smooth geçiş
+  useEffect(() => {
+    const inputSectionHeight = 180;
+    const targetPadding = isKeyboardVisible 
+      ? inputSectionHeight + keyboardHeight 
+      : inputSectionHeight;
+    
+    // Smooth animasyon - klavye açılıp kapanırken paddingBottom'u animasyonlu güncelle
+    // Bu sayede scroll sırasında kasma olmaz
+    Animated.timing(messagesListPaddingBottom, {
+      toValue: targetPadding,
+      duration: keyboardAnimationDuration || 250,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: false, // paddingBottom native driver desteklemiyor
+    }).start();
+  }, [isKeyboardVisible, keyboardHeight, keyboardAnimationDuration, messagesListPaddingBottom]);
 
   // İlk render'da padding değerini doğru set et
   useEffect(() => {
@@ -564,13 +461,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   return (
     <View style={styles.container}>
       <AnimatedKeyboardAvoidingView
-        style={[
-          styles.container,
-          {
-            transform: [{ scale: homeScale }],
-            opacity: homeDimOpacity,
-          },
-        ]}
+        style={styles.container}
         behavior={undefined}
         keyboardVerticalOffset={0}
         enabled={false}
@@ -597,33 +488,40 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
           {(() => {
             // Orta kısım bottom section (input alanı) durumuna göre değişir
             const hasInputContent = inputText.trim().length > 0 || selectedImages.length > 0 || selectedFiles.length > 0;
-            const shouldShowMessages = createdConversationId && (hasInputContent || (currentConversation?.messages && currentConversation.messages.length > 0));
+            const hasMessages = (currentConversation?.messages && currentConversation.messages.length > 0) || messagesArray.length > 0;
             
-            // Debug log
-            console.log('🔍 Home ekranı render kontrolü (bottom section bağlı):', {
-              isInputFocused,
-              hasInputContent,
-              inputTextLength: inputText.trim().length,
-              selectedImagesCount: selectedImages.length,
-              selectedFilesCount: selectedFiles.length,
-              createdConversationId,
-              shouldShowMessages,
-              hasCurrentConversation: !!currentConversation,
-              messagesCount: currentConversation?.messages?.length || messagesArray.length,
-            });
+            // Conversation oluşturulduysa (createdConversationId varsa) mesajlaşma alanını göster
+            // Bu sayede mesaj gönderildikten sonra input temizlense bile conversation var olduğu için mesajlaşma alanı görünmeye devam eder
+            // Input içeriği sadece conversation oluşturulmadan önce önemli (yeni conversation başlatılacaksa)
+            // Eğer conversation yoksa ama input içeriği varsa, mesajlaşma alanını göster (yeni conversation oluşturulacak)
+            const shouldShowMessages = createdConversationId 
+              ? true // Conversation varsa her zaman mesajlaşma alanını göster
+              : hasInputContent; // Conversation yoksa sadece input içeriği varsa göster
             
             if (shouldShowMessages) {
-              // Mesajlaşma alanı (conversation var ve input içeriği var veya mesajlar var)
+              // Mesajlaşma alanı (conversation var)
               const messagesToShow = currentConversation?.messages || messagesArray || [];
-              console.log('📱 Mesajlaşma alanı gösteriliyor (bottom section durumuna göre):', {
-                conversationId: createdConversationId,
-                messagesCount: messagesToShow.length,
-                hasInputContent,
-              });
+              
+              // Dev Mode: Pembe border'ın bottom değeri de animasyonlu olmalı
+              const devBorderBottom = messagesListPaddingBottom;
               
               return (
                 <TouchableWithoutFeedback onPress={handleScreenPress} accessible={false}>
-                  <View style={styles.messagesListContainer}>
+                  <Animated.View 
+                    style={[
+                      styles.messagesListContainer, 
+                      { paddingBottom: messagesListPaddingBottom }
+                    ]}
+                  >
+                    {/* Dev Mode: Mesajlaşma alanının sınırını pembe çerçeve ile belirle */}
+                    {__DEV__ && (
+                      <Animated.View 
+                        style={[
+                          styles.devMessagesAreaBorder, 
+                          { bottom: devBorderBottom }
+                        ]} 
+                      />
+                    )}
                     <MessageList
                       messages={messagesToShow}
                       isLoading={isLoading}
@@ -635,8 +533,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
                       onScrollToEnd={() => {
                         // Optional: Additional scroll handling
                       }}
+                      aiBubbleColor="#000000"
                     />
-                  </View>
+                  </Animated.View>
                 </TouchableWithoutFeedback>
               );
             } else {
@@ -657,71 +556,50 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
           })()}
 
           {/* Input Section - Fixed at bottom */}
-          <Animated.View style={[
-            styles.inputSectionContainer,
-            { 
-              paddingBottom: bottomPadding,
-              bottom: bottomPosition
-            }
-          ]}>
-              <ActionButtons
-                onSuggestions={handleOnerilerPress}
-                onResearch={handleArastirmaPress}
-                isLoading={isLoading}
-                isResearchMode={arastirmaModu}
-              />
-
-              <InputComponent
-                inputText={inputText}
-                setInputText={setInputText}
-                onSendMessage={handleSendMessage}
-                onDictate={toggleDictation}
-                onOpenUploadModal={openUploadModal}
-                isDictating={dictationState.isDictating}
-                isProcessing={dictationState.isProcessing}
-                isLoading={isLoading}
-                isInputFocused={isInputFocused}
-                setIsInputFocused={setIsInputFocused}
-                textInputRef={textInputRef}
-                hasSelectedFiles={selectedImages.length > 0 || selectedFiles.length > 0}
-                selectedFilesCount={selectedFiles.length}
-                selectedImagesCount={selectedImages.length}
-                showSelectedFilesIndicator={true}
-                selectedImages={selectedImages}
-                selectedFiles={selectedFiles}
-                onRemoveImage={removeImage}
-                onRemoveFile={removeFile}
-                placeholder="İstediğinizi sorun"
-                multiline={false}
-                maxLength={1000}
-                autoCorrect={true}
-                autoCapitalize="sentences"
-                returnKeyType="send"
-                keyboardType="default"
-                secureTextEntry={false}
-                editable={true}
-                selectTextOnFocus={false}
-                clearButtonMode="while-editing"
-                autoFocus={false}
-                blurOnSubmit={true}
-                onSubmitEditing={handleSendMessage}
-                testID="home-input"
-                accessibilityLabel="Soru girişi"
-                accessibilityHint="AI asistanınıza soru yazın veya sesli yazma kullanın"
-                accessibilityRole="textbox"
-                waveAnimations={waveAnimations}
-              />
-          </Animated.View>
-
-          <HomeChatModal
-            visible={showChatScreen}
-            onRequestClose={closeChatScreen}
-            chatBackdropOpacity={chatBackdropOpacity}
-            chatScreenOpacity={chatScreenOpacity}
-            translateX={translateXChat}
-            onOpenChatHistory={onOpenChatHistory}
-            conversationId={selectedConversationId || createdConversationId}
+          <ChatInputSection
+            inputText={inputText}
+            setInputText={setInputText}
+            isInputFocused={isInputFocused}
+            setIsInputFocused={setIsInputFocused}
+            onSendMessage={handleSendMessage}
+            onDictate={toggleDictation}
+            onOpenUploadModal={openUploadModal}
+            onInputAreaPress={handleScreenPress}
+            onSuggestions={handleOnerilerPress}
+            onResearch={handleArastirmaPress}
+            isLoading={isLoading}
+            isResearchMode={arastirmaModu}
+            isDictating={dictationState.isDictating}
+            isProcessing={dictationState.isProcessing}
+            selectedImages={selectedImages}
+            selectedFiles={selectedFiles}
+            onRemoveImage={removeImage}
+            onRemoveFile={removeFile}
+            textInputRef={textInputRef}
+            placeholder="İstediğinizi sorun"
+            multiline={false}
+            maxLength={1000}
+            autoCorrect={true}
+            autoCapitalize="sentences"
+            returnKeyType="send"
+            keyboardType="default"
+            secureTextEntry={false}
+            editable={true}
+            selectTextOnFocus={false}
+            clearButtonMode="while-editing"
+            autoFocus={false}
+            blurOnSubmit={true}
+            onSubmitEditing={handleSendMessage}
+            testID="home-input"
+            accessibilityLabel="Soru girişi"
+            accessibilityHint="AI asistanınıza soru yazın veya sesli yazma kullanın"
+            accessibilityRole="textbox"
+            waveAnimations={waveAnimations}
+            containerStyle={styles.inputSectionContainer}
+            animatedPaddingBottom={bottomPadding}
+            animatedBottom={bottomPosition}
           />
+
 
           <HomeQuickSuggestionsModal
             visible={showQuickSuggestions}
@@ -777,6 +655,21 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0, // Important for ScrollView to work properly (ChatScreen'deki gibi)
     backgroundColor: "transparent",
+    position: "relative",
+    // paddingBottom dinamik olarak ayarlanacak (klavye durumuna göre)
+  },
+  devMessagesAreaBorder: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    // bottom değeri dinamik olarak ayarlanacak (input section yüksekliği kadar)
+    borderWidth: 3,
+    borderColor: "#FF69B4", // Pembe border
+    borderStyle: "solid",
+    borderRadius: 8,
+    zIndex: 10000,
+    pointerEvents: "none",
   },
   inputSectionContainer: {
     position: "absolute",
@@ -787,7 +680,6 @@ const styles = StyleSheet.create({
     justifyContent: "flex-start",
     alignItems: "flex-start",
     paddingHorizontal: getResponsivePadding(),
-    paddingBottom: getResponsivePaddingBottom(),
     paddingTop: 20,
     width: getResponsiveWidth(),
     gap: getResponsiveGap(),

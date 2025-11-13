@@ -51,6 +51,10 @@ const HomeChatModal: React.FC<HomeChatModalProps> = ({
             chatScreenOpacity ? { opacity: chatScreenOpacity } : undefined,
           ]}
         >
+          {/* Dev Mode: HomeChatModal alanını siyah çerçeve ile belirle */}
+          {__DEV__ && (
+            <View style={styles.devModalBorder} />
+          )}
           <ChatScreen
             translateX={translateX}
             onClose={onRequestClose}
@@ -74,6 +78,20 @@ const styles = StyleSheet.create({
   },
   chatScreenWrapper: {
     flex: 1,
+    position: 'relative',
+  },
+  devModalBorder: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderWidth: 4,
+    borderColor: '#000000', // Siyah border
+    borderStyle: 'solid',
+    borderRadius: 8,
+    zIndex: 10001,
+    pointerEvents: 'none',
   },
 });
 

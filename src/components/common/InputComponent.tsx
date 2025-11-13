@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, memo, useState, useCallback, useMemo } from 'react';
+import React, { useRef, useEffect, memo, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Animated, Dimensions, Platform, Easing, Image, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SvgXml } from 'react-native-svg';
@@ -151,19 +151,14 @@ const InputComponent: React.FC<InputComponentProps> = ({
   
   // TextInput props
   textInputRef: externalTextInputRef,
-  placeholder = "İstediğinizi sorun (Enter ile gönder)",
+  placeholder = "İstediğinizi sorun",
   multiline = false,
   maxLength = 1000,
   autoCorrect = true,
   autoCapitalize = 'sentences',
-  returnKeyType = 'send',
-  keyboardType = 'default',
-  secureTextEntry = false,
+
   editable = true,
-  selectTextOnFocus = false,
-  clearButtonMode = 'while-editing',
-  autoFocus = false,
-  blurOnSubmit = true,
+
   
   // Event handlers
   onFocus,
@@ -203,8 +198,6 @@ const InputComponent: React.FC<InputComponentProps> = ({
   // Dynamic height state
   const [inputHeight, setInputHeight] = useState(getResponsiveInputMinHeight());
   const [isScrollable, setIsScrollable] = useState(false);
-  const [characterCount, setCharacterCount] = useState(0);
-  const [showCharacterCount, setShowCharacterCount] = useState(false);
   const scrollViewRef = useRef<ScrollView | null>(null);
   const [contentHeight, setContentHeight] = useState(0);
   const [visibleHeight, setVisibleHeight] = useState(0);
@@ -215,15 +208,6 @@ const InputComponent: React.FC<InputComponentProps> = ({
   const MIN_INPUT_HEIGHT = getResponsiveInputMinHeight() + 10; // 10px daha yüksek (daha dengeli)
   const MAX_INPUT_HEIGHT = isTablet ? 260 : (isLargeScreen ? 220 : 200);
   const SCROLL_THRESHOLD = MAX_INPUT_HEIGHT - 16;
-  const CHARACTER_LIMIT_WARNING = Math.floor(maxLength * 0.8); // 80% of max length
-  const CHARACTER_LIMIT_DANGER = Math.floor(maxLength * 0.95); // 95% of max length
-
-  // Character count tracking
-  useEffect(() => {
-    const count = inputText.length;
-    setCharacterCount(count);
-    setShowCharacterCount(count > CHARACTER_LIMIT_WARNING);
-  }, [inputText, CHARACTER_LIMIT_WARNING]);
 
   useEffect(() => {
     if (!inputText.trim()) {
@@ -426,21 +410,6 @@ const InputComponent: React.FC<InputComponentProps> = ({
     }
   }, [inputText, isScrollable, scrollToBottom]);
 
-  const getCharacterCountColor = () => {
-    if (characterCount >= CHARACTER_LIMIT_DANGER) return '#FF6B6B';
-    if (characterCount >= CHARACTER_LIMIT_WARNING) return '#FFA500';
-    return '#9CA3AF';
-  };
-
-  const getCharacterCountText = () => {
-    if (characterCount >= CHARACTER_LIMIT_DANGER) {
-      return `${characterCount}/${maxLength} - Limit yaklaşıyor!`;
-    }
-    if (characterCount >= CHARACTER_LIMIT_WARNING) {
-      return `${characterCount}/${maxLength}`;
-    }
-    return `${characterCount}/${maxLength}`;
-  };
 
   const shouldShowSendButton = !isStreaming && (inputText.trim() || hasSelectedFiles);
 
@@ -603,9 +572,7 @@ const InputComponent: React.FC<InputComponentProps> = ({
                         />
                       ))}
                     </View>
-                  ) : (
-                    <Text style={styles.dictatingText}>🎤 Dinleniyor...</Text>
-                  )}
+                  ) : null}
                 </View>
               </Animated.View>
             ) : (
@@ -687,33 +654,6 @@ const InputComponent: React.FC<InputComponentProps> = ({
 
       </Animated.View>
 
-      {/* Character Count Indicator */}
-      {showCharacterCount && (
-        <View style={styles.characterCountContainer}>
-          <Text style={[
-            styles.characterCountText,
-            { color: getCharacterCountColor() }
-          ]}>
-            {getCharacterCountText()}
-          </Text>
-          {isScrollable && (
-            <Text style={styles.scrollHintText}>
-              📜 Kaydırarak devam edin
-            </Text>
-          )}
-          <Text style={styles.enterHintText}>
-            ⏎ Enter ile gönder • Shift+Enter ile yeni satır
-          </Text>
-          {isScrollable && (
-            <Text style={styles.scrollTipText}>
-              💡 Uzun metinlerde otomatik kaydırma aktif
-            </Text>
-          )}
-        </View>
-      )}
-
-      
-
 
       {/* Microphone/Send Button */}
       {/* Öncelik sırası: 1. Dikte aktifse dikte butonu, 2. AI cevap yazıyorsa AI durdurma butonu, 3. Mesaj gönderilebilir durumda gönder butonu, 4. Değilse dikte başlatma butonu */}
@@ -772,6 +712,10 @@ const InputComponent: React.FC<InputComponentProps> = ({
               width="24"
               height="24"
             />
+            {/* Dev Mode: Gönderme butonuna beyaz nokta ekle */}
+            {__DEV__ && (
+              <View style={styles.devSendDot} />
+            )}
           </LinearGradient>
         </TouchableOpacity>
       ) : (
@@ -872,6 +816,18 @@ const styles = StyleSheet.create({
     borderRadius: isSmallScreen ? 38 : 42,
     justifyContent: 'center',
     alignItems: 'center',
+    position: 'relative',
+  },
+  devSendDot: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#7E7AE9',
   },
   cancelButton: {
     width: isSmallScreen ? 52 : 58,
@@ -999,12 +955,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
-  dictatingText: {
-    fontFamily: 'Poppins-Medium',
-    fontSize: 16,
-    color: '#7E7AE9',
-    textAlign: 'center',
-  },
+  
   // Inline Attachment Preview Styles
   attachmentPreviewInline: {
     flexDirection: 'row',
@@ -1428,42 +1379,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 12,
     opacity: 0.6,
-  },
-  
-  // Character Count Styles
-  characterCountContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    marginTop: 4,
-  },
-  characterCountText: {
-    fontSize: getResponsiveFontSize(12),
-    fontFamily: 'Poppins-Medium',
-    opacity: 0.8,
-  },
-  scrollHintText: {
-    fontSize: getResponsiveFontSize(11),
-    fontFamily: 'Poppins-Regular',
-    color: '#7E7AE9',
-    opacity: 0.7,
-  },
-  enterHintText: {
-    fontSize: getResponsiveFontSize(10),
-    fontFamily: 'Poppins-Medium',
-    color: '#7E7AE9',
-    opacity: 0.6,
-    marginTop: 2,
-  },
-  scrollTipText: {
-    fontSize: getResponsiveFontSize(9),
-    fontFamily: 'Poppins-Regular',
-    color: '#7E7AE9',
-    opacity: 0.5,
-    marginTop: 1,
-    fontStyle: 'italic',
   },
 });
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   ScrollView,
   Image,
   ActivityIndicator,
+  Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFonts } from 'expo-font';
@@ -75,11 +76,48 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, onChatPress, onHe
   const [profileData, setProfileData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const backendApiService = BackendApiService.getInstance();
+  const shimmerAnim = useRef(new Animated.Value(0)).current;
+  const contentOpacity = useRef(new Animated.Value(0)).current;
   
   let [fontsLoaded] = useFonts({
     'Poppins-Regular': require('@assets/fonts/Poppins-Regular .ttf'),
     'Poppins-Medium': require('@assets/fonts/Poppins-Medium.ttf'),
   });
+
+  // Shimmer animasyonu - daha smooth
+  useEffect(() => {
+    if (isLoading) {
+      shimmerAnim.setValue(0);
+      contentOpacity.setValue(0);
+      const shimmerAnimation = Animated.loop(
+        Animated.sequence([
+          Animated.timing(shimmerAnim, {
+            toValue: 1,
+            duration: 1500,
+            useNativeDriver: true,
+          }),
+          Animated.timing(shimmerAnim, {
+            toValue: 0,
+            duration: 1500,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      shimmerAnimation.start();
+      return () => {
+        shimmerAnimation.stop();
+        shimmerAnim.setValue(0);
+      };
+    } else {
+      // Loading bittiğinde animasyonu durdur ve içeriği fade-in yap
+      shimmerAnim.setValue(0);
+      Animated.timing(contentOpacity, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [isLoading, shimmerAnim, contentOpacity]);
 
   // Backend'den profil bilgilerini çek
   useEffect(() => {
@@ -155,12 +193,165 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, onChatPress, onHe
 
         <ScrollView style={styles.profileContent}>
           {isLoading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#7E7AE9" />
-              <Text allowFontScaling={false} style={styles.loadingText}>Profil bilgileri yükleniyor...</Text>
-            </View>
+            <Animated.View 
+              style={[
+                styles.skeletonContainer,
+                {
+                  opacity: shimmerAnim.interpolate({
+                    inputRange: [0, 0.5, 1],
+                    outputRange: [1, 1, 1],
+                  }),
+                },
+              ]}
+            >
+              {/* Profile Info Skeleton */}
+              <View style={styles.skeletonProfileInfoSection}>
+                <View style={[styles.skeletonProfileImage, styles.skeletonShimmer]}>
+                  <Animated.View
+                    style={[
+                      styles.skeletonShimmerOverlay,
+                      {
+                        opacity: shimmerAnim.interpolate({
+                          inputRange: [0, 0.5, 1],
+                          outputRange: [0.1, 0.3, 0.1],
+                        }),
+                      },
+                    ]}
+                  />
+                </View>
+                <View style={[styles.skeletonName, styles.skeletonShimmer]}>
+                  <Animated.View
+                    style={[
+                      styles.skeletonShimmerOverlay,
+                      {
+                        opacity: shimmerAnim.interpolate({
+                          inputRange: [0, 0.5, 1],
+                          outputRange: [0.1, 0.3, 0.1],
+                        }),
+                      },
+                    ]}
+                  />
+                </View>
+                <View style={[styles.skeletonEmail, styles.skeletonShimmer]}>
+                  <Animated.View
+                    style={[
+                      styles.skeletonShimmerOverlay,
+                      {
+                        opacity: shimmerAnim.interpolate({
+                          inputRange: [0, 0.5, 1],
+                          outputRange: [0.1, 0.3, 0.1],
+                        }),
+                      },
+                    ]}
+                  />
+                </View>
+              </View>
+
+              {/* Details Card Skeleton */}
+              <View style={styles.skeletonDetailsCard}>
+                {[1, 2, 3, 4].map((index) => (
+                  <View key={index} style={styles.skeletonDetailRow}>
+                    <View style={[styles.skeletonIcon, styles.skeletonShimmer]}>
+                      <Animated.View
+                        style={[
+                          styles.skeletonShimmerOverlay,
+                          {
+                            opacity: shimmerAnim.interpolate({
+                              inputRange: [0, 0.5, 1],
+                              outputRange: [0.2, 0.6, 0.2],
+                            }),
+                          },
+                        ]}
+                      />
+                    </View>
+                    <View style={styles.skeletonDetailTextContainer}>
+                      <View style={[styles.skeletonLabel, styles.skeletonShimmer]}>
+                        <Animated.View
+                          style={[
+                            styles.skeletonShimmerOverlay,
+                            {
+                              opacity: shimmerAnim.interpolate({
+                                inputRange: [0, 0.5, 1],
+                                outputRange: [0.2, 0.6, 0.2],
+                              }),
+                            },
+                          ]}
+                        />
+                      </View>
+                      <View style={[styles.skeletonValue, styles.skeletonShimmer]}>
+                        <Animated.View
+                          style={[
+                            styles.skeletonShimmerOverlay,
+                            {
+                              opacity: shimmerAnim.interpolate({
+                                inputRange: [0, 0.5, 1],
+                                outputRange: [0.2, 0.6, 0.2],
+                              }),
+                            },
+                          ]}
+                        />
+                      </View>
+                    </View>
+                  </View>
+                ))}
+              </View>
+
+              {/* Actions Card Skeleton */}
+              <View style={styles.skeletonActionsCard}>
+                {[1, 2].map((index) => (
+                  <View key={index} style={styles.skeletonActionRow}>
+                    <View style={[styles.skeletonActionIcon, styles.skeletonShimmer]}>
+                      <Animated.View
+                        style={[
+                          styles.skeletonShimmerOverlay,
+                          {
+                            opacity: shimmerAnim.interpolate({
+                              inputRange: [0, 0.5, 1],
+                              outputRange: [0.2, 0.6, 0.2],
+                            }),
+                          },
+                        ]}
+                      />
+                    </View>
+                    <View style={[styles.skeletonActionText, styles.skeletonShimmer]}>
+                      <Animated.View
+                        style={[
+                          styles.skeletonShimmerOverlay,
+                          {
+                            opacity: shimmerAnim.interpolate({
+                              inputRange: [0, 0.5, 1],
+                              outputRange: [0.2, 0.6, 0.2],
+                            }),
+                          },
+                        ]}
+                      />
+                    </View>
+                    <View style={[styles.skeletonChevron, styles.skeletonShimmer]}>
+                      <Animated.View
+                        style={[
+                          styles.skeletonShimmerOverlay,
+                          {
+                            opacity: shimmerAnim.interpolate({
+                              inputRange: [0, 0.5, 1],
+                              outputRange: [0.2, 0.6, 0.2],
+                            }),
+                          },
+                        ]}
+                      />
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </Animated.View>
           ) : (
-            <>
+            <Animated.View
+              style={[
+                styles.contentContainer,
+                {
+                  opacity: contentOpacity,
+                },
+              ]}
+            >
               {/* Profile Info Section */}
               <View style={styles.profileInfoSection}>
             <View style={styles.profileImageContainer}>
@@ -252,7 +443,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, onChatPress, onHe
                 üzerinden otomatik olarak entegre edilir.
                 </Text>
               </View>
-            </>
+            </Animated.View>
           )}
         </ScrollView>
       </LinearGradient>
@@ -384,18 +575,129 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 18,
   },
-  loadingContainer: {
+  skeletonContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 100,
+    paddingTop: 20,
   },
-  loadingText: {
-    fontFamily: 'Poppins-Regular',
-    fontSize: 16,
-    fontWeight: '400',
-    color: '#9CA3AF',
-    marginTop: 16,
+  contentContainer: {
+    flex: 1,
+  },
+  skeletonProfileInfoSection: {
+    alignItems: 'center',
+    paddingVertical: 10,
+    marginBottom: 20,
+  },
+  skeletonProfileImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#FFFFFF08',
+    marginBottom: 16,
+    overflow: 'hidden',
+  },
+  skeletonName: {
+    width: 180,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF08',
+    marginBottom: 8,
+    overflow: 'hidden',
+  },
+  skeletonEmail: {
+    width: 220,
+    height: 20,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF08',
+    overflow: 'hidden',
+  },
+  skeletonDetailsCard: {
+    backgroundColor: '#FFFFFF05',
+    borderRadius: 24,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#FFFFFF05',
+  },
+  skeletonDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+    gap: 12,
+  },
+  skeletonIcon: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    backgroundColor: '#FFFFFF08',
+    overflow: 'hidden',
+  },
+  skeletonDetailTextContainer: {
+    flex: 1,
+  },
+  skeletonLabel: {
+    width: '60%',
+    height: 18,
+    borderRadius: 6,
+    backgroundColor: '#FFFFFF08',
+    marginBottom: 8,
+    overflow: 'hidden',
+  },
+  skeletonValue: {
+    width: '80%',
+    height: 16,
+    borderRadius: 6,
+    backgroundColor: '#FFFFFF08',
+    overflow: 'hidden',
+  },
+  skeletonActionsCard: {
+    backgroundColor: '#FFFFFF05',
+    borderRadius: 24,
+    padding: 12,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#FFFFFF05',
+  },
+  skeletonActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+    marginBottom: 8,
+  },
+  skeletonActionIcon: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    backgroundColor: '#FFFFFF08',
+    marginRight: 12,
+    overflow: 'hidden',
+  },
+  skeletonActionText: {
+    flex: 1,
+    height: 20,
+    borderRadius: 6,
+    backgroundColor: '#FFFFFF08',
+    overflow: 'hidden',
+  },
+  skeletonChevron: {
+    width: 16,
+    height: 16,
+    borderRadius: 4,
+    backgroundColor: '#FFFFFF08',
+    marginLeft: 12,
+    overflow: 'hidden',
+  },
+  skeletonShimmer: {
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  skeletonShimmerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#FFFFFF15',
   },
 });
 

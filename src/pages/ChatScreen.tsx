@@ -18,8 +18,7 @@ import { ChatMessage } from '@/src/lib/mock/types';
 import Header from '@/src/components/Header';
 import UploadModal from '@/src/components/UploadModal';
 import MessageList from '@/src/components/chat/MessageList';
-import ActionButtons from '@/src/components/chat/ActionButtons';
-import InputComponent from '@/src/components/common/InputComponent';
+import ChatInputSection from '@/src/components/chat/ChatInputSection';
 import QuickSuggestionsModal from '@/src/components/chat/QuickSuggestionsModal';
 import ErrorBoundary from '@/src/components/ErrorBoundary';
 import { useChatMessages } from '@/src/hooks/useChatMessages';
@@ -575,6 +574,14 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
           start={{ x: 0, y: 0 }}
           end={{ x: 0, y: 1 }}
         >
+        {/* Dev Mode Debug Indicator - Sadece development modunda görünür */}
+        {__DEV__ && (
+          <View style={styles.devIndicator}>
+            <View style={styles.devIndicatorDot} />
+            <Text style={styles.devIndicatorText}>DEV</Text>
+          </View>
+        )}
+
         {/* Header */}
         <Header 
           onBackPress={() => {
@@ -592,6 +599,10 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
         {/* Messages List */}
         <View style={styles.messagesListContainer}>
+          {/* Dev Mode: Mesajlaşma alanının sınırını pembe çerçeve ile belirle */}
+          {__DEV__ && (
+            <View style={[styles.devMessagesAreaBorder, { bottom: 180 }]} />
+          )}
           <MessageList
             messages={messagesArray}
             isLoading={isLoading}
@@ -607,71 +618,53 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         </View>
 
         {/* Bottom Section Container */}
-        <TouchableWithoutFeedback onPress={handleInputAreaPress}>
-          <View style={[
-            styles.bottomSectionContainer,
-            { paddingBottom: getKeyboardAwarePaddingBottom() }
-          ]}>
-          <ActionButtons
-            onSuggestions={handleOnerilerPress}
-            onResearch={handleResearch}
-            isLoading={isLoading}
-            isResearchMode={arastirmaModu}
-          />
-
-          <InputComponent
-            inputText={inputText}
-            setInputText={(text) => {
-              // Kullanıcı yazmaya başladığında flag'i reset et
-              if (text.length > 0) {
-                inputClearedRef.current = false;
-              }
-              setInputText(text);
-            }}
-            onSendMessage={handleSendMessage}
-            onDictate={toggleDictation}
-            onOpenUploadModal={openUploadModal}
-            isDictating={dictationState.isDictating}
-            isProcessing={dictationState.isProcessing}
-            isLoading={isLoading}
-            isStreaming={isStreaming}
-            onCancelStreaming={cancelStreamingResponse}
-            isInputFocused={isInputFocused}
-            setIsInputFocused={setIsInputFocused}
-            textInputRef={textInputRef}
-            hasSelectedFiles={selectedImages.length > 0 || selectedFiles.length > 0}
-            selectedFilesCount={selectedFiles.length}
-            selectedImagesCount={selectedImages.length}
-            showSelectedFilesIndicator={true}
-            selectedImages={selectedImages}
-            selectedFiles={selectedFiles}
-            onRemoveImage={removeImage}
-            onRemoveFile={removeFile}
-            onKeyPress={handleEnhancedKeyPress}
-            onFocus={handleInputFocus}
-            onBlur={handleInputBlur}
-            placeholder="İstediğinizi sorun"
-            multiline={false}
-            maxLength={1000}
-            autoCorrect={true}
-            autoCapitalize="sentences"
-            returnKeyType="send"
-            keyboardType="default"
-            secureTextEntry={false}
-            editable={true}
-            selectTextOnFocus={false}
-            clearButtonMode="while-editing"
-            autoFocus={false}
-            blurOnSubmit={true}
-            onSubmitEditing={handleSendMessage}
-            testID="chat-input"
-            accessibilityLabel="Soru girişi"
-            accessibilityHint="AI asistanınıza soru yazın veya sesli yazma kullanın"
-            accessibilityRole="textbox"
-            waveAnimations={waveAnimations}
-          />
-        </View>
-        </TouchableWithoutFeedback>
+        <ChatInputSection
+          inputText={inputText}
+          setInputText={setInputText}
+          isInputFocused={isInputFocused}
+          setIsInputFocused={setIsInputFocused}
+          onSendMessage={handleSendMessage}
+          onDictate={toggleDictation}
+          onOpenUploadModal={openUploadModal}
+          onInputAreaPress={handleInputAreaPress}
+          onSuggestions={handleOnerilerPress}
+          onResearch={handleResearch}
+          isLoading={isLoading}
+          isResearchMode={arastirmaModu}
+          isDictating={dictationState.isDictating}
+          isProcessing={dictationState.isProcessing}
+          isStreaming={isStreaming}
+          onCancelStreaming={cancelStreamingResponse}
+          selectedImages={selectedImages}
+          selectedFiles={selectedFiles}
+          onRemoveImage={removeImage}
+          onRemoveFile={removeFile}
+          textInputRef={textInputRef}
+          getKeyboardAwarePaddingBottom={getKeyboardAwarePaddingBottom}
+          onKeyPress={handleEnhancedKeyPress}
+          onFocus={handleInputFocus}
+          onBlur={handleInputBlur}
+          placeholder="İstediğinizi sorun"
+          multiline={false}
+          maxLength={1000}
+          autoCorrect={true}
+          autoCapitalize="sentences"
+          returnKeyType="send"
+          keyboardType="default"
+          secureTextEntry={false}
+          editable={true}
+          selectTextOnFocus={false}
+          clearButtonMode="while-editing"
+          autoFocus={false}
+          blurOnSubmit={true}
+          onSubmitEditing={handleSendMessage}
+          testID="chat-input"
+          accessibilityLabel="Soru girişi"
+          accessibilityHint="AI asistanınıza soru yazın veya sesli yazma kullanın"
+          accessibilityRole="textbox"
+          waveAnimations={waveAnimations}
+          inputClearedRef={inputClearedRef}
+        />
 
         </LinearGradient>
 
@@ -735,14 +728,47 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0, // Important for ScrollView to work properly
     backgroundColor: 'transparent',
+    position: 'relative',
+    paddingBottom: 180, // Input section yüksekliği kadar padding (ActionButtons + InputComponent + padding'ler)
   },
-  bottomSectionContainer: {
-    flexDirection: 'column',
-    justifyContent: 'flex-end',
-    alignItems: 'flex-start',
-    paddingHorizontal: 17,
-    paddingBottom: 20,
-    gap: 8,
+  devMessagesAreaBorder: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    // bottom değeri dinamik olarak ayarlanacak (input section yüksekliği kadar)
+    borderWidth: 3,
+    borderColor: '#FF69B4', // Pembe border
+    borderStyle: 'solid',
+    borderRadius: 8,
+    zIndex: 10000,
+    pointerEvents: 'none',
+  },
+  devIndicator: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    zIndex: 9999,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 0, 0, 0.8)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
+  devIndicatorDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FFFFFF',
+    marginRight: 6,
+  },
+  devIndicatorText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: 'bold',
   },
 });
 

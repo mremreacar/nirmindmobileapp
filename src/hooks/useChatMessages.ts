@@ -599,10 +599,6 @@ export const useChatMessages = () => {
             // AI cevabı tamamlandı - backend'den gelen gerçek mesajı kullan
             // Streaming mesajını kaldır ve gerçek mesajı ekle/güncelle
             if (!streamState.cancelledByUser) {
-              if (streamingAIMessageId) {
-                removeMessage(conversationId, streamingAIMessageId);
-              }
-              
               // Timestamp validation
               let timestamp: Date;
               try {
@@ -628,7 +624,22 @@ export const useChatMessages = () => {
                 timestamp,
                 isStreaming: false // Streaming tamamlandı
               };
-              updateMessage(conversationId, aiChatMessage);
+              
+              // Eğer streaming mesaj ID'si ile backend mesaj ID'si farklıysa, streaming mesajını kaldır
+              // Aynıysa sadece güncelle (streaming mesajı zaten doğru ID'ye sahip)
+              if (streamingAIMessageId && streamingAIMessageId !== aiMessage.id) {
+                // Farklı ID'ler - önce eski streaming mesajını kaldır, sonra yeni mesajı ekle
+                removeMessage(conversationId, streamingAIMessageId);
+                // Kısa bir delay ile yeni mesajı ekle (state güncellemesi için)
+                setTimeout(() => {
+                  updateMessage(conversationId, aiChatMessage);
+                }, 0);
+              } else {
+                // Aynı ID - sadece güncelle (streaming mesajı zaten doğru ID'ye sahip)
+                // updateMessage kullan - mesaj varsa günceller, yoksa ekler
+                // Duplicate kontrolü updateMessage içinde yapılıyor
+                updateMessage(conversationId, aiChatMessage);
+              }
             }
             streamingAIMessageId = null;
             

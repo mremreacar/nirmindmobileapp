@@ -216,7 +216,10 @@ export const useChatAttachments = ({
       });
 
       if (!result.canceled && result.assets?.length) {
-        const supportedFiles = result.assets.filter((asset) => {
+        // expo-document-picker'dan gelen asset tipi
+        type DocumentAsset = { name?: string; uri: string; size?: number; mimeType?: string | null };
+        
+        const supportedFiles = result.assets.filter((asset: DocumentAsset) => {
           const extension = asset.name?.split('.').pop()?.toLowerCase();
           if (!extension) {
             return false;
@@ -236,7 +239,7 @@ export const useChatAttachments = ({
 
         if (supportedFiles.length > 0) {
           const maxSizeBytes = MAX_FILE_SIZE_MB * 1024 * 1024;
-          const validFiles = supportedFiles.filter(asset => {
+          const validFiles = supportedFiles.filter((asset: DocumentAsset) => {
             if (asset.size && asset.size > maxSizeBytes) {
               console.log(`⚠️ Dosya çok büyük: ${asset.name} (${createFileSizeMessage(asset.size)})`);
               return false;
@@ -245,7 +248,7 @@ export const useChatAttachments = ({
           });
 
           if (validFiles.length > 0) {
-            const newFiles = validFiles.map<ChatSelectedFile>((asset) => {
+            const newFiles: ChatSelectedFile[] = validFiles.map((asset: DocumentAsset) => {
               let safeUri = asset.uri;
               try {
                 safeUri = decodeURIComponent(asset.uri).replace(/[^\w\s\-\.\/:]/g, '');
@@ -421,7 +424,8 @@ export const useChatAttachments = ({
       });
 
       if (!result.canceled && result.assets?.length) {
-        const newFiles = result.assets.map<ChatSelectedFile>((asset) => ({
+        type DocumentAsset = { name?: string; uri: string; size?: number; mimeType?: string | null };
+        const newFiles: ChatSelectedFile[] = result.assets.map((asset: DocumentAsset) => ({
           name: asset.name || 'Bilinmeyen Dosya',
           uri: asset.uri,
           size: asset.size,
