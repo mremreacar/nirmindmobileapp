@@ -46,73 +46,82 @@ export const useKeyboardHandling = () => {
   }, []);
 
   useEffect(() => {
-    const keyboardWillShowListener = Keyboard.addListener(
+    // iOS için keyboardWillShow - klavye açılmadan önce tetiklenir, daha iyi senkronizasyon
+    const keyboardWillShowListener = isIOS ? Keyboard.addListener(
       'keyboardWillShow',
       (e) => {
+        // Timeout yok - anında güncelle
         setKeyboardAnimationDuration(e.duration || 250);
         setKeyboardAnimationEasing(e.easing || 'easeInEaseOut');
-        animateLayout(e.duration);
+        // LayoutAnimation'ı kaldırdık - HomeScreen kendi animasyonunu yönetiyor
+        setKeyboardHeight(e.endCoordinates.height);
+        setIsKeyboardVisible(true);
       }
-    );
+    ) : null;
 
+    // Android için keyboardDidShow - iOS'ta da fallback olarak kullanılabilir
     const keyboardDidShowListener = Keyboard.addListener(
       'keyboardDidShow',
       (e) => {
+        // iOS'ta keyboardWillShow zaten tetiklendi, sadece Android için
+        if (isIOS && keyboardWillShowListener) {
+          return;
+        }
+        
         // Clear any pending hide timeout
         if (keyboardHideTimeoutRef.current) {
           clearTimeout(keyboardHideTimeoutRef.current);
           keyboardHideTimeoutRef.current = null;
         }
 
-        // Debounce keyboard show
-        if (keyboardShowTimeoutRef.current) {
-          clearTimeout(keyboardShowTimeoutRef.current);
-        }
-        
-        keyboardShowTimeoutRef.current = setTimeout(() => {
-          animateLayout(e.duration);
-          setKeyboardHeight(e.endCoordinates.height);
-          setIsKeyboardVisible(true);
-        }, 50);
+        // Timeout yok - anında güncelle
+        setKeyboardHeight(e.endCoordinates.height);
+        setIsKeyboardVisible(true);
       }
     );
 
-    const keyboardWillHideListener = Keyboard.addListener(
+    // iOS için keyboardWillHide - klavye kapanmadan önce tetiklenir
+    const keyboardWillHideListener = isIOS ? Keyboard.addListener(
       'keyboardWillHide',
       (e) => {
+        // Timeout yok - anında güncelle
         setKeyboardAnimationDuration(e.duration || 250);
         setKeyboardAnimationEasing(e.easing || 'easeInEaseOut');
-        animateLayout(e.duration);
+        // LayoutAnimation'ı kaldırdık
+        setKeyboardHeight(0);
+        setIsKeyboardVisible(false);
       }
-    );
+    ) : null;
 
+    // Android için keyboardDidHide - iOS'ta da fallback olarak kullanılabilir
     const keyboardDidHideListener = Keyboard.addListener(
       'keyboardDidHide',
       () => {
+        // iOS'ta keyboardWillHide zaten tetiklendi, sadece Android için
+        if (isIOS && keyboardWillHideListener) {
+          return;
+        }
+        
         // Clear any pending show timeout
         if (keyboardShowTimeoutRef.current) {
           clearTimeout(keyboardShowTimeoutRef.current);
           keyboardShowTimeoutRef.current = null;
         }
 
-        // Debounce keyboard hide
-        if (keyboardHideTimeoutRef.current) {
-          clearTimeout(keyboardHideTimeoutRef.current);
-        }
-        
-        keyboardHideTimeoutRef.current = setTimeout(() => {
-          animateLayout();
-          setKeyboardHeight(0);
-          setIsKeyboardVisible(false);
-          // Don't automatically set input focus to false - let user control it
-        }, 50);
+        // Timeout yok - anında güncelle
+        setKeyboardHeight(0);
+        setIsKeyboardVisible(false);
       }
     );
 
     return () => {
-      keyboardWillShowListener.remove();
+      if (keyboardWillShowListener) {
+        keyboardWillShowListener.remove();
+      }
       keyboardDidShowListener.remove();
-      keyboardWillHideListener.remove();
+      if (keyboardWillHideListener) {
+        keyboardWillHideListener.remove();
+      }
       keyboardDidHideListener.remove();
       
       if (keyboardShowTimeoutRef.current) {
@@ -122,7 +131,7 @@ export const useKeyboardHandling = () => {
         clearTimeout(keyboardHideTimeoutRef.current);
       }
     };
-  }, [animateLayout]);
+  }, [animateLayout, isIOS]);
 
   // Enhanced responsive padding calculations
   const getResponsivePaddingBottom = () => {

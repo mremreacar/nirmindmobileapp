@@ -27,10 +27,6 @@ const searchIcon = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" 
 <path d="M14 14L11.1 11.1" stroke="#9CA3AF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>`;
 
-const leftArrowIcon = `<svg width="19" height="13" viewBox="0 0 19 13" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M4.42502 7.65683L7.75003 10.9818C7.98336 11.2152 8.09516 11.4874 8.08544 11.7985C8.07572 12.1096 7.96391 12.3818 7.75003 12.6152C7.51669 12.8485 7.23961 12.97 6.91878 12.9797C6.59794 12.9895 6.32086 12.8777 6.08752 12.6443L0.750024 7.30683C0.516691 7.0735 0.400024 6.80128 0.400024 6.49017C0.400024 6.17906 0.516691 5.90683 0.750024 5.6735L6.08752 0.336C6.32086 0.102667 6.59794 -0.00913889 6.91878 0.000583333C7.23961 0.0103056 7.51669 0.131833 7.75003 0.365167C7.96391 0.5985 8.07572 0.870722 8.08544 1.18183C8.09516 1.49294 7.98336 1.76517 7.75003 1.9985L4.42502 5.3235L17.4334 5.3235C17.7639 5.3235 18.041 5.43531 18.2646 5.65892C18.4882 5.88253 18.6 6.15961 18.6 6.49017C18.6 6.82072 18.4882 7.09781 18.2646 7.32142C18.041 7.54503 17.7639 7.65683 17.4334 7.65683L4.42502 7.65683Z" fill="white"/>
-</svg>`;
-
 const headphoneIcon = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
 <path d="M3 14V11C3 7.13401 6.13401 4 10 4C13.866 4 17 7.13401 17 11V14" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
 <path d="M17 14C18.1046 14 19 14.8954 19 16V17C19 18.1046 18.1046 19 17 19H16C15.4477 19 15 18.5523 15 18V15C15 14.4477 15.4477 14 16 14H17Z" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -291,12 +287,6 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
     }
   };
 
-  const handleBackPress = () => {
-    // Klavyeyi kapat
-    Keyboard.dismiss();
-    // Sonra geri git
-    onBack();
-  };
 
   const handleDeleteConversation = (conversationId: string, conversationTitle: string) => {
     Alert.alert(
@@ -362,34 +352,30 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
         start={{ x: 0, y: 0 }}
         end={{ x: 0, y: 1 }}
       >
-        {/* Chat History Header */}
-        <View style={styles.chatHistoryHeader}>
-          <View style={styles.searchSection}>
-            <View style={styles.searchBar}>
-              <SvgXml 
-                xml={searchIcon}
-                width="16"
-                height="16"
-              />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Ara"
-                placeholderTextColor="#9CA3AF"
-                value={searchText}
-                onChangeText={setSearchText}
-              />
-            </View>
-            <TouchableOpacity 
-              style={styles.backButton}
-              activeOpacity={1}
-              onPress={handleBackPress}
-            >
-              <SvgXml 
-                xml={leftArrowIcon}
-                width="20"
-                height="20"
-              />
-            </TouchableOpacity>
+        {/* Header */}
+        <Header
+          onBackPress={onBack}
+          onChatPress={onBack}
+          onLogoPress={onBack}
+          showBackButton={true}
+          showChatButton={true}
+        />
+
+        {/* Search Bar */}
+        <View style={styles.searchSection}>
+          <View style={styles.searchBar}>
+            <SvgXml 
+              xml={searchIcon}
+              width="16"
+              height="16"
+            />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Ara"
+              placeholderTextColor="#9CA3AF"
+              value={searchText}
+              onChangeText={setSearchText}
+            />
           </View>
         </View>
 
@@ -542,15 +528,13 @@ const styles = StyleSheet.create({
     flex: 1,
     position: 'relative',
   },
-  chatHistoryHeader: {
-    paddingTop: 70,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-  },
   searchSection: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 10,
   },
   searchBar: {
     flex: 1,
@@ -567,14 +551,6 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins-Regular',
     fontSize: 16,
     color: '#FFFFFF',
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   chatHistoryContent: {
     flex: 1,

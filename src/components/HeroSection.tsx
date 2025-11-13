@@ -66,10 +66,13 @@ const getResponsiveAssistantFontSize = () => {
 
 interface HeroSectionProps {
   animationProgress?: Animated.Value;
+  isKeyboardVisible?: boolean;
 }
 
-const HeroSection: React.FC<HeroSectionProps> = ({ animationProgress }) => {
+const HeroSection: React.FC<HeroSectionProps> = ({ animationProgress, isKeyboardVisible = false }) => {
   const { user } = useAuth();
+  // imageLoaded state'ini useRef ile koru - klavye açıldığında resetlenmesin
+  const imageLoadedRef = useRef(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [shouldLoadImage, setShouldLoadImage] = useState(false);
@@ -97,6 +100,11 @@ const HeroSection: React.FC<HeroSectionProps> = ({ animationProgress }) => {
   });
 
   const heroAnimatedStyle = useMemo(() => {
+    // Klavye açıksa animasyon yok, direkt gizle
+    if (isKeyboardVisible) {
+      return { opacity: 0 };
+    }
+    
     if (!animationProgress) {
       return null;
     }
@@ -116,15 +124,21 @@ const HeroSection: React.FC<HeroSectionProps> = ({ animationProgress }) => {
         },
       ],
     };
-  }, [animationProgress]);
+  }, [animationProgress, isKeyboardVisible]);
 
-  // Lazy load image after component mounts
+  // İlk mount'ta görseli yükle
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setShouldLoadImage(true);
-    }, 50); // Reduced delay for faster loading
+    setShouldLoadImage(true);
+  }, []);
 
-    // Fallback timeout - if image doesn't load in 10 seconds, try fallback
+  // Klavye kapandığında görseli anında göster (zaten yüklüyse)
+  // Görsel zaten yüklüyse (`imageLoaded` true), klavye kapandığında anında görünür
+  // Çünkü `shouldLoadImage` zaten true ve `imageLoaded` true ise opacity 1 olacak
+
+  // Fallback timeout - if image doesn't load in 10 seconds, try fallback
+  useEffect(() => {
+    if (!shouldLoadImage) return;
+    
     const fallbackTimer = setTimeout(() => {
       if (!imageLoaded && !imageError) {
         console.log('Image loading timeout, trying fallback');
@@ -133,12 +147,12 @@ const HeroSection: React.FC<HeroSectionProps> = ({ animationProgress }) => {
     }, 10000);
 
     return () => {
-      clearTimeout(timer);
       clearTimeout(fallbackTimer);
     };
-  }, [imageLoaded, imageError]);
+  }, [shouldLoadImage, imageLoaded, imageError]);
 
   const handleImageLoad = useCallback(() => {
+    imageLoadedRef.current = true;
     setImageLoaded(true);
     console.log('PNG image loaded successfully');
   }, []);
@@ -159,10 +173,16 @@ const HeroSection: React.FC<HeroSectionProps> = ({ animationProgress }) => {
     return null;
   }
 
+  // Klavye açıksa HeroSection'ı tamamen gizle (animasyon yok, anında)
+  if (isKeyboardVisible) {
+    return null;
+  }
+
   return (
     <Animated.View style={[styles.heroSection, heroAnimatedStyle || undefined]}>
       <View style={styles.gifContainer}>
-        {!imageLoaded && !imageError && shouldLoadImage && (
+        {/* Loading indicator sadece görsel hiç yüklenmemişse göster */}
+        {!imageLoadedRef.current && !imageLoaded && !imageError && shouldLoadImage && (
           <ActivityIndicator 
             size="large" 
             color="#7E7AE9" 
@@ -174,12 +194,13 @@ const HeroSection: React.FC<HeroSectionProps> = ({ animationProgress }) => {
             source={require('@assets/videos/gif.png')}
             style={[
               styles.heroGif,
-              { opacity: imageLoaded ? 1 : 0 }
+              // Görsel zaten yüklüyse (ref'te veya state'te) anında göster
+              { opacity: (imageLoadedRef.current || imageLoaded) ? 1 : 0 }
             ]}
             resizeMode="contain"
             onLoad={handleImageLoad}
             onError={handleImageError}
-            fadeDuration={200}
+            fadeDuration={0}
           />
         )}
         {useFallback && (

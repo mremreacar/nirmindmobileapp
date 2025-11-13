@@ -100,46 +100,8 @@ const MessageList: React.FC<MessageListProps> = ({
   const { deleteMessage } = useChat();
   const [previewFile, setPreviewFile] = useState<{ uri: string; name: string; mimeType?: string } | null>(null);
 
-  // Skeleton sadece mesajlar yüklenirken gösterilmeli
-  // Eğer mesaj yoksa ve yükleme tamamlandıysa skeleton gösterilmemeli
-  const shouldShowSkeleton = isDataLoading && messages.length === 0;
-  
   // Eğer mesaj yoksa ve yükleme tamamlandıysa hiçbir şey gösterme
   const shouldShowEmpty = !isDataLoading && messages.length === 0;
-
-  const renderSkeletonMessages = () => {
-    return Array.from({ length: 4 }).map((_, index) => {
-      const isUserSkeleton = index % 2 === 0;
-      return (
-        <View
-          key={`skeleton-${index}`}
-          style={[
-            styles.skeletonMessageContainer,
-            isUserSkeleton ? styles.userMessage : styles.aiMessage,
-          ]}
-        >
-          <View
-            style={[
-              styles.messageWrapper,
-              isUserSkeleton ? styles.userMessageWrapper : styles.aiMessageWrapper,
-            ]}
-          >
-            <View
-              style={[
-                styles.messageBubble,
-                isUserSkeleton ? styles.userBubble : styles.aiBubble,
-                styles.skeletonBubble,
-                isUserSkeleton ? styles.skeletonUserBubble : styles.skeletonAiBubble,
-              ]}
-            >
-              <View style={styles.skeletonLinePrimary} />
-              <View style={styles.skeletonLineSecondary} />
-            </View>
-          </View>
-        </View>
-      );
-    });
-  };
 
   const handleDeleteMessage = (message: ChatMessage) => {
     if (!conversationId) {
@@ -262,7 +224,7 @@ const MessageList: React.FC<MessageListProps> = ({
       removeClippedSubviews={false}
       directionalLockEnabled={false}
       canCancelContentTouches={true}
-      keyboardDismissMode="on-drag"
+      keyboardDismissMode="interactive"
       maintainVisibleContentPosition={{
         minIndexForVisible: 0,
         autoscrollToTopThreshold: 10,
@@ -285,9 +247,7 @@ const MessageList: React.FC<MessageListProps> = ({
         }, 100);
       }}
     >
-      {shouldShowSkeleton ? (
-        renderSkeletonMessages()
-      ) : shouldShowEmpty ? (
+      {shouldShowEmpty ? (
         // Mesaj yoksa ve yükleme tamamlandıysa hiçbir şey gösterme
         null
       ) : (
@@ -526,11 +486,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     width: '100%',
   },
-  skeletonMessageContainer: {
-    marginVertical: 6,
-    flexDirection: 'row',
-    width: '100%',
-  },
   userMessage: {
     justifyContent: 'flex-end',
   },
@@ -566,28 +521,6 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     borderBottomRightRadius: 20,
-  },
-  skeletonBubble: {
-    borderWidth: 0,
-  },
-  skeletonUserBubble: {
-    backgroundColor: 'rgba(126, 122, 233, 0.22)',
-  },
-  skeletonAiBubble: {
-    backgroundColor: 'rgba(255, 255, 255, 0.10)',
-  },
-  skeletonLinePrimary: {
-    height: 14,
-    width: '65%',
-    backgroundColor: 'rgba(255, 255, 255, 0.26)',
-    borderRadius: 8,
-    marginBottom: 8,
-  },
-  skeletonLineSecondary: {
-    height: 12,
-    width: '45%',
-    backgroundColor: 'rgba(255, 255, 255, 0.16)',
-    borderRadius: 8,
   },
   messageText: {
     fontFamily: 'Poppins-Regular',

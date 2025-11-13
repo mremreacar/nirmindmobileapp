@@ -3,28 +3,43 @@ import {
   View,
   StyleSheet,
   Dimensions,
-  TextInput,
   Animated,
   Easing,
   Alert,
   Platform,
-  TouchableWithoutFeedback,
   KeyboardAvoidingView,
-  Keyboard,
   PanResponder,
+  TouchableWithoutFeedback,
+  Modal,
+  ScrollView,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFonts } from "expo-font";
 import HeroSection from "../components/HeroSection";
 import Header from "../components/Header";
+import InputComponent from "../components/common/InputComponent";
+import MessageList from "../components/chat/MessageList";
+import ActionButtons from "../components/chat/ActionButtons";
+import UploadModal from "../components/UploadModal";
 import { useChat } from "../lib/context/ChatContext";
 import { useQuickSuggestions } from "../hooks/useQuickSuggestions";
 import { useDictation, useWaveAnimation } from "../features/dictation";
 import { useFilePermissions, usePermissionDialogs } from "../lib/permissions";
+import { useKeyboardHandling } from "../hooks/useKeyboardHandling";
+import { useChatUploadModal } from "../hooks/useChatUploadModal";
+import { useChatAttachments } from "../hooks/useChatAttachments";
+import { useChatMessaging } from "../hooks/useChatMessaging";
+import { useChatMessages } from "../hooks/useChatMessages";
 import { HomeScreenProps, QuickSuggestion } from "../types/homeScreen";
-import HomeBottomSection from "../components/home/HomeBottomSection";
 import HomeChatModal from "../components/home/HomeChatModal";
 import HomeQuickSuggestionsModal from "../components/home/HomeQuickSuggestionsModal";
+import {
+  getKeyboardAwarePaddingBottom,
+  getResponsiveGap,
+  getResponsivePadding,
+  getResponsiveWidth,
+  getResponsivePaddingBottom,
+} from "../constants";
 
 const { width, height } = Dimensions.get("window");
 
@@ -35,30 +50,129 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   selectedConversationId,
   onConversationSelected,
 }) => {
-  const { createNewConversation, selectConversation, updateResearchMode } = useChat();
+  const { createNewConversation, selectConversation, currentConversation, loadingMessagesConversationIds } = useChat();
+  const { isLoading, sendMessage } = useChatMessages();
   const {
     showQuickSuggestions,
     setShowQuickSuggestions,
     currentSuggestions,
+    isLoadingSuggestions,
     handleOnerilerPress,
-    isLoadingSuggestions
   } = useQuickSuggestions();
   const [showChatScreen, setShowChatScreen] = useState(false);
-  const [selectedImages, setSelectedImages] = useState<string[]>([]);
-  const [selectedFiles, setSelectedFiles] = useState<any[]>([]);
-  const [inputText, setInputText] = useState("");
-  const [pendingInitialMessage, setPendingInitialMessage] = useState<string>("");
-  const [pendingPromptType, setPendingPromptType] = useState<string | undefined>(undefined);
   const [createdConversationId, setCreatedConversationId] = useState<
     string | undefined
   >();
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
-  const [arastirmaModu, setArastirmaModu] = useState(false);
-  const [isInputFocused, setIsInputFocused] = useState(false);
   const [plusButtonPressed, setPlusButtonPressed] = useState(false);
+  const [inputText, setInputText] = useState("");
+  const [arastirmaModu, setArastirmaModu] = useState(false);
+  const inputClearedRef = useRef(false);
+  const messagesScrollViewRef = useRef<ScrollView | null>(null);
+  
+  // Memoize messages array to prevent unnecessary re-renders (ChatScreen'deki gibi)
+  const messagesArray = useMemo(() => {
+    if (currentConversation?.messages && Array.isArray(currentConversation.messages)) {
+      return currentConversation.messages;
+    }
+    return [];
+  }, [currentConversation?.messages]);
+  
+  // Check if conversation data is loading
+  const isConversationDataLoading = useMemo(() => {
+    if (!createdConversationId) {
+      return false;
+    }
+    return loadingMessagesConversationIds.includes(createdConversationId);
+  }, [createdConversationId, loadingMessagesConversationIds]);
+
+  // Keyboard handling
+  const {
+    keyboardHeight,
+    isKeyboardVisible,
+    isInputFocused,
+    setIsInputFocused,
+    getKeyboardAwarePaddingBottom: getKeyboardPadding,
+    textInputRef,
+    dismissKeyboard,
+    handleScreenPress,
+    keyboardAnimationDuration,
+  } = useKeyboardHandling();
+
+  // Başlangıç padding değerini hook'tan al (klavye kapalıyken)
+  const initialPadding = useMemo(() => getKeyboardPadding(), [getKeyboardPadding]);
+  
+  const bottomPadding = useRef(new Animated.Value(initialPadding)).current;
+  const lastPaddingRef = useRef<number>(initialPadding);
+  
+  // Bottom position animasyonu - klavye açıldığında bottom section yukarı hareket etsin
+  const bottomPosition = useRef(new Animated.Value(0)).current;
+
+  // Dikte feature hooks
+  const { dictationState, toggleDictation: originalToggleDictation } = useDictation({
+    onTextUpdate: (text: string) => {
+      setInputText((prev) => {
+        const newText = prev + text;
+        if (newText.length > 0) {
+          inputClearedRef.current = false;
+        }
+        return newText;
+      });
+    },
+    onError: (error: string) => {
+      Alert.alert("Bilgi", error, [{ text: "Tamam" }]);
+    },
+    onStart: () => {
+      setInputText('');
+      inputClearedRef.current = true;
+    },
+    onStop: () => {},
+  });
+
+  const toggleDictation = useCallback(async () => {
+    await originalToggleDictation();
+  }, [originalToggleDictation]);
+
+  const { animations: waveAnimations } = useWaveAnimation(dictationState.isDictating);
+
+  // Permission hooks
+  const { mediaLibrary, documents } = useFilePermissions();
+  const { showPermissionDialog } = usePermissionDialogs();
+
+  // Upload modal
+  const {
+    showUploadModal,
+    openUploadModal,
+    closeUploadModal,
+    translateY,
+    panHandlers,
+  } = useChatUploadModal({
+    initialVisible: false,
+    dismissKeyboard,
+    textInputRef,
+    setIsInputFocused,
+  });
+
+  // Attachments
+  const {
+    selectedImages,
+    setSelectedImages,
+    selectedFiles,
+    setSelectedFiles,
+    pickImage,
+    pickDocument,
+    removeImage,
+    removeFile,
+  } = useChatAttachments({
+    mediaLibraryPermission: mediaLibrary,
+    documentsPermission: documents,
+    showPermissionDialog,
+    onCloseUploadModal: closeUploadModal,
+    onOpenUploadModal: openUploadModal,
+    textInputRef,
+    setInputText,
+  });
+
   const translateXChat = useRef(new Animated.Value(-width)).current;
-  const textInputRef = useRef<TextInput>(null);
   const chatBackdropOpacity = useRef(new Animated.Value(0)).current;
   const chatScreenOpacity = useRef(new Animated.Value(1)).current; // ChatScreen opacity için
   const homeScale = useRef(new Animated.Value(1)).current;
@@ -152,43 +266,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     [chatBackdropOpacity, homeScale, translateXChat, chatScreenOpacity]
   );
 
-  // Dikte feature hooks
-  const { dictationState, toggleDictation } = useDictation({
-    onTextUpdate: (text: string) => {
-      // Hızlı text güncelleme - console log'ları kaldırdık
-      setInputText((prev) => prev + text);
-    },
-    onError: (error: string) => {
-      console.error("Dikte hatası:", error);
-      // Kullanıcıya bilgilendirme mesajı göster
-      Alert.alert("Bilgi", error, [{ text: "Tamam" }]);
-    },
-    onStart: () => {
-      console.log("Dikte başlatıldı");
-    },
-    onStop: () => {
-      console.log("Dikte durduruldu");
-    },
-  });
-
-  const { animations: waveAnimations } = useWaveAnimation(
-    dictationState.isDictating
-  );
-
-  // Permission hooks
-  const {
-    mediaLibrary,
-    documents,
-    storage,
-    camera,
-    hasFilePermissions,
-    hasAllPermissions,
-    requestFilePermissions,
-    requestAllPermissions
-  } = useFilePermissions();
-  
-  const { showPermissionDialog, showRequiredPermissionsDialog } = usePermissionDialogs();
-
   const [fontsLoaded, fontError] = useFonts({
     "Poppins-Regular": require("@assets/fonts/Poppins-Regular .ttf"),
     "Poppins-Medium": require("@assets/fonts/Poppins-Medium.ttf"),
@@ -200,60 +277,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     console.error("Font loading error:", fontError);
     // Continue with fallback fonts instead of blocking UI
   }
-
-  // Keyboard event listeners - Optimized with useCallback
-  const handleKeyboardShow = useCallback((e: any) => {
-    setKeyboardHeight(e.endCoordinates.height);
-    setIsKeyboardVisible(true);
-  }, []);
-
-  const handleKeyboardHide = useCallback(() => {
-    setKeyboardHeight(0);
-    setIsKeyboardVisible(false);
-  }, []);
-
-  useEffect(() => {
-    const keyboardDidShowListener = Keyboard.addListener(
-      "keyboardDidShow",
-      handleKeyboardShow
-    );
-
-    const keyboardDidHideListener = Keyboard.addListener(
-      "keyboardDidHide",
-      handleKeyboardHide
-    );
-
-    return () => {
-      keyboardDidShowListener?.remove();
-      keyboardDidHideListener?.remove();
-    };
-  }, [handleKeyboardShow, handleKeyboardHide]);
-
-  // Input focus handlers
-  const handleInputFocus = useCallback(() => {
-    setIsInputFocused(true);
-    // Chat ekranını otomatik açma - sadece focus state'i güncelle
-  }, []);
-
-  const handleInputBlur = useCallback(() => {
-    setIsInputFocused(false);
-  }, []);
-
-  const handleTextChange = useCallback((text: string) => {
-    // Sadece text'i güncelle, chat ekranını açma
-    setInputText(text);
-  }, []);
-
-  const handleScreenPress = useCallback(() => {
-    // Ekranda bir yere basınca klavye açılma özelliği devre dışı
-    // Sadece klavye kapatma işlevi aktif
-    if (isKeyboardVisible || isInputFocused) {
-      // Klavye açıksa veya input focus'taysa klavyeyi kapat
-      textInputRef.current?.blur();
-      setIsInputFocused(false);
-    }
-    // Klavye açma özelliği kaldırıldı
-  }, [isKeyboardVisible, isInputFocused]);
 
   // PanResponder for swipe gesture - soldan sağa çekme ile chat history açma (memoized)
   const panResponder = useMemo(
@@ -289,47 +312,46 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     
     // Plus butonuna basıldığını işaretle
     setPlusButtonPressed(true);
-    // Home input'undaki odağı kaldır ve klavyeyi kapat
-    textInputRef.current?.blur();
-    setIsInputFocused(false);
-    Keyboard.dismiss();
     
     // Boş bir conversation oluştur
     const conversationId = await createNewConversation("Yeni Sohbet", "");
     setCreatedConversationId(conversationId);
     setShowChatScreen(true);
     runChatEntrance();
-  }, [createNewConversation, runChatEntrance, textInputRef]);
+  }, [createNewConversation, runChatEntrance]);
 
   const openChatScreen = useCallback(async () => {
-    // Header'daki chat butonuna basıldığında yeni mesaj sayfası aç
-    console.log("💬 Header chat butonu tıklandı - yeni mesaj açılıyor");
+    // Header'daki chat butonuna basıldığında Home ekranını sıfırla (ilk kez açılıyormuş gibi)
+    console.log("💬 Header chat butonu tıklandı - Home ekranı sıfırlanıyor");
 
-    // Home input'undaki odağı kaldır ve klavyeyi kapat
-    textInputRef.current?.blur();
-    setIsInputFocused(false);
-    Keyboard.dismiss();
+    // Eğer chat ekranı açıksa kapat
+    if (showChatScreen) {
+      runChatExit(() => {
+        setShowChatScreen(false);
+      });
+    }
 
-    // Boş bir conversation oluştur
-    const conversationId = await createNewConversation("Yeni Sohbet", "");
-    setCreatedConversationId(conversationId);
-    setShowChatScreen(true);
-    runChatEntrance();
-  }, [createNewConversation, runChatEntrance, textInputRef]);
+    // Conversation'ı temizle - Home ekranı başlangıç durumuna dönsün
+    setCreatedConversationId(undefined);
+    
+    // Input'u temizle
+    setInputText("");
+    setSelectedImages([]);
+    setSelectedFiles([]);
+    setArastirmaModu(false);
+    
+    // Klavyeyi kapat
+    dismissKeyboard();
+    
+    // HeroSection otomatik olarak gösterilecek çünkü createdConversationId undefined olacak
+    // Bu sayede Home ekranı ilk kez açılıyormuş gibi görünecek
+  }, [dismissKeyboard, showChatScreen, runChatExit]);
 
   const closeChatScreen = useCallback(() => {
     runChatExit(() => {
       setShowChatScreen(false);
       setCreatedConversationId(undefined);
-      setInputText("");
-      setPendingInitialMessage("");
-      setPendingPromptType(undefined);
-      setSelectedImages([]);
-      setSelectedFiles([]);
-      setArastirmaModu(false);
-      setIsInputFocused(false);
       setPlusButtonPressed(false);
-      Keyboard.dismiss();
       onConversationSelected();
     });
   }, [onConversationSelected, runChatExit]);
@@ -338,168 +360,133 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     setArastirmaModu((prev) => !prev);
   }, []);
 
+  // Handle send message from home - creates conversation, sends message, and shows messages in hero area
+  // Mesaj gönderme işleminin duplicate çağrılmasını önlemek için ref
+  const isSendingMessageRef = useRef(false);
+
+  const handleSendMessage = useCallback(async () => {
+    // Eğer zaten bir mesaj gönderiliyorsa, duplicate çağrıyı engelle
+    if (isSendingMessageRef.current) {
+      console.log('⚠️ Mesaj zaten gönderiliyor, duplicate çağrı engellendi');
+      return;
+    }
+
+    if (!inputText.trim() && selectedImages.length === 0 && selectedFiles.length === 0) {
+      return;
+    }
+
+    // Mesaj gönderme flag'ini set et
+    isSendingMessageRef.current = true;
+
+    try {
+      let conversationId = createdConversationId;
+      
+      // Eğer conversation yoksa oluştur
+      if (!conversationId) {
+        const title = inputText.trim().length > 30 
+          ? inputText.trim().substring(0, 30) + "..." 
+          : inputText.trim() || "Yeni Sohbet";
+        
+        conversationId = await createNewConversation(title);
+        setCreatedConversationId(conversationId);
+        
+        // Conversation'ı seç ve mesajların yüklenmesini bekle
+        await selectConversation(conversationId);
+        
+        // Mesajların yüklenmesi için kısa bir bekleme
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      // Mesaj gönder
+      if (conversationId) {
+        console.log('📤 Home ekranından mesaj gönderiliyor:', {
+          conversationId,
+          messageText: inputText.trim().substring(0, 50),
+          hasImages: selectedImages.length > 0,
+          hasFiles: selectedFiles.length > 0,
+        });
+        
+        await sendMessage(
+          inputText.trim(),
+          conversationId,
+          arastirmaModu,
+          selectedImages,
+          selectedFiles
+        );
+        
+        console.log('✅ Mesaj gönderildi');
+        
+        // Mesaj gönderildikten sonra currentConversation'ın güncellenmesi için kısa bir bekleme
+        // sendMessage zaten addMessage çağırıyor ve currentConversation'ı güncelliyor
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      // Clear input ve focus'u kapat
+      setInputText("");
+      setSelectedImages([]);
+      setSelectedFiles([]);
+      setIsInputFocused(false);
+      dismissKeyboard();
+    } catch (error) {
+      console.error("❌ Mesaj gönderme hatası:", error);
+      Alert.alert("Hata", "Mesaj gönderilirken bir hata oluştu.");
+    } finally {
+      // Mesaj gönderme flag'ini reset et
+      isSendingMessageRef.current = false;
+    }
+  }, [inputText, selectedImages, selectedFiles, createdConversationId, createNewConversation, selectConversation, sendMessage, arastirmaModu, dismissKeyboard, setIsInputFocused, currentConversation]);
+
   const handleQuickSuggestionSelect = useCallback(async (suggestion: QuickSuggestion) => {
     console.log('🎯 Öneri seçildi:', suggestion);
     
     try {
       setShowQuickSuggestions(false);
 
-      // Dismiss keyboard
-      textInputRef.current?.blur();
-
       // Home ekranından geldiğinde her zaman yeni konuşma oluştur
       const title = suggestion.question.length > 30 ? suggestion.question.substring(0, 30) + '...' : suggestion.question;
       console.log('📝 Yeni konuşma oluşturuluyor:', title);
       
-      const conversationId = await createNewConversation(title);
-      console.log('✅ Konuşma oluşturuldu:', conversationId);
+      let conversationId = createdConversationId;
       
-      // Yeni konuşmayı seç
-      if (conversationId) {
-        // Conversation'ı seç (await et)
-        console.log('🔍 Konuşma seçiliyor:', conversationId);
-        await selectConversation(conversationId);
+      // Eğer conversation yoksa oluştur
+      if (!conversationId) {
+        conversationId = await createNewConversation(title);
+        console.log('✅ Konuşma oluşturuldu:', conversationId);
         setCreatedConversationId(conversationId);
         
-        // Mesajı pendingInitialMessage'e kaydet (ChatScreen'de initialMessage prop'u ile otomatik gönderilecek)
-        // Bu sayede mesaj sadece bir kez gönderilecek
-        setPendingInitialMessage(suggestion.question);
-        setPendingPromptType(suggestion.promptType); // promptType'ı da kaydet
+        // Conversation'ı seç ve mesajların yüklenmesini bekle
+        await selectConversation(conversationId);
         
-        // ChatScreen'e geçiş yap
-        console.log('💬 ChatScreen açılıyor...');
-        setShowChatScreen(true);
-        runChatEntrance();
-        
-        setInputText("");
-        console.log('✅ Öneri işlemi tamamlandı, mesaj ChatScreen\'de gönderilecek');
+        // Mesajların yüklenmesi için kısa bir bekleme
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      // Mesaj gönder (Home ekranında mesajlaşma alanında gösterilecek)
+      if (conversationId) {
+        console.log('📤 Öneri mesajı gönderiliyor:', suggestion.question);
+        await sendMessage(
+          suggestion.question,
+          conversationId,
+          false, // arastirmaModu
+          [], // selectedImages
+          [], // selectedFiles
+          suggestion.promptType
+        );
+        console.log('✅ Öneri işlemi tamamlandı - Home ekranında mesajlaşma alanında gösterilecek');
       } else {
         console.error('❌ Konuşma oluşturulamadı');
       }
     } catch (error) {
       console.error('❌ Öneri seçim hatası:', error);
-      // Hata durumunda modal'ı tekrar aç
-      setShowQuickSuggestions(true);
+      Alert.alert("Hata", "Öneri seçilirken bir hata oluştu.");
     }
-  }, [createNewConversation, runChatEntrance, selectConversation]);
-
-
-  const handleSendFilesOnly = useCallback(async () => {
-    try {
-      // En az bir dosya veya resim seçilmiş olmalı
-      if (selectedImages.length === 0 && selectedFiles.length === 0) {
-        console.log("⚠️ Gönderilecek dosya/resim yok");
-        return;
-      }
-
-      console.log("📤 Dosyalar direkt OpenAI'ye gönderiliyor:", {
-        images: selectedImages.length,
-        files: selectedFiles.length,
-      });
-
-      // Basit mesaj oluştur - sistem analizi yok
-      let fileMessage = "Dosya/resim gönderildi. Lütfen analiz edin.";
-
-      // Create new conversation with the file message
-      const title = "Dosya/Resim Gönderildi";
-      const conversationId = await createNewConversation(title, fileMessage);
-
-      setCreatedConversationId(conversationId);
-      setInputText("");
-      setSelectedImages([]); // Seçili resimleri temizle
-      setSelectedFiles([]); // Seçili dosyaları temizle
-
-      // Yeni mesajlaşma süreci başlat - Chat ekranına smooth geçiş
-      setShowChatScreen(true);
-      runChatEntrance();
-    } catch (error) {
-      console.error("❌ Dosya gönderme hatası:", error);
-      Alert.alert("Hata", "Dosyalar gönderilirken bir hata oluştu.");
-    }
-  }, [createNewConversation, runChatEntrance, selectedFiles, selectedImages]);
-
-  const handleSendMessage = useCallback(async () => {
-    // Herhangi bir içerik varsa (text, resim, dosya, dikte) mesaj gönder
-    if (
-      inputText.trim() ||
-      selectedImages.length > 0 ||
-      selectedFiles.length > 0 ||
-      dictationState.isDictating ||
-      dictationState.isProcessing
-    ) {
-      // Dismiss keyboard
-      textInputRef.current?.blur();
-
-      let finalMessage = inputText.trim();
-
-      const title =
-        finalMessage.length > 30
-          ? finalMessage.substring(0, 30) + "..."
-          : finalMessage || "Dosya gönderildi";
-      
-      // Conversation oluştur ama initialMessage gönderme - ChatScreen'de gönderilecek
-      const conversationId = await createNewConversation(title);
-
-      // Araştırma modunu backend'e kaydet
-      if (conversationId && arastirmaModu) {
-        console.log('🔍 Home ekranında araştırma modu aktif, backend\'e kaydediliyor...', {
-          conversationId,
-          arastirmaModu
-        });
-        await updateResearchMode(conversationId, true);
-        console.log('✅ Araştırma modu backend\'e kaydedildi');
-      } else {
-        console.log('🔍 Home ekranında araştırma modu kontrolü:', {
-          conversationId,
-          arastirmaModu,
-          willSave: conversationId && arastirmaModu
-        });
-      }
-
-      setCreatedConversationId(conversationId);
-      
-      // Mesajı pendingInitialMessage'e kaydet (ChatScreen'de kullanılacak)
-      setPendingInitialMessage(finalMessage);
-
-      console.log('📤 Home ekranından ChatScreen\'e geçiliyor:', {
-        conversationId,
-        initialMessage: finalMessage,
-        initialArastirmaModu: arastirmaModu,
-        pendingInitialMessage: finalMessage
-      });
-
-      // Chat ekranına geç - mesaj orada gönderilecek (inputText henüz temizlenmedi)
-      setShowChatScreen(true);
-      runChatEntrance();
-      
-      // Input'u hemen temizle (pendingInitialMessage korunacak)
-      setInputText("");
-      setSelectedImages([]);
-      setSelectedFiles([]);
-      // Araştırma modunu kapatma - ChatScreen'de conversation'a bağlı olacak
-      // setArastirmaModu(false); // Kaldırıldı - ChatScreen'de conversation'dan yüklenecek
-      Keyboard.dismiss();
-    }
-  }, [
-    inputText,
-    selectedImages,
-    selectedFiles,
-    dictationState.isDictating,
-    dictationState.isProcessing,
-    createNewConversation,
-    updateResearchMode,
-    arastirmaModu,
-    runChatEntrance,
-  ]);
+  }, [createdConversationId, createNewConversation, selectConversation, sendMessage]);
 
   // Handle selected conversation - ChatHistoryScreen zaten selectConversation çağırdığı için
   // burada sadece chat ekranını açıyoruz, duplicate selectConversation çağrısı yapmıyoruz
   useEffect(() => {
     if (selectedConversationId) {
       console.log('📥 Geçmiş sohbetten conversation seçildi (HomeScreen):', selectedConversationId);
-      
-      // Klavyeyi kapat - geçmiş mesajlardan açıldığında klavye açık olmamalı
-      Keyboard.dismiss();
       
       // ChatHistoryScreen zaten selectConversation çağırmış, burada sadece chat ekranını aç
       // Duplicate selectConversation çağrısı yapmıyoruz - bu request deduplication ile önlendi
@@ -509,6 +496,27 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
       console.log('✅ Chat ekranı açıldı, conversation ChatHistoryScreen tarafından zaten yüklendi');
     }
   }, [selectedConversationId, runChatEntrance]);
+
+  // Conversation oluşturulduğunda veya mesaj gönderildiğinde currentConversation'ı kontrol et
+  useEffect(() => {
+    if (createdConversationId) {
+      if (!currentConversation) {
+        // Conversation oluşturuldu ama henüz seçilmedi, seç
+        selectConversation(createdConversationId);
+      } else if (currentConversation.id !== createdConversationId) {
+        // Farklı bir conversation seçilmiş, doğru conversation'ı seç
+        selectConversation(createdConversationId);
+      }
+    }
+  }, [createdConversationId, currentConversation, selectConversation]);
+  
+  // Mesaj gönderildikten sonra currentConversation'ın güncellenmesini bekle
+  useEffect(() => {
+    if (createdConversationId && currentConversation && currentConversation.id === createdConversationId) {
+      // Conversation seçili ve doğru, mesajlar yüklenecek
+      console.log('✅ Home ekranında conversation seçili, mesaj sayısı:', currentConversation.messages?.length || 0);
+    }
+  }, [createdConversationId, currentConversation]);
 
   useEffect(() => {
     const isChatVisible = showChatScreen;
@@ -527,61 +535,26 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     };
   }, [heroReveal, showChatScreen]);
 
-  const inputComponentProps = useMemo(
-    () => ({
-      inputText,
-      setInputText,
-      onSendMessage: handleSendMessage,
-      onDictate: toggleDictation,
-      onOpenUploadModal: openModal,
-      isDictating: dictationState.isDictating,
-      isProcessing: dictationState.isProcessing,
-      isInputFocused,
-      setIsInputFocused,
-      hasSelectedFiles: selectedImages.length > 0 || selectedFiles.length > 0,
-      selectedFilesCount: selectedFiles.length,
-      selectedImagesCount: selectedImages.length,
-      showSelectedFilesIndicator: true,
-      selectedImages,
-      selectedFiles,
-      onRemoveImage: (index: number) => {
-        setSelectedImages((prev) => prev.filter((_, i) => i !== index));
-      },
-      onRemoveFile: (index: number) => {
-        setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
-      },
-      onFocus: handleInputFocus,
-      onBlur: handleInputBlur,
-      onTextChange: handleTextChange,
-      placeholder: "İstediğinizi sorun",
-      multiline: false,
-      autoCorrect: true,
-      autoCapitalize: "sentences" as const,
-      returnKeyType: "send" as const,
-      keyboardType: "default" as const,
-      onSubmitEditing: handleSendMessage,
-      waveAnimations,
-      textInputRef,
-    }),
-    [
-      inputText,
-      handleSendMessage,
-      toggleDictation,
-      openModal,
-      dictationState.isDictating,
-      dictationState.isProcessing,
-      isInputFocused,
-      setIsInputFocused,
-      selectedImages,
-      selectedFiles,
-      handleInputFocus,
-      handleInputBlur,
-      handleTextChange,
-      waveAnimations,
-      textInputRef,
-    ]
-  );
+  // Bottom padding ve position - klavye ile tam senkronize, animasyon yok direkt set
+  useEffect(() => {
+    const targetPadding = getKeyboardPadding();
+    const targetBottom = isKeyboardVisible ? keyboardHeight : 0;
+    
+    // Klavye ile senkronize hareket için animasyon yok, direkt set et
+    // Bu sayede klavye ile birlikte anında hareket eder
+    bottomPadding.setValue(targetPadding);
+    bottomPosition.setValue(targetBottom);
+    lastPaddingRef.current = targetPadding;
+  }, [keyboardHeight, isKeyboardVisible, getKeyboardPadding, bottomPadding, bottomPosition]);
 
+  // İlk render'da padding değerini doğru set et
+  useEffect(() => {
+    const currentPadding = getKeyboardPadding();
+    if (lastPaddingRef.current !== currentPadding) {
+      bottomPadding.setValue(currentPadding);
+      lastPaddingRef.current = currentPadding;
+    }
+  }, []);
 
   // Show loading while fonts are loading
   if (!fontsLoaded) {
@@ -598,11 +571,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
             opacity: homeDimOpacity,
           },
         ]}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
+        behavior={undefined}
+        keyboardVerticalOffset={0}
+        enabled={false}
         {...panResponder.panHandlers}
       >
-      <TouchableWithoutFeedback onPress={handleScreenPress}>
+      <TouchableWithoutFeedback onPress={handleScreenPress} accessible={false}>
         <LinearGradient
           colors={["#02020A", "#16163C"]}
           locations={[0.1827, 1.0]}
@@ -614,30 +588,130 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
           <Header
             onBackPress={onOpenChatHistory}
             onChatPress={openChatScreen}
-            onLogoPress={() => {
-              console.log('🏠 Home ekranında logo tıklandı - zaten home ekranındayız');
-              // Home ekranında zaten olduğumuz için özel bir işlem yapmaya gerek yok
-            }}
+            onLogoPress={openChatScreen}
             showBackButton={true}
             showChatButton={true}
           />
 
-          {/* Hero Section - Koşullu gösterim */}
-          {!isInputFocused && (
-            <View style={styles.heroSectionWrapper}>
-              <HeroSection animationProgress={heroReveal} />
-            </View>
-          )}
+          {/* Hero Section veya Mesajlaşma Alanı */}
+          {(() => {
+            // Orta kısım bottom section (input alanı) durumuna göre değişir
+            const hasInputContent = inputText.trim().length > 0 || selectedImages.length > 0 || selectedFiles.length > 0;
+            const shouldShowMessages = createdConversationId && (hasInputContent || (currentConversation?.messages && currentConversation.messages.length > 0));
+            
+            // Debug log
+            console.log('🔍 Home ekranı render kontrolü (bottom section bağlı):', {
+              isInputFocused,
+              hasInputContent,
+              inputTextLength: inputText.trim().length,
+              selectedImagesCount: selectedImages.length,
+              selectedFilesCount: selectedFiles.length,
+              createdConversationId,
+              shouldShowMessages,
+              hasCurrentConversation: !!currentConversation,
+              messagesCount: currentConversation?.messages?.length || messagesArray.length,
+            });
+            
+            if (shouldShowMessages) {
+              // Mesajlaşma alanı (conversation var ve input içeriği var veya mesajlar var)
+              const messagesToShow = currentConversation?.messages || messagesArray || [];
+              console.log('📱 Mesajlaşma alanı gösteriliyor (bottom section durumuna göre):', {
+                conversationId: createdConversationId,
+                messagesCount: messagesToShow.length,
+                hasInputContent,
+              });
+              
+              return (
+                <TouchableWithoutFeedback onPress={handleScreenPress} accessible={false}>
+                  <View style={styles.messagesListContainer}>
+                    <MessageList
+                      messages={messagesToShow}
+                      isLoading={isLoading}
+                      scrollViewRef={messagesScrollViewRef}
+                      isKeyboardVisible={isKeyboardVisible}
+                      keyboardHeight={keyboardHeight}
+                      conversationId={createdConversationId}
+                      isDataLoading={isConversationDataLoading && (!currentConversation?.messages || currentConversation.messages.length === 0)}
+                      onScrollToEnd={() => {
+                        // Optional: Additional scroll handling
+                      }}
+                    />
+                  </View>
+                </TouchableWithoutFeedback>
+              );
+            } else {
+              // HeroSection (conversation yoksa veya input boşsa)
+              // Klavye açıksa HeroSection'ı tamamen render etme - layout hesaplamalarını etkilemesin
+              if (isKeyboardVisible) {
+                return null;
+              }
+              
+              return (
+                <TouchableWithoutFeedback onPress={handleScreenPress} accessible={false}>
+                  <View style={styles.heroSectionWrapper}>
+                    <HeroSection animationProgress={heroReveal} isKeyboardVisible={isKeyboardVisible} />
+                  </View>
+                </TouchableWithoutFeedback>
+              );
+            }
+          })()}
 
-          {/* Bottom Section Container - Fixed at bottom */}
-          <HomeBottomSection
-            keyboardHeight={keyboardHeight}
-            isKeyboardVisible={isKeyboardVisible}
-            isResearchMode={arastirmaModu}
-            onPressResearch={handleArastirmaPress}
-            onPressSuggestions={handleOnerilerPress}
-            inputProps={inputComponentProps}
-          />
+          {/* Input Section - Fixed at bottom */}
+          <Animated.View style={[
+            styles.inputSectionContainer,
+            { 
+              paddingBottom: bottomPadding,
+              bottom: bottomPosition
+            }
+          ]}>
+              <ActionButtons
+                onSuggestions={handleOnerilerPress}
+                onResearch={handleArastirmaPress}
+                isLoading={isLoading}
+                isResearchMode={arastirmaModu}
+              />
+
+              <InputComponent
+                inputText={inputText}
+                setInputText={setInputText}
+                onSendMessage={handleSendMessage}
+                onDictate={toggleDictation}
+                onOpenUploadModal={openUploadModal}
+                isDictating={dictationState.isDictating}
+                isProcessing={dictationState.isProcessing}
+                isLoading={isLoading}
+                isInputFocused={isInputFocused}
+                setIsInputFocused={setIsInputFocused}
+                textInputRef={textInputRef}
+                hasSelectedFiles={selectedImages.length > 0 || selectedFiles.length > 0}
+                selectedFilesCount={selectedFiles.length}
+                selectedImagesCount={selectedImages.length}
+                showSelectedFilesIndicator={true}
+                selectedImages={selectedImages}
+                selectedFiles={selectedFiles}
+                onRemoveImage={removeImage}
+                onRemoveFile={removeFile}
+                placeholder="İstediğinizi sorun"
+                multiline={false}
+                maxLength={1000}
+                autoCorrect={true}
+                autoCapitalize="sentences"
+                returnKeyType="send"
+                keyboardType="default"
+                secureTextEntry={false}
+                editable={true}
+                selectTextOnFocus={false}
+                clearButtonMode="while-editing"
+                autoFocus={false}
+                blurOnSubmit={true}
+                onSubmitEditing={handleSendMessage}
+                testID="home-input"
+                accessibilityLabel="Soru girişi"
+                accessibilityHint="AI asistanınıza soru yazın veya sesli yazma kullanın"
+                accessibilityRole="textbox"
+                waveAnimations={waveAnimations}
+              />
+          </Animated.View>
 
           <HomeChatModal
             visible={showChatScreen}
@@ -647,12 +721,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
             translateX={translateXChat}
             onOpenChatHistory={onOpenChatHistory}
             conversationId={selectedConversationId || createdConversationId}
-            initialArastirmaModu={arastirmaModu}
-            initialUploadModalOpen={plusButtonPressed}
-            initialMessage={pendingInitialMessage}
-            initialPromptType={pendingPromptType}
-            initialImages={selectedImages}
-            initialFiles={selectedFiles}
           />
 
           <HomeQuickSuggestionsModal
@@ -662,6 +730,31 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
             suggestions={currentSuggestions}
             onSelectSuggestion={handleQuickSuggestionSelect}
           />
+
+          {/* Upload Modal */}
+          <Modal
+            visible={showUploadModal}
+            animationType="slide"
+            transparent={true}
+            onRequestClose={() => closeUploadModal()}
+          >
+            <UploadModal
+              visible={showUploadModal}
+              translateY={translateY}
+              panHandlers={panHandlers}
+              selectedImages={selectedImages}
+              selectedFiles={selectedFiles}
+              onPickImage={pickImage}
+              onSelectRecentPhoto={(photoUri) => {
+                setSelectedImages((prev) => [...prev, photoUri]);
+                closeUploadModal(true);
+              }}
+              onPickDocument={pickDocument}
+              onRemoveImage={removeImage}
+              onRemoveFile={removeFile}
+              onRequestClose={closeUploadModal}
+            />
+          </Modal>
         </LinearGradient>
       </TouchableWithoutFeedback>
       </AnimatedKeyboardAvoidingView>
@@ -679,6 +772,28 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "flex-start",
     alignItems: "center",
+  },
+  messagesListContainer: {
+    flex: 1,
+    minHeight: 0, // Important for ScrollView to work properly (ChatScreen'deki gibi)
+    backgroundColor: "transparent",
+  },
+  inputSectionContainer: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: "column",
+    justifyContent: "flex-start",
+    alignItems: "flex-start",
+    paddingHorizontal: getResponsivePadding(),
+    paddingBottom: getResponsivePaddingBottom(),
+    paddingTop: 20,
+    width: getResponsiveWidth(),
+    gap: getResponsiveGap(),
+    alignSelf: "center",
+    backgroundColor: "transparent",
+    zIndex: 1000,
   },
 });
 

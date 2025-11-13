@@ -17,12 +17,6 @@ interface HomeChatModalProps {
   translateX: Animated.Value;
   onOpenChatHistory: () => void;
   conversationId?: string;
-  initialArastirmaModu: boolean;
-  initialUploadModalOpen: boolean;
-  initialMessage?: string;
-  initialPromptType?: string;
-  initialImages: string[];
-  initialFiles: any[];
   containerStyle?: StyleProp<ViewStyle>;
   backdropStyle?: StyleProp<ViewStyle>;
 }
@@ -35,12 +29,6 @@ const HomeChatModal: React.FC<HomeChatModalProps> = ({
   translateX,
   onOpenChatHistory,
   conversationId,
-  initialArastirmaModu,
-  initialUploadModalOpen,
-  initialMessage,
-  initialPromptType,
-  initialImages,
-  initialFiles,
   containerStyle,
   backdropStyle,
 }) => {
@@ -68,12 +56,6 @@ const HomeChatModal: React.FC<HomeChatModalProps> = ({
             onClose={onRequestClose}
             onOpenChatHistory={onOpenChatHistory}
             conversationId={conversationId}
-            initialArastirmaModu={initialArastirmaModu}
-            initialUploadModalOpen={initialUploadModalOpen}
-            initialMessage={initialMessage}
-            initialPromptType={initialPromptType}
-            initialImages={initialImages}
-            initialFiles={initialFiles}
           />
         </Animated.View>
       </View>

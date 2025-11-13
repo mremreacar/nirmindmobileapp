@@ -1,7 +1,6 @@
-import React, { ComponentProps, memo } from "react";
+import React, { memo } from "react";
 import { View, StyleSheet } from "react-native";
 import ActionButtons from "../chat/ActionButtons";
-import InputComponent from "../common/InputComponent";
 import {
   getKeyboardAwarePaddingBottom,
   getResponsiveGap,
@@ -10,24 +9,22 @@ import {
   getResponsivePaddingBottom,
 } from "../../constants";
 
-interface HomeBottomSectionProps {
+interface HomeInputSectionProps {
   keyboardHeight: number;
   isKeyboardVisible: boolean;
   isResearchMode: boolean;
   onPressResearch: () => void;
   onPressSuggestions: () => void;
   actionButtonsLoading?: boolean;
-  inputProps: ComponentProps<typeof InputComponent>;
 }
 
-const HomeBottomSection: React.FC<HomeBottomSectionProps> = ({
+const HomeInputSection: React.FC<HomeInputSectionProps> = ({
   keyboardHeight,
   isKeyboardVisible,
   isResearchMode,
   onPressResearch,
   onPressSuggestions,
   actionButtonsLoading = false,
-  inputProps,
 }) => {
   return (
     <View
@@ -47,8 +44,6 @@ const HomeBottomSection: React.FC<HomeBottomSectionProps> = ({
         isLoading={actionButtonsLoading}
         isResearchMode={isResearchMode}
       />
-
-      <InputComponent {...inputProps} />
     </View>
   );
 };
@@ -73,5 +68,5 @@ const styles = StyleSheet.create({
   },
 });
 
-export default memo(HomeBottomSection);
+export default memo(HomeInputSection);
 
