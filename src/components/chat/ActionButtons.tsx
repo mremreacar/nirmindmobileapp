@@ -81,8 +81,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'flex-start',
     alignItems: 'center',
-    width: isTablet ? 300 : 242,
-    height: isSmallScreen ? 38 : 42,
+    width: '100%', // Responsive: Sabit genişlik yerine tam genişlik kullan
+    maxWidth: '100%', // Maksimum genişlik sınırı yok - büyük ekranlarda tam genişlik
+    height: isSmallScreen ? 34 : 38, // Küçültüldü: 38 -> 34, 42 -> 38 (yazı boyutuna uyumlu)
     gap: getResponsiveGap(),
     backgroundColor: 'transparent',
     zIndex: 1000,
@@ -92,12 +93,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.05)', // 5% opacity
     borderRadius: 48, // 48px radius for pill shape
-    paddingTop: 12,
-    paddingRight: 16,
-    paddingBottom: 12,
-    paddingLeft: 16,
+    paddingTop: 10, // Küçültüldü: 12 -> 10 (yazı boyutuna uyumlu)
+    paddingRight: 14, // Küçültüldü: 16 -> 14 (yazı boyutuna uyumlu)
+    paddingBottom: 10, // Küçültüldü: 12 -> 10 (yazı boyutuna uyumlu)
+    paddingLeft: 14, // Küçültüldü: 16 -> 14 (yazı boyutuna uyumlu)
     gap: 6,
-    height: 42,
+    height: isSmallScreen ? 34 : 38, // Küçültüldü: 42 -> 38 (yazı boyutuna uyumlu)
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
     shadowColor: '#000',
@@ -110,19 +111,19 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   onerilerButton: {
-    width: 120,
+    width: 110, // Küçültüldü: 120 -> 110 (yazı boyutuna uyumlu)
   },
   arastirmaButton: {
-    width: 120,
+    width: 110, // Küçültüldü: 120 -> 110 (yazı boyutuna uyumlu)
   },
   arastirmaButtonActive: {
     backgroundColor: '#3B38BD',
   },
   actionButtonText: {
     fontFamily: 'Poppins-Medium',
-    fontSize: 12,
+    fontSize: 11, // Küçültüldü: 12 -> 11
     fontWeight: '500',
-    lineHeight: 16.8, // 140% of 12px
+    lineHeight: 15.4, // 140% of 11px (küçültüldü: 16.8 -> 15.4)
     letterSpacing: 0, // 0%
     textAlign: 'center',
     color: '#FFFFFF',

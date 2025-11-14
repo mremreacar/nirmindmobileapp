@@ -29,6 +29,10 @@ export const useChatMessages = () => {
   const [isStreaming, setIsStreaming] = useState(false);
   const activeStreamRef = useRef<ActiveStreamState | null>(null);
   const thinkingMessageIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // Streaming performans optimizasyonu: Chunk güncellemelerini throttle et
+  const lastUpdateTimeRef = useRef<number>(0);
+  const pendingUpdateRef = useRef<{ messageId: string; content: string; conversationId: string } | null>(null);
+  const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // Dinamik "düşünüyor" mesajları
   const thinkingMessages = [
@@ -49,6 +53,14 @@ export const useChatMessages = () => {
     selectedFiles: any[] = [],
     promptType?: string
   ) => {
+    // Cleanup pending updates when starting a new message
+    if (updateTimeoutRef.current) {
+      clearTimeout(updateTimeoutRef.current);
+      updateTimeoutRef.current = null;
+    }
+    pendingUpdateRef.current = null;
+    lastUpdateTimeRef.current = 0;
+
     if (isLoading) {
       console.log('⚠️ Zaten bir mesaj işleniyor, yeni mesaj gönderilemiyor');
       return;
@@ -507,6 +519,7 @@ export const useChatMessages = () => {
             setIsStreaming(true);
           },
           // onAIChunk - ChatGPT gibi gerçek zamanlı yazma efekti
+          // Performans optimizasyonu: Chunk'ları throttle et (her 100ms'de bir güncelle)
           (chunk: string, fullContent: string) => {
             // İlk chunk geldiğinde thinking mesaj interval'ini temizle
             if (thinkingMessageIntervalRef.current) {
@@ -537,18 +550,75 @@ export const useChatMessages = () => {
             }
             
             streamingAIMessageText = fullContent;
-            // Mevcut AI mesajını güncelle (updateMessage kullan - duplicate kontrolü yok)
+            
+            // Performans optimizasyonu: Chunk güncellemelerini throttle et (her 50ms'de bir güncelle)
+            // Bu sayede çok sık UI güncellemesi yapılmaz, daha smooth bir akış sağlanır
+            const now = Date.now();
+            const timeSinceLastUpdate = now - lastUpdateTimeRef.current;
+            const THROTTLE_INTERVAL = 50; // 50ms throttle (20 FPS - yeterince smooth)
+            
+            // Pending update'i kaydet
             if (streamingAIMessageId) {
-              const updatedAIMessage: ChatMessage = {
-                id: streamingAIMessageId,
-                text: fullContent,
-                isUser: false,
-                timestamp: new Date(),
-                isStreaming: true, // Streaming devam ediyor
-                isThinking: false // İlk chunk geldi, artık düşünmüyor
+              pendingUpdateRef.current = {
+                messageId: streamingAIMessageId,
+                content: fullContent,
+                conversationId
               };
-              // updateMessage kullan - mesaj varsa günceller, yoksa ekler
-              updateMessage(conversationId, updatedAIMessage);
+            }
+            
+            // Eğer throttle interval'ı geçtiyse veya ilk chunk ise, hemen güncelle
+            if (timeSinceLastUpdate >= THROTTLE_INTERVAL || !firstChunkTime) {
+              // Pending timeout varsa iptal et
+              if (updateTimeoutRef.current) {
+                clearTimeout(updateTimeoutRef.current);
+                updateTimeoutRef.current = null;
+              }
+              
+              // Hemen güncelle
+              if (pendingUpdateRef.current) {
+                const { messageId, content, conversationId: convId } = pendingUpdateRef.current;
+                lastUpdateTimeRef.current = now;
+                
+                // requestAnimationFrame ile UI güncellemesini optimize et
+                requestAnimationFrame(() => {
+                  const updatedAIMessage: ChatMessage = {
+                    id: messageId,
+                    text: content,
+                    isUser: false,
+                    timestamp: new Date(),
+                    isStreaming: true,
+                    isThinking: false
+                  };
+                  updateMessage(convId, updatedAIMessage);
+                });
+                
+                pendingUpdateRef.current = null;
+              }
+            } else {
+              // Throttle interval'ı geçmediyse, timeout ile geciktir
+              if (!updateTimeoutRef.current && pendingUpdateRef.current) {
+                updateTimeoutRef.current = setTimeout(() => {
+                  if (pendingUpdateRef.current) {
+                    const { messageId, content, conversationId: convId } = pendingUpdateRef.current;
+                    lastUpdateTimeRef.current = Date.now();
+                    
+                    requestAnimationFrame(() => {
+                      const updatedAIMessage: ChatMessage = {
+                        id: messageId,
+                        text: content,
+                        isUser: false,
+                        timestamp: new Date(),
+                        isStreaming: true,
+                        isThinking: false
+                      };
+                      updateMessage(convId, updatedAIMessage);
+                    });
+                    
+                    pendingUpdateRef.current = null;
+                  }
+                  updateTimeoutRef.current = null;
+                }, THROTTLE_INTERVAL - timeSinceLastUpdate);
+              }
             }
 
             if (activeStreamRef.current) {
@@ -557,6 +627,14 @@ export const useChatMessages = () => {
           },
           // onAIComplete
           (aiMessage: any) => {
+            // Cleanup pending updates
+            if (updateTimeoutRef.current) {
+              clearTimeout(updateTimeoutRef.current);
+              updateTimeoutRef.current = null;
+            }
+            pendingUpdateRef.current = null;
+            lastUpdateTimeRef.current = 0;
+
             // AI Message validation
             if (!aiMessage || !aiMessage.id) {
               console.error('❌ Geçersiz aiMessage:', aiMessage);
@@ -1322,6 +1400,14 @@ export const useChatMessages = () => {
       console.error('❌ AI yanıtı durdurulurken hata oluştu:', error);
     }
 
+    // Pending update'leri temizle
+    if (updateTimeoutRef.current) {
+      clearTimeout(updateTimeoutRef.current);
+      updateTimeoutRef.current = null;
+    }
+    pendingUpdateRef.current = null;
+    lastUpdateTimeRef.current = 0;
+
     if (active.conversationId && active.streamingMessageId) {
       removeMessage(active.conversationId, active.streamingMessageId);
     }
@@ -1331,7 +1417,7 @@ export const useChatMessages = () => {
     setIsLoading(false);
 
     return true;
-  }, [updateMessage]);
+  }, [removeMessage]);
 
   return {
     isLoading,

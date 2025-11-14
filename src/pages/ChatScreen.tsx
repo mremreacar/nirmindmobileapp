@@ -205,6 +205,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     dismissKeyboard,
     textInputRef,
     setIsInputFocused,
+    isKeyboardVisible, // Klavye durumunu geçir
   });
 
   const {
@@ -475,31 +476,9 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   // AI response is handled by useChatMessages hook - no duplicate logic needed
 
 
-  // Auto scroll to bottom when messages change - Optimized with debouncing
-  // Klavye açılma animasyonu ile çakışmaması için delay ekle
-  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  useEffect(() => {
-    // Önceki timeout'u temizle
-    if (scrollTimeoutRef.current) {
-      clearTimeout(scrollTimeoutRef.current);
-    }
-    
-    if (messagesArray.length > 0) {
-      // Klavye açılma animasyonu tamamlandıktan sonra scroll yap
-      // Klavye açıksa daha uzun bekle, yoksa kısa bekle
-      const delay = isKeyboardVisible ? 350 : 150;
-      
-      scrollTimeoutRef.current = setTimeout(() => {
-        scrollViewRef.current?.scrollToEnd({ animated: true });
-      }, delay);
-    }
-    
-    return () => {
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
-    };
-  }, [messagesArray.length, isKeyboardVisible]);
+  // Auto scroll to bottom when messages change - MessageList zaten scroll yapıyor
+  // ChatScreen'deki scroll mantığını kaldırdık - çakışmayı önlemek için
+  // MessageList kendi scroll mantığını yönetiyor (debounce ile optimize edilmiş)
 
 
   const handleQuickSuggestionSelect = async (suggestion: {question: string, promptType: string}) => {
@@ -538,13 +517,9 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   };
 
   const handleInputFocus = useCallback(() => {
-    // Auto-scroll to input when focused - delay ile daha smooth
-    if (scrollViewRef.current && isKeyboardVisible) {
-      setTimeout(() => {
-        scrollViewRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-    }
-  }, [isKeyboardVisible]);
+    // Auto-scroll to input when focused - MessageList zaten scroll yapıyor
+    // Burada scroll yapmaya gerek yok, çakışmayı önlemek için kaldırıldı
+  }, []);
 
   const handleInputBlur = useCallback(() => {
     // Optional: Keep focus state for better UX

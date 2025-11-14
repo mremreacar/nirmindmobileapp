@@ -9,7 +9,8 @@ export const getResponsivePadding = () => {
 };
 
 export const getResponsiveWidth = () => {
-  if (isTablet) return Math.min(screenWidth * 0.8, 600);
+  if (isTablet) return Math.min(screenWidth * 0.9, 700); // Büyük ekranlar için artırıldı: 0.8 -> 0.9, 600 -> 700
+  if (isLargeScreen) return Math.min(screenWidth * 0.95, 500); // Büyük ekranlar için artırıldı: 400 -> 500
   return Math.min(screenWidth * 0.95, 400);
 };
 

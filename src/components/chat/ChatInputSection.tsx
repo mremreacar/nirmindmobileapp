@@ -246,9 +246,11 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     justifyContent: 'flex-end',
     alignItems: 'flex-start',
-    paddingHorizontal: 17,
+    paddingHorizontal: 17, // Responsive padding getResponsivePadding() ile ayarlanacak
     paddingBottom: 20,
     gap: 8,
+    width: '100%', // Tam genişlik kullan
+    maxWidth: '100%', // Maksimum genişlik sınırı yok
   },
   devIndicatorInput: {
     position: 'absolute',

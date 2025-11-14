@@ -1141,47 +1141,126 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       return;
     }
 
+    // Geçici streaming mesajlarını kontrol et (backend'de olmayan mesajlar)
+    // ID formatına göre karar ver - conversations array'ini aramaya gerek yok
+    // Geçici mesaj ID formatları:
+    // - ai-streaming-{timestamp} (streaming AI mesajları)
+    // - thinking-{timestamp} (thinking mesajları)
+    // - user-{timestamp} (optimistic user mesajları - eğer varsa)
+    const isTemporaryStreamingMessage = messageId.startsWith('ai-streaming-') || 
+                                       messageId.startsWith('thinking-') ||
+                                       messageId.startsWith('user-');
+
+    // Eğer geçici streaming mesajı ise, sadece local'den sil (backend'e istek gönderme)
+    if (isTemporaryStreamingMessage) {
+      console.log('⚠️ Geçici streaming mesajı siliniyor (backend\'e istek gönderilmiyor):', messageId);
+      
+      // Sadece local state'den kaldır
+      setConversations(prev => 
+        prev.map(conv => 
+          conv.id === conversationId 
+            ? { 
+                ...conv, 
+                messages: conv.messages.filter(msg => msg.id !== messageId)
+              }
+            : conv
+        )
+      );
+      
+      // Eğer current conversation ise, onu da güncelle
+      if (currentConversation?.id === conversationId) {
+        setCurrentConversation(prev => 
+          prev ? {
+            ...prev,
+            messages: prev.messages.filter(msg => msg.id !== messageId)
+          } : null
+        );
+      }
+      
+      // Cache'i invalidate et - mesaj silindi
+      const cached = messageCacheRef.current.get(conversationId);
+      if (cached) {
+        messageCacheRef.current.set(conversationId, {
+          messages: cached.messages.filter(msg => msg.id !== messageId),
+          timestamp: cached.timestamp
+        });
+      }
+      
+      console.log('✅ Geçici mesaj local\'den silindi');
+      return; // Backend'e istek gönderme
+    }
+
+    // Gerçek mesajlar için: Optimistic update: Önce local state'den mesajı kaldır (kullanıcı deneyimi için)
+    // Önceki state'i sakla (rollback için)
+    let previousConversations: ChatConversation[] | null = null;
+    let previousCurrentConversation: ChatConversation | null = null;
+    let cached: { messages: ChatMessage[]; timestamp: number } | undefined;
+    
+    // Önceki state'i yakala (functional update kullanarak)
+    setConversations(prev => {
+      previousConversations = prev;
+      return prev.map(conv => 
+        conv.id === conversationId 
+          ? { 
+              ...conv, 
+              messages: conv.messages.filter(msg => msg.id !== messageId)
+            }
+          : conv
+      );
+    });
+    
+    // Eğer current conversation ise, onu da güncelle ve önceki state'i sakla
+    if (currentConversation?.id === conversationId) {
+      setCurrentConversation(prev => {
+        previousCurrentConversation = prev;
+        return prev ? {
+          ...prev,
+          messages: prev.messages.filter(msg => msg.id !== messageId)
+        } : null;
+      });
+    }
+    
+    // Cache'i invalidate et - mesaj silindi
+    cached = messageCacheRef.current.get(conversationId);
+    if (cached) {
+      messageCacheRef.current.set(conversationId, {
+        messages: cached.messages.filter(msg => msg.id !== messageId),
+        timestamp: cached.timestamp
+      });
+    }
+
     try {
       const response = await backendApiService.deleteMessage(messageId);
       
       if (response.success) {
-        // Local state'den mesajı kaldır
-        setConversations(prev => 
-          prev.map(conv => 
-            conv.id === conversationId 
-              ? { 
-                  ...conv, 
-                  messages: conv.messages.filter(msg => msg.id !== messageId)
-                }
-              : conv
-          )
-        );
-        
-        // Eğer current conversation ise, onu da güncelle
-        if (currentConversation?.id === conversationId) {
-          setCurrentConversation(prev => 
-            prev ? {
-              ...prev,
-              messages: prev.messages.filter(msg => msg.id !== messageId)
-            } : null
-          );
-        }
-        
-        // Cache'i invalidate et - mesaj silindi
-        const cached = messageCacheRef.current.get(conversationId);
-        if (cached) {
-          messageCacheRef.current.set(conversationId, {
-            messages: cached.messages.filter(msg => msg.id !== messageId),
-            timestamp: cached.timestamp
-          });
-        }
-        
         console.log('✅ Mesaj başarıyla silindi');
       } else {
-        console.error('❌ Mesaj silme hatası:', response.error);
+        // Backend başarısız oldu, state'i geri yükle
+        console.error('❌ Mesaj silme hatası (state geri yükleniyor):', response.error);
+        if (previousConversations) {
+          setConversations(previousConversations);
+        }
+        if (previousCurrentConversation) {
+          setCurrentConversation(previousCurrentConversation);
+        }
+        // Cache'i de geri yükle
+        if (cached) {
+          messageCacheRef.current.set(conversationId, cached);
+        }
       }
     } catch (error) {
-      console.error('❌ Mesaj silme hatası:', error);
+      // Backend hatası, state'i geri yükle
+      console.error('❌ Mesaj silme hatası (state geri yükleniyor):', error);
+      if (previousConversations) {
+        setConversations(previousConversations);
+      }
+      if (previousCurrentConversation) {
+        setCurrentConversation(previousCurrentConversation);
+      }
+      // Cache'i de geri yükle
+      if (cached) {
+        messageCacheRef.current.set(conversationId, cached);
+      }
     }
   }, [backendApiService, currentConversation]);
 

@@ -51,17 +51,17 @@ const getResponsiveTextMarginBottom = () => {
 };
 
 const getResponsiveFontSize = () => {
-  const baseFontSize = Math.min(width * 0.06, height * 0.035);
-  if (isSmallScreen) return Math.max(baseFontSize * 0.9, 20);
-  if (isLargeScreen) return Math.max(baseFontSize * 1.2, 26);
-  return Math.max(baseFontSize, 22);
+  const baseFontSize = Math.min(width * 0.05, height * 0.03); // Küçültüldü: 0.06 -> 0.05, 0.035 -> 0.03
+  if (isSmallScreen) return Math.max(baseFontSize * 0.85, 18); // Küçültüldü: 0.9 -> 0.85, 20 -> 18
+  if (isLargeScreen) return Math.max(baseFontSize * 1.0, 22); // Küçültüldü: 1.2 -> 1.0, 26 -> 22
+  return Math.max(baseFontSize, 20); // Küçültüldü: 22 -> 20
 };
 
 const getResponsiveAssistantFontSize = () => {
-  const baseFontSize = Math.min(width * 0.035, height * 0.02);
-  if (isSmallScreen) return Math.max(baseFontSize * 0.9, 14);
-  if (isLargeScreen) return Math.max(baseFontSize * 1.2, 18);
-  return Math.max(baseFontSize, 16);
+  const baseFontSize = Math.min(width * 0.03, height * 0.018); // Küçültüldü: 0.035 -> 0.03, 0.02 -> 0.018
+  if (isSmallScreen) return Math.max(baseFontSize * 0.85, 12); // Küçültüldü: 0.9 -> 0.85, 14 -> 12
+  if (isLargeScreen) return Math.max(baseFontSize * 1.0, 15); // Küçültüldü: 1.2 -> 1.0, 18 -> 15
+  return Math.max(baseFontSize, 14); // Küçültüldü: 16 -> 14
 };
 
 interface HeroSectionProps {
@@ -126,8 +126,9 @@ const HeroSection: React.FC<HeroSectionProps> = ({ animationProgress, isKeyboard
     };
   }, [animationProgress, isKeyboardVisible]);
 
-  // İlk mount'ta görseli yükle
+  // Görseli hemen yükle - optimizasyon için mount'ta direkt başlat
   useEffect(() => {
+    // Görseli hemen yüklemeye başla (delay yok)
     setShouldLoadImage(true);
   }, []);
 
