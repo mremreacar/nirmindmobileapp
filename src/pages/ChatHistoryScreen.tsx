@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,8 @@ import {
   ActivityIndicator,
   RefreshControl,
   TouchableWithoutFeedback,
+  PanResponder,
+  Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFonts } from 'expo-font';
@@ -63,6 +65,92 @@ const nirmindLogoIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 17
 const MAX_CONVERSATIONS_DISPLAY = 10;
 const REFRESH_MIN_DURATION = 700;
 
+// Conversation Item Component - memoize edildi (performans için)
+interface ConversationItemProps {
+  conversation: ChatConversation;
+  onSelect: (id: string) => void;
+  onDelete: (id: string, title: string) => void;
+  isLoading: boolean;
+}
+
+const ConversationItem = memo<ConversationItemProps>(({ conversation, onSelect, onDelete, isLoading }) => {
+  const title = useMemo(() => conversation.title || 'Sohbet', [conversation.title]);
+  
+  const handlePress = useCallback(() => {
+    onSelect(conversation.id);
+  }, [conversation.id, onSelect]);
+  
+  const handleLongPress = useCallback(() => {
+    onDelete(conversation.id, title);
+  }, [conversation.id, title, onDelete]);
+
+  return (
+    <View style={styles.conversationItem}>
+      <TouchableOpacity 
+        style={styles.chatItem}
+        activeOpacity={0.7}
+        onPress={handlePress}
+        onLongPress={handleLongPress}
+        disabled={isLoading}
+      >
+        <View style={styles.chatItemContent}>
+          <Text allowFontScaling={false} style={styles.chatText}>{title}</Text>
+        </View>
+      </TouchableOpacity>
+    </View>
+  );
+});
+
+ConversationItem.displayName = 'ConversationItem';
+
+// Skeleton Loader Component - smooth loading animation
+interface SkeletonLoaderProps {
+  count: number;
+}
+
+const SkeletonLoader = memo<SkeletonLoaderProps>(({ count }) => {
+  const fadeAnim = useRef(new Animated.Value(0.3)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(fadeAnim, {
+          toValue: 0.7,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(fadeAnim, {
+          toValue: 0.3,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [fadeAnim]);
+
+  return (
+    <>
+      {Array.from({ length: count }).map((_, index) => (
+        <View key={`skeleton-${index}`} style={styles.conversationItem}>
+          <Animated.View 
+            style={[
+              styles.chatItem, 
+              styles.chatItemSkeleton,
+              { opacity: fadeAnim }
+            ]}
+          >
+            <View style={styles.skeletonTitle} />
+          </Animated.View>
+        </View>
+      ))}
+    </>
+  );
+});
+
+SkeletonLoader.displayName = 'SkeletonLoader';
+
 interface ChatHistoryScreenProps {
   onBack: () => void;
   onSelectConversation?: (conversationId: string) => void;
@@ -91,6 +179,51 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const autoLoadingRef = useRef(false);
   const scrollViewRef = useRef<ScrollView>(null);
+  
+  // PanResponder for swipe gesture - soldan sağa VEYA sağdan sola çekme ile geri dönme (memoized)
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: (evt) => {
+          // Sol kenardan (ilk 30px) veya sağ kenardan (son 30px) başlayan dokunuşları yakala
+          const startX = evt.nativeEvent.pageX;
+          const screenWidth = Dimensions.get('window').width;
+          return startX < 30 || startX > screenWidth - 30;
+        },
+        onMoveShouldSetPanResponder: (evt, gestureState) => {
+          // Sol kenardan başlayan ve sağa doğru hareket eden gesture'ları algıla
+          // VEYA sağ kenardan başlayan ve sola doğru hareket eden gesture'ları algıla
+          const startX = evt.nativeEvent.pageX - gestureState.dx;
+          const screenWidth = Dimensions.get('window').width;
+          const isFromLeftEdge = startX < 30;
+          const isFromRightEdge = startX > screenWidth - 30;
+          const isRightwardSwipe = gestureState.dx > 20; // Sağa doğru çekme
+          const isLeftwardSwipe = gestureState.dx < -20; // Sola doğru çekme
+          const isMostlyHorizontal = Math.abs(gestureState.dy) < Math.abs(gestureState.dx) * 2;
+          
+          // Sol kenardan sağa çekme VEYA sağ kenardan sola çekme
+          return (
+            (isFromLeftEdge && isRightwardSwipe && isMostlyHorizontal) ||
+            (isFromRightEdge && isLeftwardSwipe && isMostlyHorizontal)
+          );
+        },
+        onPanResponderGrant: () => {
+          // Swipe gesture başladı
+        },
+        onPanResponderMove: (evt, gestureState) => {
+          // Hareket sırasında herhangi bir animasyon yapma
+          // Sadece gesture'ı takip et
+        },
+        onPanResponderRelease: (evt, gestureState) => {
+          // Eğer yeterince sağa çekildiyse (sol kenardan) VEYA yeterince sola çekildiyse (sağ kenardan) geri dön
+          // Threshold'u düşürdük - daha kolay tetiklenir
+          if (gestureState.dx > 50 || gestureState.dx < -50) {
+            onBack();
+          }
+        },
+      }),
+    [onBack]
+  );
   
   // Keyboard handling
   const {
@@ -223,10 +356,15 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
     });
   }, [filteredConversations, getConversationMessageCount]);
 
-  const conversationsForDisplay = messageEligibleConversations.length > 0 ? messageEligibleConversations : filteredConversations;
+  // Gösterilecek conversation'lar - memoize edildi (performans için)
+  const conversationsForDisplay = useMemo(() => {
+    return messageEligibleConversations.length > 0 ? messageEligibleConversations : filteredConversations;
+  }, [messageEligibleConversations, filteredConversations]);
 
-  // Gösterilecek konuşmalar
-  const displayedConversations = conversationsForDisplay.slice(0, visibleConversationCount);
+  // Gösterilecek konuşmalar - memoize edildi (performans için)
+  const displayedConversations = useMemo(() => {
+    return conversationsForDisplay.slice(0, visibleConversationCount);
+  }, [conversationsForDisplay, visibleConversationCount]);
 
   const hasMoreLocalConversations = visibleConversationCount < conversationsForDisplay.length;
   const shouldShowLoadMoreButton = conversationsForDisplay.length > 0 && (hasMoreLocalConversations || hasMoreConversations);
@@ -270,7 +408,7 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
     // loadConversations dependency'sini kaldırdık - infinite loop'a neden oluyor
   ]);
 
-  const handleConversationSelect = async (conversationId: string) => {
+  const handleConversationSelect = useCallback(async (conversationId: string) => {
     // Klavyeyi kapat - hem hemen hem de navigation öncesi
     Keyboard.dismiss();
     
@@ -284,35 +422,39 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
     setLoadingConversationId(conversationId);
     
     try {
-      // selectConversation'ı await et - cache'den yükleme durumunda state'in güncellenmesini bekle
+      // CRITICAL FIX: selectConversation'ı await et - mesajların yüklendiğinden emin ol
       await selectConversation(conversationId);
       
       // State update'in tamamlanması için kısa bir delay (cache'den yükleme durumunda)
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 100));
       
       console.log("✅ Conversation ChatContext'te seçildi:", conversationId);
 
+      // CRITICAL FIX: onSelectConversation callback'ini çağırmadan önce conversation'ın yüklendiğinden emin ol
       if (onSelectConversation) {
         onSelectConversation(conversationId);
       }
 
       // onBack() çağrılmadan önce state'in güncellenmesini bekle ve klavyeyi tekrar kapat
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 100));
       
       // Navigation öncesi klavyeyi tekrar kapat (garanti için)
       Keyboard.dismiss();
       
+      // CRITICAL FIX: onBack() çağrılmadan önce conversation'ın tamamen yüklendiğinden emin ol
       onBack();
     } catch (error: any) {
       console.error('❌ Conversation seçilirken hata:', error);
       Alert.alert('Sohbet açılamadı', error?.message || 'Sohbet açılırken bir hata oluştu. Lütfen tekrar deneyin.');
     } finally {
-      setLoadingConversationId(null);
+      // CRITICAL FIX: Loading state'ini temizle ama biraz gecikmeyle (UI feedback için)
+      setTimeout(() => {
+        setLoadingConversationId(null);
+      }, 300);
     }
-  };
+  }, [loadingConversationId, selectConversation, onSelectConversation, onBack]);
 
-
-  const handleDeleteConversation = (conversationId: string, conversationTitle: string) => {
+  const handleDeleteConversation = useCallback((conversationId: string, conversationTitle: string) => {
     Alert.alert(
       'Sohbeti Sil',
       `"${conversationTitle}" sohbetini silmek istediğinizden emin misiniz?`,
@@ -328,7 +470,7 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
         },
       ]
     );
-  };
+  }, [deleteConversation]);
 
   const handleRefresh = async () => {
     try {
@@ -368,7 +510,7 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
   };
 
   return (
-    <View style={styles.chatHistoryContainer}>
+    <View style={styles.chatHistoryContainer} {...panResponder.panHandlers}>
       <TouchableWithoutFeedback onPress={handleScreenPress} accessible={false}>
         <LinearGradient
           colors={['#02020A', '#16163C']}
@@ -404,10 +546,10 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
           ]}
           refreshControl={
             <RefreshControl
-              refreshing={isRefreshing}
+              refreshing={false} // Varsayılan loading'i gizle - manuel loading göstergesi kullanılıyor
               onRefresh={handleRefresh}
-              tintColor="#00DDA5"
-              colors={['#00DDA5']}
+              tintColor="transparent" // iOS'ta loading rengini transparent yap
+              colors={['transparent']} // Android'de loading rengini transparent yap
             />
           }
         >
@@ -444,28 +586,16 @@ const ChatHistoryScreen: React.FC<ChatHistoryScreenProps> = ({
           {/* Chat List */}
           <View style={styles.chatList}>
             {isInitialLoading && conversationsForDisplay.length === 0 ? (
-              Array.from({ length: 6 }).map((_, index) => (
-                <View key={`skeleton-${index}`} style={styles.conversationItem}>
-                  <View style={[styles.chatItem, styles.chatItemSkeleton]}>
-                    <View style={styles.skeletonTitle} />
-                  </View>
-                </View>
-              ))
+              <SkeletonLoader count={6} />
             ) : displayedConversations.length > 0 ? (
               displayedConversations.map((conversation) => (
-                <View key={conversation.id} style={styles.conversationItem}>
-                  <TouchableOpacity 
-                    style={styles.chatItem}
-                    activeOpacity={0.7}
-                    onPress={() => handleConversationSelect(conversation.id)}
-                    onLongPress={() => handleDeleteConversation(conversation.id, conversation.title || 'Sohbet')}
-                    disabled={!!loadingConversationId}
-                  >
-                    <View style={styles.chatItemContent}>
-                      <Text allowFontScaling={false} style={styles.chatText}>{conversation.title || 'Sohbet'}</Text>
-                    </View>
-                  </TouchableOpacity>
-                </View>
+                <ConversationItem
+                  key={conversation.id}
+                  conversation={conversation}
+                  onSelect={handleConversationSelect}
+                  onDelete={handleDeleteConversation}
+                  isLoading={!!loadingConversationId}
+                />
               ))
             ) : (
               <View style={styles.emptyStateContainer}>

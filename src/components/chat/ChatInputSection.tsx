@@ -176,13 +176,6 @@ const ChatInputSection: React.FC<ChatInputSectionProps> = ({
   return (
     <TouchableWithoutFeedback onPress={onInputAreaPress}>
       <Container {...containerProps}>
-        {/* Dev Mode Debug Indicator - Sadece development modunda görünür */}
-        {__DEV__ && (
-          <View style={styles.devIndicatorInput}>
-            <View style={styles.devIndicatorDotInput} />
-            <Text style={styles.devIndicatorTextInput}>DEV</Text>
-          </View>
-        )}
 
         <ActionButtons
           onSuggestions={onSuggestions}
@@ -217,7 +210,7 @@ const ChatInputSection: React.FC<ChatInputSectionProps> = ({
           onFocus={onFocus}
           onBlur={onBlur}
           placeholder={placeholder}
-          multiline={multiline}
+          multiline={multiline !== undefined ? multiline : true} // Varsayılan olarak true (her zaman multiline aktif)
           maxLength={maxLength}
           autoCorrect={autoCorrect}
           autoCapitalize={autoCapitalize}
@@ -246,7 +239,7 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     justifyContent: 'flex-end',
     alignItems: 'flex-start',
-    paddingHorizontal: 17, // Responsive padding getResponsivePadding() ile ayarlanacak
+    paddingHorizontal: 12, // Kenarlara göre optimize edildi: 17 -> 12
     paddingBottom: 20,
     gap: 8,
     width: '100%', // Tam genişlik kullan

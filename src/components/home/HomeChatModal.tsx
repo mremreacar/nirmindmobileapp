@@ -51,10 +51,6 @@ const HomeChatModal: React.FC<HomeChatModalProps> = ({
             chatScreenOpacity ? { opacity: chatScreenOpacity } : undefined,
           ]}
         >
-          {/* Dev Mode: HomeChatModal alanını siyah çerçeve ile belirle */}
-          {__DEV__ && (
-            <View style={styles.devModalBorder} />
-          )}
           <ChatScreen
             translateX={translateX}
             onClose={onRequestClose}

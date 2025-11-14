@@ -152,23 +152,16 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   }, [softDeletedConversationIds]);
 
   const addMessage = useCallback(async (conversationId: string, message: ChatMessage) => {
-    // Message validation
+    // ChatGPT benzeri akış: addMessage sadece mesaj ekler
+    // Conversation oluşturma sendMessage içinde yapılıyor
+    
     if (!message || !message.id) {
       console.error('❌ addMessage: Geçersiz mesaj objesi:', message);
       return;
     }
     
-    const messageText = message.text || '';
-    const messagePreview = messageText.length > 50 ? messageText.substring(0, 50) + '...' : messageText;
-    console.log('📝 addMessage çağrıldı:', { conversationId, messageId: message.id, isUser: message.isUser, text: messagePreview });
-    
-    // Conversation ID kontrolü
     if (!conversationId) {
-      console.error('❌ addMessage: conversationId eksik, mesaj eklenemedi:', {
-        messageId: message.id,
-        messageText: messagePreview,
-        isUser: message.isUser
-      });
+      console.error('❌ addMessage: conversationId eksik, mesaj eklenemedi:', message.id);
       return;
     }
 
@@ -177,109 +170,44 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       return;
     }
     
-    // Eğer currentConversation undefined ise veya farklı conversation'a işaret ediyorsa,
-    // önce conversation'ı kontrol et ve gerekirse yükle
-    let conversationExists = false;
+    // Conversation'ı bul veya oluştur (basit fallback)
     let foundConversation: ChatConversation | undefined;
     
     setConversations(prev => {
       foundConversation = prev.find(conv => conv.id === conversationId);
-      conversationExists = !!foundConversation;
       return prev;
     });
     
-    // Eğer conversation yoksa backend'den yükle
-    if (!conversationExists) {
-      // Eğer zaten yükleniyorsa tekrar yükleme
-      if (loadingConversationsRef.current.has(conversationId)) {
-        console.log('⚠️ Conversation zaten yükleniyor, bekleniyor...', conversationId);
-        // Bekle ve tekrar kontrol et
-        await new Promise(resolve => setTimeout(resolve, 500));
-        setConversations(prev => {
-          const retryFound = prev.find(conv => conv.id === conversationId);
-          if (retryFound) {
-            foundConversation = retryFound;
-            conversationExists = true;
-          }
-          return prev;
-        });
-        
-        if (conversationExists && foundConversation) {
-          // Conversation yüklendi, devam et
-          if (!currentConversation || currentConversation.id !== conversationId) {
-            setCurrentConversation(foundConversation);
-          }
-        } else {
-          // Hala yükleniyor, ama mesaj eklenebilmeli (conversation zaten var, sadece yükleniyor)
-          console.log('⚠️ Conversation hala yükleniyor, mesaj ekleniyor (conversation yüklenene kadar bekleniyor)');
-          // Return etme, mesaj eklenebilmeli
-          // Conversation yoksa fallback olarak oluşturulacak (aşağıdaki kod)
+    // Conversation yoksa basit bir fallback oluştur (sendMessage zaten oluşturmuş olmalı)
+    if (!foundConversation) {
+      // Sessizce geçici conversation oluştur - bu normal bir durum olabilir
+      const tempConversation: ChatConversation = {
+        id: conversationId,
+        title: 'Yeni Sohbet',
+        isResearchMode: false,
+        isSoftDeleted: false,
+        messages: [] as ChatMessage[],
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      
+      setConversations(prevConvs => {
+        const exists = prevConvs.find(c => c.id === conversationId);
+        if (!exists) {
+          return [tempConversation, ...prevConvs];
         }
-      } else {
-        // Yükleme işlemini başlat
-        loadingConversationsRef.current.add(conversationId);
-        console.log('⚠️ Conversation henüz yüklenmemiş, backend\'den yükleniyor...', conversationId);
-        try {
-          const convResponse = await backendApiService.getConversation(conversationId);
-          
-          // Rate limit hatası kontrolü - sessizce atla
-          if (!convResponse.success && 
-              (convResponse.error === 'Çok fazla istek' || 
-               convResponse.message?.includes('Çok fazla istek') ||
-               convResponse.message?.includes('rate limit'))) {
-            console.warn('⚠️ Rate limit hatası - conversation yüklenemedi, geçici conversation oluşturulacak');
-            loadingConversationsRef.current.delete(conversationId);
-            // Rate limit hatasında sessizce devam et, geçici conversation oluşturulacak
-          } else if (convResponse.success && convResponse.data) {
-            const convData = convResponse.data;
-            const newConversation: ChatConversation = {
-              id: convData.id,
-              title: convData.title,
-              isResearchMode: convData.isResearchMode || false,
-              isSoftDeleted: false,
-              messages: [] as ChatMessage[],
-              createdAt: new Date(convData.createdAt),
-              updatedAt: new Date(convData.updatedAt)
-            };
-            
-            setConversations(prevConvs => {
-              const exists = prevConvs.find(c => c.id === conversationId);
-              if (!exists) {
-                return [newConversation, ...prevConvs];
-              }
-              return prevConvs;
-            });
-            
-            setCurrentConversation(newConversation);
-            foundConversation = newConversation;
-            conversationExists = true;
-            loadingConversationsRef.current.delete(conversationId);
-            console.log('✅ Conversation backend\'den yüklendi ve seçildi:', conversationId);
-          } else {
-            loadingConversationsRef.current.delete(conversationId);
-          }
-        } catch (error: any) {
-          loadingConversationsRef.current.delete(conversationId);
-          // Rate limit hatası kontrolü
-          const errorMessage = error.message || '';
-          if (errorMessage.includes('Çok fazla istek') || 
-              errorMessage.includes('rate limit') || 
-              errorMessage.includes('429')) {
-            console.warn('⚠️ Rate limit hatası - conversation yüklenemedi, geçici conversation oluşturulacak');
-            // Rate limit hatasında sessizce devam et
-          } else {
-            console.error('❌ Conversation yüklenirken hata:', error);
-          }
-          // Devam et, fallback olarak geçici conversation oluşturulacak
-        }
+        return prevConvs;
+      });
+      
+      foundConversation = tempConversation;
+      
+      // Eğer currentConversation yoksa veya farklıysa güncelle
+      if (!currentConversation || currentConversation.id !== conversationId) {
+        setCurrentConversation(tempConversation);
       }
     } else if (!currentConversation || currentConversation.id !== conversationId) {
-      // Conversation var ama currentConversation farklı veya undefined
-      console.log('⚠️ Conversation var ama seçili değil, seçiliyor...', conversationId);
-      if (foundConversation) {
-        setCurrentConversation(foundConversation);
-        console.log('✅ Conversation seçildi:', conversationId);
-      }
+      // Conversation var ama currentConversation farklı
+      setCurrentConversation(foundConversation);
     }
     
     // Duplicate kontrolü - aynı ID'ye sahip mesaj varsa ekleme
@@ -368,15 +296,16 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       }
     }
 
-    // İlk kullanıcı mesajından sonra başlık güncelle ve backend'e konuşma kaydet
+    // İlk kullanıcı mesajından sonra başlık güncelle (backend ID varsa)
     if (message.isUser && message.text && message.text.trim() && messageAdded) {
       setConversations(prev => {
         const conversation = prev.find(conv => conv.id === conversationId);
-        if (conversation && (conversation.title === "Yeni Sohbet" || conversation.title === "New Conversation")) {
-          // İlk mesajdan otomatik başlık oluştur
+        if (conversation && 
+            (conversation.title === "Yeni Sohbet" || conversation.title === "New Conversation") &&
+            !conversationId.startsWith('conv-')) {
+          // Backend ID'si varsa başlığı güncelle
           const newTitle = generateConversationTitle(message.text);
           
-          // Başlığı güncelle - setTimeout ile async işlemi yap
           setTimeout(() => {
             setConversations(prevConvs => 
               prevConvs.map(conv => 
@@ -392,33 +321,9 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
           }, 0);
           
           // Backend'e başlık güncellemesi gönder
-          if (!conversationId.startsWith('conv-')) {
-            // Backend ID'si varsa başlığı güncelle
-            backendApiService.updateConversation(conversationId, newTitle).catch(error => {
-              console.error('❌ Backend başlık güncelleme hatası:', error);
-            });
-          } else {
-            // Eğer konuşma local ise (Backend ID'si yoksa), backend'e kaydet
-            backendApiService.createConversation(newTitle).then(response => {
-              if (response.success && response.data) {
-                // Konuşma ID'sini backend ID ile güncelle
-                setConversations(prevConvs => 
-                  prevConvs.map(conv => 
-                    conv.id === conversationId 
-                      ? { ...conv, id: response.data!.id }
-                      : conv
-                  )
-                );
-                
-                // Current conversation'ı da güncelle
-                setCurrentConversation(prev => 
-                  prev && prev.id === conversationId ? { ...prev, id: response.data!.id } : prev
-                );
-              }
-            }).catch(error => {
-              console.error('❌ Local konuşma backend\'e kaydetme hatası:', error);
-            });
-          }
+          backendApiService.updateConversation(conversationId, newTitle).catch(error => {
+            console.error('❌ Backend başlık güncelleme hatası:', error);
+          });
         }
         return prev;
       });
@@ -433,6 +338,25 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   // Update message in conversation (for streaming updates)
   // Bu fonksiyon duplicate kontrolü yapmaz, sadece günceller veya ekler
   const updateMessage = useCallback((conversationId: string, message: ChatMessage) => {
+    // CRITICAL FIX: Boş text ile updateMessage çağrılmasını önle
+    // Boş text ile güncelleme yapmak gereksiz ve performans sorunlarına neden olur
+    // Streaming mesajları için text boş olabilir (sadece "Düşünüyorum..." gösterilecek), bu durumda güncelleme yap
+    if (!message.isStreaming && (!message.text || message.text.trim().length === 0)) {
+      // Boş text ve streaming değil, güncelleme yapma
+      return;
+    }
+    
+    // Sadece önemli durumlarda log (ilk mesaj veya sorun varsa)
+    if (message.text && (message.text.length <= 2 || message.text.length % 500 === 0)) {
+      console.log('💬 [AI] Mesaj context\'e güncellendi:', {
+        conversationId,
+        messageId: message.id,
+        textLength: message.text.length,
+        isStreaming: message.isStreaming,
+        hasContent: message.text.length > 0
+      });
+    }
+    
     if (softDeletedConversationsRef.current.has(conversationId)) {
       console.warn('⚠️ Soft delete edilmiş conversation\'daki mesaj güncellenemez:', conversationId);
       return;
@@ -463,24 +387,63 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       if (messageIndex >= 0) {
         // Mesaj zaten var, güncelle
         const existingMessage = conversation.messages[messageIndex];
-        // Eğer mesaj aynıysa (text ve timestamp aynı), güncelleme yapma
-        if (existingMessage.text === message.text && 
+        // Eğer mesaj aynıysa (text, streaming, user aynı), güncelleme yapma
+        // Ama streaming mesajları için text değiştiyse her zaman güncelle (streaming sırasında text sürekli değişir)
+        const isStreamingUpdate = message.isStreaming || existingMessage.isStreaming;
+        const textChanged = existingMessage.text !== message.text;
+        
+        if (!isStreamingUpdate && !textChanged &&
+            existingMessage.text === message.text && 
             existingMessage.isStreaming === message.isStreaming &&
             existingMessage.isUser === message.isUser) {
-          // Mesaj aynı, güncelleme yapma (duplicate önleme)
+          // Mesaj aynı ve streaming değil, güncelleme yapma (duplicate önleme)
+          // Ama yine de yeni array döndür (React state güncellemesi için)
           updatedConversation = conversation;
-          return prev;
+          return prev; // Aynı array'i döndür - React state güncellemesi algılanmayacak ama bu durumda sorun değil
         }
+        
+        // Streaming güncellemesi veya text değişti - her zaman güncelle
         // Mesaj farklı, güncelle
-        const updatedMessages = conversation.messages.map((msg, idx) => idx === messageIndex ? message : msg);
+        // Thinking steps kaldırıldı - artık frontend'de işlenmiyor
+        // updateMessage logları kaldırıldı (çok fazla log üretiyordu)
+        
+        let finalMessage = message;
+        
+        // Text field'ını merge et: 
+        // - Eğer yeni mesajın text'i varsa, onu kullan (ana mesaj geldiğinde)
+        // - Eğer yeni mesajın text'i boşsa, mevcut text'i koru ("Düşünüyorum..." gösterilecek)
+        if (!message.text || message.text.trim() === '') {
+          // Yeni mesajın text'i boş, mevcut text'i koru (MessageList'te "Düşünüyorum..." gösterilecek)
+          finalMessage = {
+            ...finalMessage,
+            text: existingMessage.text || ''
+          };
+        }
+        // Eğer yeni mesajın text'i varsa, onu kullan (ana mesaj geldiğinde) - finalMessage zaten message'ı içeriyor
+        
+        const updatedMessages = conversation.messages.map((msg, idx) => idx === messageIndex ? finalMessage : msg);
         updatedConversation = {
           ...conversation,
           messages: updatedMessages,
           updatedAt: new Date()
         };
-        return prev.map(conv =>
+        
+        // Yeni array döndür - React state güncellemesi için referans değişmeli
+        const newConversations = prev.map(conv =>
           conv.id === conversationId ? updatedConversation! : conv
         );
+        
+        // Sadece önemli durumlarda log (ilk mesaj veya sorun varsa)
+        if (message.text && (message.text.length <= 2 || message.text.length % 500 === 0)) {
+          console.log('💬 [AI] Conversations array güncellendi:', {
+            conversationId,
+            messageId: message.id,
+            textLength: message.text.length,
+            messageCount: newConversations.find(c => c.id === conversationId)?.messages?.length || 0
+          });
+        }
+        
+        return newConversations;
       }
       // Mesaj yok, ekle
       const updatedMessages = [...conversation.messages, message];
@@ -491,9 +454,23 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         updatedAt: new Date()
       };
       
-      return prev.map(conv =>
+      // Yeni array döndür - React state güncellemesi için referans değişmeli
+      const newConversations = prev.map(conv =>
         conv.id === conversationId ? updatedConversation! : conv
       );
+      
+      // Sadece önemli durumlarda log (yeni mesaj eklendiğinde)
+      if (message.text && message.text.length > 0) {
+        console.log('💬 [AI] Yeni mesaj eklendi:', {
+          conversationId,
+          messageId: message.id,
+          textLength: message.text.length,
+          isUser: message.isUser,
+          messageCount: newConversations.find(c => c.id === conversationId)?.messages?.length || 0
+        });
+      }
+      
+      return newConversations;
     });
     
     // currentConversation'ı da güncelle
@@ -508,14 +485,24 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
           if (messageIndex >= 0) {
             // Mesaj zaten var, duplicate kontrolü yap
             const existingMessage = prevConv.messages[messageIndex];
-            // Eğer mesaj aynıysa, güncelleme yapma
+            // Eğer mesaj aynıysa (text, streaming, user aynı), güncelleme yapma
             if (existingMessage.text === message.text && 
                 existingMessage.isStreaming === message.isStreaming &&
                 existingMessage.isUser === message.isUser) {
               return prevConv; // Mesaj aynı, güncelleme yapma
             }
             // Mesaj farklı, güncelle
+            // Thinking steps kaldırıldı - artık frontend'de işlenmiyor
             const updatedMessages = prevConv.messages.map((msg, idx) => idx === messageIndex ? message : msg);
+            // Log'u sadece önemli durumlarda göster (ilk birkaç karakter veya her 500 karakter)
+            if (!message.text || message.text.length <= 2 || message.text.length % 500 === 0) {
+              console.log('✅ currentConversation mesajı güncellendi:', { 
+                conversationId, 
+                messageId: message.id,
+                messageCount: updatedMessages.length,
+                textLength: message.text?.length || 0
+              });
+            }
             return {
               ...prevConv,
               messages: updatedMessages,
@@ -523,18 +510,36 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
             };
           }
           // Mesaj yok, ekle
-          return {
-            ...prevConv,
-            messages: [...prevConv.messages, message],
-            updatedAt: new Date()
-          };
+          const messageExists = prevConv.messages.some(msg => msg.id === message.id);
+          if (!messageExists) {
+            console.log('✅ currentConversation\'a yeni mesaj eklendi:', { 
+              conversationId, 
+              messageId: message.id,
+              previousMessageCount: prevConv.messages.length,
+              newMessageCount: prevConv.messages.length + 1
+            });
+            return {
+              ...prevConv,
+              messages: [...prevConv.messages, message],
+              updatedAt: new Date()
+            };
+          }
+          return prevConv;
         } else {
           // Farklı conversation veya undefined, güncellenmiş conversation'ı kullan
-          return updatedConversation;
+          if (updatedConversation) {
+            console.log('✅ currentConversation otomatik seçildi (updateMessage):', { 
+              previousId: prevConv?.id, 
+              newId: conversationId,
+              messageCount: updatedConversation.messages.length
+            });
+            return updatedConversation;
+          }
+          return prevConv;
         }
       });
     }
-  }, [currentConversation]);
+  }, []); // currentConversation dependency'sini kaldırdık - closure sorununu önlemek için
 
   // Remove message from conversation (for optimistic updates)
   const removeMessage = useCallback((conversationId: string, messageId: string) => {
@@ -554,15 +559,25 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       )
     );
     
-    if (currentConversation?.id === conversationId) {
-      setCurrentConversation(prev => 
-        prev ? {
+    // CRITICAL FIX: currentConversation'ı da güncelle
+    // Closure sorununu önlemek için setCurrentConversation callback pattern kullan
+    setCurrentConversation(prev => {
+      if (prev?.id === conversationId) {
+        const filteredMessages = prev.messages.filter(msg => msg.id !== messageId);
+        console.log('🗑️ currentConversation\'dan mesaj kaldırıldı:', {
+          conversationId,
+          messageId,
+          remainingMessages: filteredMessages.length
+        });
+        return {
           ...prev,
-          messages: prev.messages.filter(msg => msg.id !== messageId)
-        } : null
-      );
-    }
-  }, [currentConversation]);
+          messages: filteredMessages,
+          updatedAt: new Date()
+        };
+      }
+      return prev;
+    });
+  }, []);
 
   const createNewConversation = useCallback(async (title: string, initialMessage?: string): Promise<string> => {
     const now = new Date();
@@ -723,7 +738,53 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         });
         
         const backendMessages: ChatMessage[] = fetchedMessages
-          .filter((msg: any) => msg && msg.id) // Geçersiz mesajları filtrele
+          .filter((msg: any) => {
+            // Geçersiz mesajları filtrele
+            if (!msg || !msg.id) return false;
+            
+            // CRITICAL FIX: Boş AI mesajlarını filtrele (geçmiş sohbetlerde boş balon görünmesin)
+            // Kullanıcı mesajları her zaman göster (boş olsa bile - görsel/dosya olabilir)
+            // AI mesajları sadece text, görsel veya dosya varsa göster
+            // NOT: Backend'den text boş gelebilir ama mesaj backend'de kaydedilmişse gösterilmeli
+            // Bu durumda text'i parse ederken düzeltiyoruz
+            if (!msg.isUser) {
+              // Text parse et - null, undefined veya boş string olabilir
+              let messageText = '';
+              if (msg.text && typeof msg.text === 'string') {
+                messageText = msg.text.trim();
+              } else if (msg.text !== null && msg.text !== undefined) {
+                messageText = String(msg.text).trim();
+              }
+              
+              const hasText = messageText.length > 0;
+              const hasAttachments = msg.attachments && Array.isArray(msg.attachments) && msg.attachments.length > 0;
+              
+              // CRITICAL: Eğer mesaj backend'de kaydedilmişse (ID formatı gerçek bir ID ise), text boş olsa bile göster
+              // Çünkü bu mesaj zaten backend'de var ve muhtemelen streaming sırasında text kaybolmuş olabilir
+              // Sadece gerçekten hiçbir içeriği olmayan mesajları filtrele
+              const isRealBackendMessage = msg.id && !msg.id.startsWith('ai-streaming-') && !msg.id.startsWith('temp-');
+              
+              if (!hasText && !hasAttachments && !isRealBackendMessage) {
+                console.warn('⚠️ Boş AI mesajı filtrelendi:', {
+                  messageId: msg.id,
+                  hasText,
+                  hasAttachments,
+                  attachmentsCount: msg.attachments?.length || 0,
+                  isRealBackendMessage
+                });
+                return false; // Boş AI mesajını filtrele
+              }
+              
+              // Eğer gerçek backend mesajı ama text boşsa, log'la ama göster
+              if (isRealBackendMessage && !hasText && !hasAttachments) {
+                console.warn('⚠️ Backend AI mesajı text boş ama gösteriliyor (backend\'de kayıtlı):', {
+                  messageId: msg.id
+                });
+              }
+            }
+            
+            return true;
+          })
           .map((msg: any) => {
             // Timestamp validation - geçersiz tarihler için fallback
             let timestamp: Date;
@@ -744,6 +805,10 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
               timestamp = new Date();
             }
             
+            // CRITICAL: Backend'den gelen mesajların isStreaming flag'ini false yap
+            // Streaming mesajları sadece aktif streaming sırasında true olmalı
+            // Backend'den yüklenen mesajlar her zaman tamamlanmış mesajlardır
+            
             // Attachments validation
             const attachments = msg.attachments || [];
             const images = attachments
@@ -758,15 +823,40 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
                 mimeType: a.mimeType || undefined
               }));
             
+            // CRITICAL FIX: Text field'ını doğru parse et
+            // Backend'den text null, undefined veya boş string olabilir
+            let messageText = '';
+            if (msg.text && typeof msg.text === 'string') {
+              messageText = msg.text.trim();
+            } else if (msg.text !== null && msg.text !== undefined) {
+              // String değilse string'e çevir
+              messageText = String(msg.text).trim();
+            }
+            
+            // CRITICAL FIX: Eğer AI mesajı text boşsa ama backend'de kayıtlıysa,
+            // bu mesaj muhtemelen streaming sırasında text kaybolmuş olabilir
+            // Bu durumda mesajı filtrele (boş balon görünmesin)
+            // Ama eğer attachments varsa mesajı göster
+            const hasAttachments = (images.length > 0 || files.length > 0);
+            if (!msg.isUser && !messageText && !hasAttachments) {
+              // Text boş ve attachment yok, mesajı filtrele
+              console.warn('⚠️ Backend AI mesajı text boş ve attachment yok, filtreleniyor:', {
+                messageId: msg.id
+              });
+              return null; // null döndür, filter'da false olacak
+            }
+            
             return {
               id: msg.id,
-              text: msg.text || '', // text undefined olabilir, boş string olarak set et
+              text: messageText, // Trim edilmiş text (boş olabilir)
               isUser: msg.isUser === true, // Boolean coercion
               timestamp,
+              isStreaming: false, // CRITICAL: Backend'den yüklenen mesajlar her zaman tamamlanmış mesajlardır
               images: images.length > 0 ? images : undefined,
               files: files.length > 0 ? files : undefined
             };
-          });
+          })
+          .filter((msg: ChatMessage | null): msg is ChatMessage => msg !== null); // null'ları filtrele
         
         // Eğer conversation başlığı varsayılan ise ve ilk kullanıcı mesajı varsa başlık oluştur
         const firstUserMessage = backendMessages.find(msg => msg.isUser && msg.text && msg.text.trim());
@@ -784,6 +874,8 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         
         // Mevcut mesajlarla birleştir ve duplicate'leri kaldır
         // Pagination durumunda: eğer page > 1 ise yeni mesajları ekle, page === 1 ise replace et
+        // CRITICAL FIX: mergedConversation'ı direkt hesapla, ref kullanma
+        // setConversations callback'i içinde hesapla ve döndür, sonra conversations state'inden al
         let mergedConversation: ChatConversation | undefined;
         
         setConversations(prev => {
@@ -793,10 +885,19 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
           
           let mergedMessages: ChatMessage[];
           if (page === 1) {
-            // İlk sayfa - mevcut mesajları replace et (cache refresh veya ilk yükleme)
+            // CRITICAL FIX: İlk sayfa - backend'den gelen mesajları kullan (geçmiş sohbetler için)
+            // Mevcut mesajları replace et - backend'den gelen mesajlar kaynak olmalı
+            // Duplicate kontrolü yap - aynı ID'ye sahip mesajları filtrele
             const existingIds = new Set(existingMessages.map((m: ChatMessage) => m.id));
             const newMessages = backendMessages.filter((m: ChatMessage) => !existingIds.has(m.id));
-            mergedMessages = [...existingMessages, ...newMessages];
+            
+            // Backend'den gelen mesajları öncelikli olarak kullan
+            // Eğer backend'de mesaj varsa onu kullan, yoksa mevcut mesajı koru
+            const backendMessageIds = new Set(backendMessages.map((m: ChatMessage) => m.id));
+            const existingMessagesNotInBackend = existingMessages.filter((m: ChatMessage) => !backendMessageIds.has(m.id));
+            
+            // Backend mesajları + backend'de olmayan mevcut mesajlar (streaming mesajları gibi)
+            mergedMessages = [...backendMessages, ...existingMessagesNotInBackend];
           } else {
             // Sonraki sayfalar - yeni mesajları başa ekle (eski mesajlar)
             const existingIds = new Set(existingMessages.map((m: ChatMessage) => m.id));
@@ -825,14 +926,19 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
             }
           });
           
+          // CRITICAL FIX: totalMessageCount'u backend'den gelen pagination bilgisinden al
+          // Eğer backend'den totalMessageCount geliyorsa onu kullan, yoksa mergedMessages.length kullan
+          const backendTotalCount = paginationInfo?.total || mergedMessages.length;
+          
           const nextConversation: ChatConversation = {
             ...baseConversation,
-                  title: conversation.title,
+            title: conversation.title,
             messages: mergedMessages,
-            totalMessageCount: mergedMessages.length,
+            totalMessageCount: backendTotalCount, // Backend'den gelen gerçek total count
             updatedAt: new Date()
           };
 
+          // mergedConversation'ı direkt set et
           mergedConversation = nextConversation;
 
           if (currentConv) {
@@ -842,23 +948,24 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
           return [nextConversation, ...prev];
         });
         
-        if (!mergedConversation) {
-          console.warn('⚠️ mergedConversation bulunamadı, mesaj güncelleme atlandı:', conversationId);
-          return;
+        // mergedConversation set edildi, şimdi currentConversation'ı güncelle
+        if (mergedConversation) {
+          // Eğer bu conversation şu anki conversation ise güncelle
+          if (currentConversation?.id === conversationId) {
+            setCurrentConversation(mergedConversation);
+          }
+          
+          // Cache'e kaydet
+          messageCacheRef.current.set(conversationId, {
+            messages: mergedConversation.messages,
+            timestamp: Date.now()
+          });
         }
-
-        setCurrentConversation(mergedConversation);
-        
-        // Cache'e kaydet
-        messageCacheRef.current.set(conversationId, {
-          messages: mergedConversation.messages,
-          timestamp: Date.now()
-        });
         
         console.log('✅ Conversation mesajları güncellendi:', {
           conversationId,
-          messageCount: mergedConversation.messages.length,
-          totalMessageCount: mergedConversation.totalMessageCount,
+          messageCount: mergedConversation?.messages.length || 0,
+          totalMessageCount: mergedConversation?.totalMessageCount,
           page,
           hasMore,
           fromCache: false
@@ -996,33 +1103,58 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       // Cache yoksa veya geçersizse normal conversation'ı set et
       setCurrentConversation(foundConversation);
       
-      // Eğer totalMessageCount yoksa veya 0 ise veya currentCount totalCount'tan azsa yükle
-      // Ayrıca, eğer totalMessageCount yoksa ve mesaj varsa bile yükle (güvenlik için)
+      // CRITICAL FIX: Mesaj yükleme mantığını optimize et
+      // Geçmiş sohbetlerden seçildiğinde mesajların yüklendiğinden emin ol
       const shouldLoadMessages = !hasMessages || 
                                  !totalCount || 
                                  totalCount === 0 || 
                                  (totalCount > 0 && currentCount < totalCount);
       
-      if (shouldLoadMessages) {
+      // CRITICAL FIX: Duplicate yükleme isteklerini önle
+      // Eğer mesajlar zaten yükleniyorsa tekrar yükleme
+      const isLoading = loadingConversationsRef.current.has(conversationId);
+      
+      // CRITICAL FIX: Geçmiş sohbetlerden seçildiğinde mesajları yükle
+      // Eğer mesajlar yoksa veya eksikse mutlaka yükle
+      // Bu, geçmiş sohbetlerden seçildiğinde mesajların görünmesini garanti eder
+      if (shouldLoadMessages && !isLoading) {
         console.log('📥 Conversation\'da mesaj yükleniyor...', {
           hasMessages,
           currentCount,
           totalCount,
           shouldLoad: shouldLoadMessages,
-          fromCache: false
+          fromCache: false,
+          forceLoad: !hasMessages || currentCount === 0,
+          isLoading
         });
         // Mesajları paralel yükle (non-blocking) - İlk sayfa ile başla
-        loadConversationMessages(conversationId, foundConversation, { page: 1, limit: DEFAULT_MESSAGE_PAGE_SIZE })
+        // forceRefresh: true ile cache'i bypass et ve backend'den yükle
+        // CRITICAL: Geçmiş sohbetlerden seçildiğinde mesajlar yoksa force refresh yap
+        loadConversationMessages(conversationId, foundConversation, { 
+          page: 1, 
+          limit: DEFAULT_MESSAGE_PAGE_SIZE,
+          forceRefresh: !hasMessages || currentCount === 0 // Mesajlar yoksa veya eksikse force refresh
+        })
           .then(() => {
             console.log('✅ Conversation mesajları yüklendi:', conversationId);
           })
           .catch(error => {
             console.error('❌ Mesajlar yüklenirken hata:', error);
           });
-      } else {
-        console.log('✅ Conversation\'da tüm mesajlar mevcut, yükleme gerekmiyor', {
+      } else if (isLoading) {
+        console.log('⏳ Conversation mesajları zaten yükleniyor, atlanıyor:', conversationId);
+      } else if (hasMessages && currentCount > 0 && totalCount && currentCount >= totalCount) {
+        console.log('✅ Conversation\'da mesajlar mevcut, yükleme gerekmiyor', {
           currentCount,
-          totalCount
+          totalCount,
+          hasMessages
+        });
+      } else {
+        console.log('ℹ️ Conversation\'da mesaj yükleme atlandı (mesajlar mevcut veya yükleniyor)', {
+          currentCount,
+          totalCount,
+          hasMessages,
+          isLoading
         });
       }
       return; // Conversation bulundu, işlem tamamlandı

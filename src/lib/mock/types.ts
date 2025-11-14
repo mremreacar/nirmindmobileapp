@@ -4,6 +4,12 @@
  * @description Mock JSON verileri için TypeScript type tanımları
  */
 
+export interface ThinkingStep {
+  step: string; // 'insight' | 'context' | 'solution' | 'connection'
+  content: string;
+  fullStep: string;
+}
+
 export interface ChatMessage {
   id: string;
   text: string;
@@ -13,6 +19,7 @@ export interface ChatMessage {
   files?: any[];
   isStreaming?: boolean; // Streaming mesajları için flag
   isThinking?: boolean; // İlk chunk gelene kadar "düşünüyor" durumu (UX iyileştirmesi)
+  thinkingSteps?: ThinkingStep[]; // Düşünme aşaması adımları (Insight, Context, Solution, Connection)
 }
 
 export interface ChatConversation {

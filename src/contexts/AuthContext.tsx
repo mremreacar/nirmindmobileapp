@@ -53,37 +53,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const checkStoredAuth = async () => {
     try {
-      console.log('🔍 Nirmind - Stored auth kontrolü başlatılıyor...');
-      
-      // Development modunda test user bypass (test için)
-      if (__DEV__) {
-        const bypassTest = false; // Test için true yapın, production'da false olmalı
-        if (bypassTest) {
-          const testUser = {
-            id: 'test-user-id',
-            email: 'test@test.com',
-            firstName: 'Test',
-            lastName: 'User',
-            phone: '+905551234567',
-            nirpaxId: 'NRP-TEST-001',
-            apps: ['nirmind'],
-            permissions: {}
-          };
-          await AsyncStorage.setItem('authToken', 'test-token');
-          await AsyncStorage.setItem('user', JSON.stringify(testUser));
-          await backendApiService.setAuthToken('test-token');
-          setUser(testUser);
-          setIsLoading(false);
-          console.log('🧪 Test user bypass aktif');
-          return;
-        }
-      }
+      // Açılış logları kaldırıldı (çok fazla log üretiyordu)
       
       const token = await AsyncStorage.getItem('authToken');
       const storedUser = await AsyncStorage.getItem('user');
 
       if (token && storedUser) {
-        console.log('✅ Nirmind - Stored auth bulundu, token kontrol ediliyor...');
+        // Stored auth logları kaldırıldı
         await backendApiService.setAuthToken(token);
         
         try {
@@ -92,19 +68,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           const currentTime = Math.floor(Date.now() / 1000);
           
           if (decoded && decoded.exp && decoded.exp > currentTime) {
-            console.log('✅ Nirmind - Token geçerli, kullanıcı yüklendi');
+            // Token geçerli logları kaldırıldı
             const userData = JSON.parse(storedUser);
             setUser(userData);
           } else {
-            console.log('❌ Nirmind - Token süresi dolmuş, temizleniyor');
+            // Token süresi dolmuş logları kaldırıldı
             await clearAuth();
           }
         } catch (decodeError) {
-          console.log('❌ Nirmind - Token decode hatası, temizleniyor');
+          // Token decode hatası logları kaldırıldı
           await clearAuth();
         }
       } else {
-        console.log('ℹ️ Nirmind - Stored auth bulunamadı');
+        // Stored auth bulunamadı logları kaldırıldı
       }
     } catch (error) {
       console.error('❌ Nirmind - Stored auth kontrolü hatası:', error);
@@ -214,8 +190,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       console.log('🔍 Nirmind\'ten profil bilgileri çekiliyor...');
       
-      // Gerçek domain üzerinde test ediliyor
-      const backendUrl = 'https://nircore.io/api/nirmind/auth/verify';
+      // Local development için: http://localhost:3000/api/nirmind/auth/verify
+      // Fiziksel cihaz için: http://[BILGISAYAR_IP]:3000/api/nirmind/auth/verify
+      const backendUrl = 'http://10.172.1.103:3000/api/nirmind/auth/verify';
       
       const response = await fetch(backendUrl, {
         method: 'POST',

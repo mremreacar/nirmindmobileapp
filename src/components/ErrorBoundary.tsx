@@ -45,11 +45,6 @@ class ErrorBoundary extends Component<Props, State> {
             <Text style={styles.errorMessage}>
               Uygulamada beklenmeyen bir hata oluştu. Lütfen tekrar deneyin.
             </Text>
-            {__DEV__ && this.state.error && (
-              <Text style={styles.errorDetails}>
-                {this.state.error.message}
-              </Text>
-            )}
             <TouchableOpacity style={styles.retryButton} onPress={this.handleRetry}>
               <Text style={styles.retryButtonText}>Tekrar Dene</Text>
             </TouchableOpacity>

@@ -155,7 +155,7 @@ class PermissionServiceImpl implements PermissionService {
 
   private async initializePermissions(): Promise<void> {
     try {
-      console.log('🔐 Permission service başlatılıyor...');
+      // Permission service logları kaldırıldı (açılışta çok fazla log üretiyordu)
       
       // Tüm permission'ları kontrol et
       const permissionTypes = Object.values(PermissionType);
@@ -179,9 +179,10 @@ class PermissionServiceImpl implements PermissionService {
       this.state.isInitialized = true;
       this.state.lastChecked = new Date();
       
-      console.log('✅ Permission service başlatıldı');
+      // Permission service başlatıldı logu kaldırıldı
       this.notifyListeners();
     } catch (error) {
+      // Sadece hata durumunda log
       console.error('❌ Permission service başlatma hatası:', error);
       this.state.isInitialized = false;
     }

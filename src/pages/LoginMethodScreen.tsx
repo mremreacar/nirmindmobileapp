@@ -43,7 +43,9 @@ const nirpaxLogoIcon = `<svg width="24" height="16" viewBox="0 0 24 16" fill="no
 <path d="M23.2522 9.9284C23.264 9.97305 23.4327 10.1321 23.5162 10.1274C23.724 9.97305 23.7146 6.07676 23.5162 5.8754C23.4311 5.86522 23.2522 6.05169 23.2522 6.07441C23.2522 6.9433 23.0851 9.27105 23.2522 9.9284Z" fill="white"/>
 </svg>`;
 
-const NIRPAX_WEB_CALLBACK_URL = 'https://nircore.io/api/nirpax/auth/google/callback';
+// Local development için: http://localhost:3000/api/nirpax/auth/google/callback
+// Fiziksel cihaz için: http://[BILGISAYAR_IP]:3000/api/nirpax/auth/google/callback
+const NIRPAX_WEB_CALLBACK_URL = 'http://10.172.1.103:3000/api/nirpax/auth/google/callback';
 
 interface LoginMethodScreenProps {
   onBack: () => void;

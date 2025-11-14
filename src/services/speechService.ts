@@ -48,38 +48,11 @@ const loadVoiceModule = (): any => {
       if (voiceModule && typeof voiceModule.start === 'function' && 
           typeof voiceModule.stop === 'function') {
         Voice = voiceModule;
-        console.log('✅ React Native Voice modülü başarıyla yüklendi ve hazır');
-        console.log('✅ Voice modülü metodları:', {
-          hasStart: typeof voiceModule.start === 'function',
-          hasStop: typeof voiceModule.stop === 'function',
-          hasIsAvailable: typeof voiceModule.isAvailable === 'function',
-          hasDestroy: typeof voiceModule.destroy === 'function',
-          hasCancel: typeof voiceModule.cancel === 'function',
-          allKeys: Object.keys(voiceModule).slice(0, 20) // İlk 20 key'i göster
-        });
+        // Voice modülü logları kaldırıldı (açılışta çok fazla log üretiyordu)
         return Voice;
       } else {
-        // Detaylı debug bilgisi
+        // Sadece hata durumunda log
         console.warn('⚠️ Voice modülü yüklendi ama gerekli metodlar eksik');
-        console.warn('⚠️ Debug bilgileri:', {
-          voiceModuleExists: !!voiceModule,
-          hasStart: voiceModule ? typeof voiceModule.start : 'N/A',
-          hasStop: voiceModule ? typeof voiceModule.stop : 'N/A',
-          moduleKeys: voiceModule ? Object.keys(voiceModule).slice(0, 20) : [],
-          moduleType: typeof voiceModule,
-          defaultExists: !!voiceModuleRaw.default,
-          defaultType: typeof voiceModuleRaw.default,
-          rawKeys: Object.keys(voiceModuleRaw).slice(0, 10)
-        });
-        
-        // Eğer default export varsa ama metodlar yoksa, default'un prototype'ını kontrol et
-        if (voiceModuleRaw.default && voiceModule === voiceModuleRaw.default) {
-          const defaultModule = voiceModuleRaw.default;
-          console.log('🔍 Default modül prototype kontrolü...');
-          if (defaultModule.__proto__) {
-            console.log('📦 Default modül prototype keys:', Object.keys(defaultModule.__proto__).slice(0, 10));
-          }
-        }
       }
     } else {
       console.warn('⚠️ Voice modülü require edildi ama null/undefined döndü');

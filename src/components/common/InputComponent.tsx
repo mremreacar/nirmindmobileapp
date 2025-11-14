@@ -220,7 +220,9 @@ const InputComponent: React.FC<InputComponentProps> = ({
   
   // Constants for dynamic sizing - Daha iyi genişleme
   const MIN_INPUT_HEIGHT = getResponsiveInputMinHeight() + 10; // 10px daha yüksek (daha dengeli)
-  const MAX_INPUT_HEIGHT = isTablet ? 150 : (isLargeScreen ? 130 : 120); // Daha da azaltıldı: 180->150, 160->130, 140->120
+  // 4 satır sonra scroll aktif olsun: 4 satır × 24px (lineHeight) + 16px (padding) = 112px
+  // Margin için +8px = 120px
+  const MAX_INPUT_HEIGHT = isTablet ? 140 : (isLargeScreen ? 130 : 120); // 4 satır sonra scroll için ayarlandı
   const SCROLL_THRESHOLD = MAX_INPUT_HEIGHT - 16;
 
   useEffect(() => {
@@ -293,46 +295,47 @@ const InputComponent: React.FC<InputComponentProps> = ({
   const handleKeyPress = (e: any) => {
     const key = e.nativeEvent.key;
     
-    // Enter tuşu kontrolü
+    // Enter tuşu kontrolü - multiline aktifken
     if (key === 'Enter') {
-      // Shift+Enter kontrolü - yeni satır ekle
-      if (e.nativeEvent.shiftKey) {
-        // Shift+Enter: Yeni satır ekle, mesaj gönderme
-        return;
-      } else {
-        // Sadece Enter: Mesaj gönder
-        e.preventDefault();
-        if (inputText.trim() || hasSelectedFiles) {
-          handleSendPress();
-        }
-        return;
-      }
+      // Shift+Enter veya normal Enter: Her durumda yeni satır ekle (multiline aktif)
+      // Mesaj göndermek için gönder butonunu kullan
+      return; // Enter tuşu ile mesaj gönderme kaldırıldı - sadece gönder butonu ile gönder
     }
     
     onKeyPress?.(key);
   };
 
   const handleSubmitEditing = () => {
-    if (onSubmitEditing) {
-      onSubmitEditing();
-    } else {
-      onSendMessage();
-    }
+    // Multiline aktifken Enter tuşu yeni satır eklemek için kullanılıyor
+    // Mesaj göndermek için gönder butonunu kullan
+    // Bu fonksiyon multiline modda çağrılmamalı
   };
 
   const handleSendPress = () => {
+    console.log('📤 [InputComponent] handleSendPress çağrıldı:', {
+      inputText: inputText.substring(0, 50),
+      inputTextLength: inputText.length,
+      hasSelectedFiles,
+      isLoading,
+      isStreaming
+    });
+    
     // Loading guard - eğer mesaj işleniyorsa gönderme
     if (isLoading || isStreaming) {
-      console.log('⚠️ Mesaj işleniyor, yeni mesaj gönderilemiyor');
+      console.log('⚠️ [InputComponent] Mesaj işleniyor, yeni mesaj gönderilemiyor:', {
+        isLoading,
+        isStreaming
+      });
       return;
     }
     
     // Çift gönderimi engelle - eğer input boşsa gönderme
     if (!inputText.trim() && !hasSelectedFiles) {
-      console.log('⚠️ Input boş, mesaj gönderilemiyor');
+      console.log('⚠️ [InputComponent] Input boş, mesaj gönderilemiyor');
       return;
     }
     
+    console.log('✅ [InputComponent] onSendMessage çağrılıyor');
     // Input'u temizleme - ChatScreen'de yapılacak
     // Send message - ChatScreen input'u temizleyecek
     onSendMessage();
@@ -354,8 +357,9 @@ const InputComponent: React.FC<InputComponentProps> = ({
     }
     
     // Yazma sırasında son satıra scroll yap (her karakter için)
+    // Özellikle scroll aktif olduğunda (maksimum yüksekliğe ulaşıldığında) mutlaka scroll yap
     if (text.length > 0 && scrollViewRef.current) {
-      // requestAnimationFrame ile smooth scroll
+      // Her zaman scroll yap (scroll aktif olsun ya da olmasın, yazarken son satırda olmalıyız)
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           if (scrollViewRef.current) {
@@ -392,22 +396,31 @@ const InputComponent: React.FC<InputComponentProps> = ({
         setInputHeight(boundedHeight);
         lastHeightRef.current = boundedHeight;
       }
-      setIsScrollable(adjustedHeight >= SCROLL_THRESHOLD);
+      const newIsScrollable = adjustedHeight >= SCROLL_THRESHOLD;
+      setIsScrollable(newIsScrollable);
       setContentHeight(adjustedHeight);
       
       // Content size değiştiğinde son satıra scroll yap (yazma sırasında)
-      // Double requestAnimationFrame ile layout güncellemelerini bekle
+      // Özellikle scroll aktif olduğunda veya maksimum yüksekliğe ulaşıldığında mutlaka scroll yap
       if (inputText.length > 0 && scrollViewRef.current) {
-        requestAnimationFrame(() => {
+        // Scroll aktifse veya maksimum yüksekliğe ulaşıldıysa, hemen scroll yap
+        const shouldScroll = newIsScrollable || boundedHeight >= MAX_INPUT_HEIGHT - 10;
+        
+        if (shouldScroll) {
+          // Triple requestAnimationFrame ile layout güncellemelerini bekle (daha güvenilir)
           requestAnimationFrame(() => {
-            if (scrollViewRef.current) {
-              scrollViewRef.current.scrollTo({
-                y: Number.MAX_SAFE_INTEGER,
-                animated: false, // Anında scroll (yazma sırasında)
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                if (scrollViewRef.current) {
+                  scrollViewRef.current.scrollTo({
+                    y: Number.MAX_SAFE_INTEGER,
+                    animated: false, // Anında scroll (yazma sırasında)
+                  });
+                }
               });
-            }
+            });
           });
-        });
+        }
       }
       
       onContentSizeChange?.(event);
@@ -447,6 +460,7 @@ const InputComponent: React.FC<InputComponentProps> = ({
   }, [inputText, onSelectionChange]);
 
   // Input text değiştiğinde native state'i senkronize et ve cursor yönetimi
+  // Ayrıca scroll aktif olduğunda otomatik scroll yap
   useEffect(() => {
     if (!textInputRef.current) return;
     
@@ -459,6 +473,21 @@ const InputComponent: React.FC<InputComponentProps> = ({
             textInputRef.current.setNativeProps({
               selection: { start: inputText.length, end: inputText.length }
             });
+            
+            // Scroll aktifse veya maksimum yüksekliğe ulaşıldıysa, cursor hareketinden sonra scroll yap
+            // Input alanı maksimum yüksekliğe ulaştığında her yeni satırda otomatik scroll
+            if ((isScrollable || inputHeight >= MAX_INPUT_HEIGHT - 10) && scrollViewRef.current) {
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                  if (scrollViewRef.current) {
+                    scrollViewRef.current.scrollTo({
+                      y: Number.MAX_SAFE_INTEGER,
+                      animated: false,
+                    });
+                  }
+                });
+              });
+            }
           } catch (error) {
             // Hata durumunda sessizce devam et
           }
@@ -481,7 +510,7 @@ const InputComponent: React.FC<InputComponentProps> = ({
         // Native state zaten React state'e bağlı, bu sadece bir optimizasyon
       }
     }
-  }, [inputText]);
+  }, [inputText, isScrollable, inputHeight]);
 
   // Smart scroll to bottom - Geliştirilmiş versiyon
   const scrollToBottom = useCallback(() => {
@@ -652,7 +681,13 @@ const InputComponent: React.FC<InputComponentProps> = ({
 
           {/* Alt Bölüm - Mesaj Yazma Alanı */}
           <View
-            style={styles.messageSection}
+            style={[
+              styles.messageSection,
+              {
+                // Küçük ekranda ve boşken içeriği ortala
+                justifyContent: isSmallScreen && inputText.length === 0 && !isInputFocused ? 'center' : 'flex-start',
+              }
+            ]}
             onLayout={(event) => {
               setVisibleHeight(event.nativeEvent.layout.height);
             }}
@@ -692,45 +727,65 @@ const InputComponent: React.FC<InputComponentProps> = ({
               </Animated.View>
             ) : (
               <>
-                <ScrollView
-                  ref={scrollViewRef}
-                  style={[
-                    styles.textScrollView,
-                    { minHeight: MIN_INPUT_HEIGHT } // Başlangıç yüksekliği - TextInput görünür olsun
-                  ]}
-                  contentContainerStyle={[
-                    styles.textScrollViewContent,
-                    { minHeight: MIN_INPUT_HEIGHT } // Başlangıç yüksekliği - TextInput görünür olsun
-                  ]}
-                  scrollEnabled={isScrollable}
-                  showsVerticalScrollIndicator={false}
-                  keyboardShouldPersistTaps="handled"
-                  nestedScrollEnabled={true}
-                  onScroll={handleScroll}
-                  scrollEventThrottle={16}
-                >
-              <TextInput
-                ref={textInputRef}
-                style={[
-                  styles.textInput, 
-                  textInputStyle,
-                  {
-                        minHeight: MIN_INPUT_HEIGHT,
-                        paddingRight: isScrollable ? 12 : 8,
-                        // paddingTop ve paddingBottom stil dosyasında ayarlanıyor
-                        opacity: isProcessing ? 0.6 : 1,
-                        width: '100%',
-                        color: isDictating ? '#7E7AE9' : '#FFFFFF',
-                        fontSize: 17, // Daha büyük font - daha iyi okunabilirlik
-                        lineHeight: 24, // Daha büyük line height - daha iyi okunabilirlik
-                  },
-                  isDictating && {
-                    fontWeight: '600',
-                  },
-                ]}
-                placeholder={placeholder}
-                placeholderTextColor="#9CA3AF" // Daha görünür placeholder rengi
-                value={inputText}
+                <View style={styles.textInputWrapper}>
+                  {/* Bağımsız Placeholder - TextInput'tan ayrı, ortalanmış */}
+                  {inputText.length === 0 && !isInputFocused && (
+                    <View style={styles.placeholderContainer} pointerEvents="none">
+                      <Text style={styles.placeholderText}>{placeholder}</Text>
+                    </View>
+                  )}
+                  
+                  <ScrollView
+                    ref={scrollViewRef}
+                    style={[
+                      styles.textScrollView,
+                      { 
+                        height: inputHeight, // Dinamik yükseklik - TextInput'un içeriğine göre
+                        minHeight: MIN_INPUT_HEIGHT, // Başlangıç yüksekliği - TextInput görünür olsun
+                        maxHeight: MAX_INPUT_HEIGHT, // Maksimum yükseklik - scroll için
+                      }
+                    ]}
+                    contentContainerStyle={[
+                      styles.textScrollViewContent,
+                      { 
+                        // minHeight kaldırıldı - TextInput kendi yüksekliğini belirlesin
+                        justifyContent: 'flex-start', // Her zaman üstten başla
+                      }
+                    ]}
+                    scrollEnabled={isScrollable} // Scroll aktif olduğunda etkinleştir
+                    showsVerticalScrollIndicator={isScrollable} // Scroll aktif olduğunda scroll göstergesini göster
+                    keyboardShouldPersistTaps="handled"
+                    nestedScrollEnabled={true}
+                    onScroll={handleScroll}
+                    scrollEventThrottle={16}
+                    bounces={false} // Scroll sınırında bounce yapma
+                  >
+                    <TextInput
+                      ref={textInputRef}
+                      style={[
+                        styles.textInput, 
+                        textInputStyle,
+                        {
+                              // height kaldırıldı - multiline TextInput kendi yüksekliğini ayarlasın
+                              minHeight: MIN_INPUT_HEIGHT, // Minimum yükseklik
+                              paddingRight: isScrollable ? 12 : 8,
+                              // paddingTop ve paddingBottom stil dosyasında ayarlanıyor
+                              opacity: isProcessing ? 0.6 : 1,
+                              width: '100%',
+                              color: isDictating ? '#7E7AE9' : (inputText.length === 0 ? 'transparent' : '#FFFFFF'), // Boşken transparent (placeholder görünsün)
+                              fontSize: 17, // Daha büyük font - daha iyi okunabilirlik
+                              lineHeight: 24, // Daha büyük line height - daha iyi okunabilirlik
+                              textAlign: 'left', // Her zaman sol hizalı
+                              paddingTop: 8,
+                              paddingBottom: 8,
+                        },
+                        isDictating && {
+                          fontWeight: '600',
+                        },
+                      ]}
+                      placeholder="" // Placeholder kaldırıldı - ayrı component kullanılıyor
+                      placeholderTextColor="transparent" // Placeholder rengi transparent
+                      value={inputText}
                 onChangeText={handleTextChange}
                 onContentSizeChange={handleContentSizeChange}
                 onSelectionChange={handleSelectionChange}
@@ -738,17 +793,17 @@ const InputComponent: React.FC<InputComponentProps> = ({
                 onFocus={handleFocus}
                 onBlur={handleBlur}
                 editable={editable && !isDictating}
-                multiline={true}
+                multiline={multiline !== undefined ? multiline : true} // Her zaman multiline aktif - kullanıcı alt satıra geçebilmeli
                 maxLength={maxLength}
-                returnKeyType="default"
+                returnKeyType="default" // Multiline aktifken "default" kullan (yeni satır için)
                 autoCorrect={autoCorrect}
                 autoCapitalize={autoCapitalize}
                 autoFocus={autoFocus}
-                onSubmitEditing={handleSubmitEditing}
+                onSubmitEditing={undefined} // Multiline aktifken onSubmitEditing'i devre dışı bırak
                 underlineColorAndroid="transparent"
                 selectionColor="#7E7AE9"
                 cursorColor="#7E7AE9"
-                textAlignVertical={inputText.length > 0 ? "top" : "center"} // Boşken ortada, dolu iken üstte
+                textAlignVertical="top" // Her zaman üstten başla - placeholder ayrı component
                 keyboardType="default"
                 blurOnSubmit={false}
                 enablesReturnKeyAutomatically={false}
@@ -756,27 +811,28 @@ const InputComponent: React.FC<InputComponentProps> = ({
                 spellCheck={false}
                 textContentType="none"
               />
-                </ScrollView>
+                    </ScrollView>
 
-                {isScrollable && canScrollUp && (
-                  <LinearGradient
-                    pointerEvents="none"
-                    colors={["rgba(2, 2, 10, 0.85)", "rgba(2, 2, 10, 0)"]}
-                    style={[styles.scrollFade, styles.scrollFadeTop]}
-                  >
-                    <Text style={styles.scrollHintArrow}>⌃</Text>
-                  </LinearGradient>
-                )}
+                    {isScrollable && canScrollUp && (
+                      <LinearGradient
+                        pointerEvents="none"
+                        colors={["rgba(2, 2, 10, 0.85)", "rgba(2, 2, 10, 0)"]}
+                        style={[styles.scrollFade, styles.scrollFadeTop]}
+                      >
+                        <Text style={styles.scrollHintArrow}>⌃</Text>
+                      </LinearGradient>
+                    )}
 
-                {isScrollable && canScrollDown && (
-                  <LinearGradient
-                    pointerEvents="none"
-                    colors={["rgba(2, 2, 10, 0)", "rgba(2, 2, 10, 0.85)"]}
-                    style={[styles.scrollFade, styles.scrollFadeBottom]}
-                  >
-                    <Text style={styles.scrollHintArrow}>⌄</Text>
-                  </LinearGradient>
-                )}
+                    {isScrollable && canScrollDown && (
+                      <LinearGradient
+                        pointerEvents="none"
+                        colors={["rgba(2, 2, 10, 0)", "rgba(2, 2, 10, 0.85)"]}
+                        style={[styles.scrollFade, styles.scrollFadeBottom]}
+                      >
+                        <Text style={styles.scrollHintArrow}>⌄</Text>
+                      </LinearGradient>
+                    )}
+                  </View>
               </>
             )}
           </View>
@@ -880,10 +936,6 @@ const InputComponent: React.FC<InputComponentProps> = ({
               width="24"
               height="24"
             />
-            {/* Dev Mode: Gönderme butonuna beyaz nokta ekle */}
-            {__DEV__ && (
-              <View style={styles.devSendDot} />
-            )}
           </LinearGradient>
         </TouchableOpacity>
       ) : (
@@ -924,19 +976,19 @@ const styles = StyleSheet.create({
   inputSectionContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12, // 16px'den 12px'e azaltıldı (daha dengeli)
+    gap: 10, // Kenarlara göre optimize edildi: 12 -> 10
     width: '100%',
-    paddingHorizontal: 2, // 4px'den 2px'e azaltıldı
+    paddingHorizontal: 0, // Kenarlara göre optimize edildi: 2 -> 0 (ChatInputSection'da zaten padding var)
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF0D',
     borderRadius: getResponsiveInputBorderRadius(),
-    paddingLeft: 10, // 12px'den 10px'e azaltıldı
-    paddingRight: 16, // 20px'den 16px'e azaltıldı
+    paddingLeft: 12, // Kenarlara göre optimize edildi: 10 -> 12 (daha dengeli)
+    paddingRight: 12, // Kenarlara göre optimize edildi: 16 -> 12 (simetrik)
     paddingVertical: getResponsiveInputPaddingVertical(),
-    gap: 10, // 12px'den 10px'e azaltıldı
+    gap: 8, // Kenarlara göre optimize edildi: 10 -> 8
     flex: 1,
     borderWidth: 0, // Hayalet çizgi kaldırıldı
     borderColor: 'transparent', // Border rengi şeffaf
@@ -966,18 +1018,18 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   textInput: {
-    flex: 1,
-    width: '100%',
+    width: '100%', // flex: 1 kaldırıldı - height dinamik olarak ayarlanacak
     fontFamily: 'Poppins-Regular',
     fontSize: 17, // Artırıldı: 15 -> 17 (daha iyi okunabilirlik)
     color: '#FFFFFF',
-    textAlignVertical: 'top', // Uzun mesajlarda üstten başlat
-    minHeight: 50,
+    textAlignVertical: 'top', // Uzun mesajlarda üstten başlat - satır satır görünmesi için kritik
+    // height kaldırıldı - multiline TextInput kendi yüksekliğini ayarlasın
+    minHeight: 50, // Minimum yükseklik
     paddingBottom: 8, // Alt padding eklendi - daha iyi görünürlük
     paddingLeft: 4, // Sol padding eklendi
     paddingRight: 0, // Sağ padding kaldırıldı (scroll indicator için)
     paddingTop: 8, // Üst padding eklendi - daha iyi görünürlük
-    lineHeight: 24, // Artırıldı: 20 -> 24 (daha iyi okunabilirlik)
+    lineHeight: 24, // Artırıldı: 20 -> 24 (daha iyi okunabilirlik) - satırlar arası boşluk
     // marginTop kaldırıldı - attachment'lardan bağımsız
     // Uzun mesajlarda daha iyi okunabilirlik için
     textAlign: 'left',
@@ -1535,16 +1587,38 @@ const styles = StyleSheet.create({
     // paddingTop ve marginTop kaldırıldı - attachment'lardan bağımsız
     // Çizgi kaldırıldı - ortadan bölen çizgi yok
   },
-  textScrollView: {
-    maxHeight: 320,
-    flex: 1,
+  textInputWrapper: {
+    position: 'relative',
     width: '100%',
+  },
+  placeholderContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1,
+    pointerEvents: 'none', // Tıklamaları TextInput'a geçir
+  },
+  placeholderText: {
+    fontFamily: 'Poppins-Regular',
+    fontSize: 17,
+    color: '#9CA3AF',
+    textAlign: 'center',
+    width: '100%',
+  },
+  textScrollView: {
+    width: '100%',
+    // flex: 1 kaldırıldı - height dinamik olarak ayarlanacak
+    // maxHeight kaldırıldı - inline style'da ayarlanıyor
   },
   textScrollViewContent: {
     paddingRight: 6,
     paddingTop: 0, // Padding kaldırıldı - TextInput textAlignVertical ile hizalanacak
     paddingBottom: 8,
-    flexGrow: 1,
+    // flexGrow: 1 kaldırıldı - minHeight dinamik olarak ayarlanacak
   },
   scrollFade: {
     position: 'absolute',

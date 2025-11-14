@@ -144,7 +144,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   const { dictationState, toggleDictation: originalToggleDictation } = useDictation({
     onTextUpdate: (text: string, replacePrevious?: boolean) => {
       // Hızlı text güncelleme - functional update kullan (closure sorununu önler)
-      console.log('📝 [ChatScreen] onTextUpdate çağrıldı, text:', text, 'replacePrevious:', replacePrevious);
       setInputText((prev) => {
         let newText: string;
         if (replacePrevious) {
@@ -154,12 +153,10 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
           // lastReceivedTextRef kullanarak son eklenen metni takip edemeyiz (hook içinde)
           // Bu yüzden: replacePrevious=true ise, text'i direkt kullan (önceki metin zaten çıkarılmış olmalı)
           newText = text;
-          console.log('🔄 [ChatScreen] Metin değişti, yeni metin eklendi:', text);
         } else {
           // Normal ekleme
           newText = prev + text;
         }
-        console.log('📝 [ChatScreen] Yeni text:', newText);
         if (newText.length > 0) {
           inputClearedRef.current = false;
         }
@@ -172,31 +169,18 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
       Alert.alert('Bilgi', error, [{ text: 'Tamam' }]);
     },
     onStart: () => {
-      console.log('✅ [ChatScreen] Chat dikte başlatıldı');
       // Yeni dikte başladığında input alanını temizle (önceki dikte metnini kaldır)
       setInputText('');
       inputClearedRef.current = true;
-      console.log('🧹 [ChatScreen] Input alanı temizlendi (yeni dikte için)');
     },
     onStop: () => {
-      console.log('🛑 [ChatScreen] Chat dikte durduruldu');
     },
   });
 
-  // Dikte tuşuna basma logları için wrapper
+  // Dikte tuşuna basma wrapper
   const toggleDictation = useCallback(async () => {
-    console.log('🎤 [ChatScreen] Dikte tuşuna basıldı (toggleDictation wrapper)', {
-      currentState: {
-        isDictating: dictationState.isDictating,
-        isListening: dictationState.isListening,
-        isProcessing: dictationState.isProcessing,
-        currentMessage: dictationState.currentMessage,
-      },
-      inputTextLength: inputText.length,
-      timestamp: new Date().toISOString()
-    });
     await originalToggleDictation();
-  }, [originalToggleDictation, dictationState, inputText.length]);
+  }, [originalToggleDictation]);
 
   const { animations: waveAnimations } = useWaveAnimation(dictationState.isDictating);
 
@@ -704,14 +688,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
           start={{ x: 0, y: 0 }}
           end={{ x: 0, y: 1 }}
         >
-        {/* Dev Mode Debug Indicator - Sadece development modunda görünür */}
-        {__DEV__ && (
-          <View style={styles.devIndicator}>
-            <View style={styles.devIndicatorDot} />
-            <Text style={styles.devIndicatorText}>DEV</Text>
-          </View>
-        )}
-
         {/* Header */}
         <Header 
           onBackPress={() => {
@@ -734,10 +710,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
         {/* Messages List */}
         <View style={styles.messagesListContainer}>
-          {/* Dev Mode: Mesajlaşma alanının sınırını pembe çerçeve ile belirle */}
-          {__DEV__ && (
-            <View style={[styles.devMessagesAreaBorder, { bottom: 180 }]} />
-          )}
           <MessageList
             messages={messagesArray}
             isLoading={isLoading}

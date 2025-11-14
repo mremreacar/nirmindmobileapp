@@ -172,12 +172,19 @@ export const useKeyboardHandling = () => {
     setIsInputFocused(false);
   }, []);
 
-  // Smart keyboard dismissal
+  // Smart keyboard dismissal - gelişmiş özellikler
   const handleScreenPress = useCallback(() => {
     if (isKeyboardVisible || isInputFocused) {
       dismissKeyboard();
     }
   }, [isKeyboardVisible, isInputFocused, dismissKeyboard]);
+
+  // Scroll yapınca klavye kapatma
+  const handleScrollDismiss = useCallback(() => {
+    if (isKeyboardVisible) {
+      dismissKeyboard();
+    }
+  }, [isKeyboardVisible, dismissKeyboard]);
 
   // Keyboard shortcuts support
   const handleKeyPress = useCallback((key: string, onSend?: () => void) => {
@@ -225,6 +232,7 @@ export const useKeyboardHandling = () => {
     blurInput,
     dismissKeyboard,
     handleScreenPress,
+    handleScrollDismiss, // Scroll yapınca klavye kapatma
     handleKeyPress,
     getScrollOffset,
     getAccessibilityProps,

@@ -124,14 +124,14 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, onChatPress, onHe
     const loadProfile = async () => {
       try {
         setIsLoading(true);
-        console.log('📥 Profil bilgileri backend\'den çekiliyor...');
+        // Profil bilgileri logları kaldırıldı (açılışta çok fazla log üretiyordu)
         const response = await backendApiService.getUserProfile();
         
         if (response.success && response.data) {
-          console.log('✅ Profil bilgileri alındı:', response.data.email);
+          // Profil bilgileri alındı logları kaldırıldı
           setProfileData(response.data);
         } else {
-          console.warn('⚠️ Profil bilgileri alınamadı, auth user kullanılıyor:', response.error);
+          // Profil bilgileri alınamadı uyarısı kaldırıldı
           // Backend'den alınamazsa auth user'ı kullan
           setProfileData(authUser);
         }
@@ -183,7 +183,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, onChatPress, onHe
           onBackPress={onBack}
           onChatPress={onChatPress}
           onLogoPress={() => {
-            console.log('🏠 Profil ekranından Home ekranına gidiliyor');
+            // Profil ekranından Home ekranına gitme logları kaldırıldı
             onBack();
           }}
           showBackButton={true}

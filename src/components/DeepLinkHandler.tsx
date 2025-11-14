@@ -17,29 +17,30 @@ export const DeepLinkHandler: React.FC<DeepLinkHandlerProps> = ({ onLoginSuccess
       try {
         const url = await Linking.getInitialURL();
         if (url) {
-          console.log('🔗 Initial URL:', url);
+          // Deep link logları kaldırıldı (açılışta çok fazla log üretiyordu)
           await handleDeepLink(url);
         }
       } catch (error) {
+        // Sadece hata durumunda log
         console.error('❌ Initial URL hatası:', error);
       }
     };
 
     // Handle deep link while app is running
     const handleUrlChange = (event: { url: string }) => {
-      console.log('🔗 URL changed:', event.url);
+      // Deep link logları kaldırıldı
       handleDeepLink(event.url);
     };
 
     const handleDeepLink = async (url: string) => {
       if (url.startsWith('nirmind://auth')) {
-        console.log('✅ Auth callback alındı');
+        // Auth callback logları kaldırıldı
         const parsed = crossAppAuthService.parseAuthCallback(url);
 
         if (parsed.token) {
           try {
             await handleAuthCallback(parsed.token);
-            console.log('✅ Auth callback başarılı');
+            // Auth callback başarı logları kaldırıldı
             
             if (onLoginSuccess) {
               onLoginSuccess();

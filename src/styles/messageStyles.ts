@@ -52,18 +52,6 @@ export const messageStyles = StyleSheet.create({
     borderTopRightRadius: 20,
     borderBottomLeftRadius: 20,
   },
-  devUserDot: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#7E7AE9',
-    zIndex: 10,
-  },
   aiBubble: {
     backgroundColor: '#3532A8',
     borderBottomLeftRadius: 4,
@@ -99,37 +87,67 @@ export const messageStyles = StyleSheet.create({
   },
   // Thinking state styles - Temaya uygun
   thinkingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
     gap: 10,
     position: 'relative',
+    backgroundColor: '#6B7280', // Farklı renk - gri ton
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 20,
+    borderBottomLeftRadius: 4,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderBottomRightRadius: 20,
   },
   thinkingText: {
     fontFamily: 'Poppins-Medium',
     fontSize: 16,
     lineHeight: 24,
-    color: '#FFFFFF',
-    opacity: 0.9,
+    color: '#FFFFFF', // Beyaz renk (gri balon üzerinde)
+    opacity: 1,
     letterSpacing: 0.2,
+    marginTop: 0, // Padding zaten var
   },
-  devAiTextWrapper: {
-    position: 'relative',
+  // Thinking steps kaldırıldı - artık kullanılmıyor
+  // thinkingStepsContainer, thinkingStepItem, thinkingStepLabel, thinkingStepContent,
+  // thinkingStepsOverlay, thinkingHeader, thinkingHeaderText, thinkingDivider kaldırıldı
+  // Mesaj içeriği wrapper - thinking steps ve mesaj arasında ayrım için
+  messageContentWrapper: {
     width: '100%',
+    marginTop: 8,
   },
-  devAiAnimationOverlay: {
-    position: 'absolute',
-    top: -2,
-    left: -2,
-    right: -2,
-    bottom: -2,
-    backgroundColor: 'rgba(255, 0, 0, 0.15)',
+  messageSeparator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    marginTop: 8,
+  },
+  messageSeparatorLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  messageSeparatorText: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.6)',
+    marginHorizontal: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  // Tamamlanmış mesaj için gri stil (sorun-çözüm formatı)
+  completedMessageBubble: {
+    backgroundColor: '#4A5568', // Gri-mavi ton
+    opacity: 0.95,
     borderWidth: 1,
-    borderColor: 'rgba(255, 0, 0, 0.5)',
-    borderStyle: 'dashed',
-    borderRadius: 4,
-    zIndex: 1,
-    pointerEvents: 'none',
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
+  completedMessageContent: {
+    opacity: 0.98,
+  },
+  // completedMarkdown kaldırıldı - StyleSheet içinde nested object desteklenmiyor
+  // Markdown stilleri component içinde inline olarak tanımlanmalı
   imagesContainer: {
     marginBottom: 8,
     gap: 8,

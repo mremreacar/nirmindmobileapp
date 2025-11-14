@@ -85,27 +85,88 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   // Memoize messagesToShow - conversations array'inden direkt al (daha güncel)
   // Bu sayede currentConversation güncellemesi gecikse bile mesajlar hemen görünür
   // selectedConversationId'yi de kontrol et - ChatHistoryScreen'den seçilen conversation için
-  const messagesToShow = useMemo(() => {
-    // Önce selectedConversationId'yi kontrol et (ChatHistoryScreen'den yeni seçilen conversation)
-    const conversationIdToUse = selectedConversationId || createdConversationId;
+  // CRITICAL: conversations array'inin içindeki mesajların referansını da dependency array'e ekle
+  // Çünkü conversations array'i güncelleniyor ama conversationFromArray.messages referansı değişmeyebiliyor
+  const conversationIdToUse = selectedConversationId || createdConversationId;
+  const conversationFromArray = useMemo(() => {
+    if (!conversationIdToUse) return null;
+    const found = conversations.find(conv => conv.id === conversationIdToUse);
     
+    // Debug: conversationFromArray bulunuyor mu kontrol et
+    if (!found && conversationIdToUse) {
+      console.warn('⚠️ [HomeScreen] conversationFromArray bulunamadı:', {
+        conversationId: conversationIdToUse,
+        conversationsCount: conversations.length,
+        conversationIds: conversations.map(c => c.id),
+        selectedConversationId,
+        createdConversationId
+      });
+    }
+    
+    return found;
+  }, [conversationIdToUse, conversations, selectedConversationId, createdConversationId]);
+  
+  const messagesToShow = useMemo(() => {
     if (!conversationIdToUse) {
       return [];
     }
     
-    // Önce conversations array'inden bul (daha güncel olabilir)
-    const conversationFromArray = conversations.find(conv => conv.id === conversationIdToUse);
-    if (conversationFromArray && conversationFromArray.messages && Array.isArray(conversationFromArray.messages)) {
-      return conversationFromArray.messages;
+    // CRITICAL FIX: Önce conversations array'inden bul - daha güncel olabilir
+    // currentConversation güncellemesi gecikebilir, conversations array daha hızlı güncellenir
+    const conversation = conversations.find(conv => conv.id === conversationIdToUse);
+    if (conversation && conversation.messages && Array.isArray(conversation.messages)) {
+      // Yeni array referansı döndür - React'in değişikliği algılaması için
+      return [...conversation.messages];
     }
     
-    // Fallback: currentConversation'dan al
+    // Fallback: currentConversation'dan al (yeni conversation için)
+    // CRITICAL FIX: Yeni conversation oluşturulduğunda currentConversation daha güncel olabilir
     if (currentConversation && currentConversation.id === conversationIdToUse && currentConversation.messages) {
-      return currentConversation.messages;
+      // Sadece sorun durumunda log (mesaj sayısı beklenenden azsa veya streaming mesajı varsa)
+      if (currentConversation.messages.length > 0) {
+        const lastMessage = currentConversation.messages[currentConversation.messages.length - 1];
+        // Sadece streaming mesajı varsa veya beklenmeyen durum varsa log
+        if (lastMessage?.isStreaming && !lastMessage?.text) {
+          console.log('🤔 [HomeScreen] Streaming mesajı var ama text yok:', {
+            conversationId: conversationIdToUse,
+            messageId: lastMessage.id,
+            messageCount: currentConversation.messages.length
+          });
+        }
+      }
+      // Yeni array referansı döndür - React'in değişikliği algılaması için
+      return [...currentConversation.messages];
+    }
+    
+    
+    // Debug: Hiçbir kaynaktan mesaj bulunamadı
+    if (conversationIdToUse) {
+      console.warn('⚠️ [HomeScreen] messagesToShow boş - hiçbir kaynaktan mesaj bulunamadı:', {
+        conversationId: conversationIdToUse,
+        hasConversationFromArray: !!conversationFromArray,
+        hasConversationFromArrayMessages: !!(conversationFromArray?.messages),
+        conversationFromArrayMessagesLength: conversationFromArray?.messages?.length || 0,
+        hasCurrentConversation: !!currentConversation,
+        currentConversationId: currentConversation?.id,
+        currentConversationMessagesLength: currentConversation?.messages?.length || 0,
+        conversationsCount: conversations.length,
+        foundInConversations: !!conversations.find(c => c.id === conversationIdToUse)
+      });
     }
     
     return [];
-  }, [selectedConversationId, createdConversationId, conversations, currentConversation]);
+  }, [
+    conversationIdToUse, 
+    conversations, // CRITICAL: conversations array'ini direkt dependency olarak kullan
+    // CRITICAL FIX: conversations array'indeki ilgili conversation'ın messages array'ini de dependency olarak ekle
+    // Bu sayede mesajlar eklendiğinde/güncellendiğinde messagesToShow yeniden hesaplanır
+    conversations.find(conv => conv.id === conversationIdToUse)?.messages,
+    conversations.find(conv => conv.id === conversationIdToUse)?.messages?.length,
+    currentConversation, 
+    currentConversation?.id, // currentConversation ID değiştiğinde algıla
+    currentConversation?.messages, // currentConversation messages array'i değiştiğinde algıla
+    currentConversation?.messages?.length // Array length değiştiğinde algıla
+  ]);
   
   // Check if conversation data is loading
   const isConversationDataLoading = useMemo(() => {
@@ -296,9 +357,19 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   const panResponder = useMemo(
     () =>
       PanResponder.create({
+        onStartShouldSetPanResponder: (evt) => {
+          // Sol kenardan başlayan dokunuşları yakala (ilk 30px içinde)
+          const startX = evt.nativeEvent.pageX;
+          return startX < 30;
+        },
         onMoveShouldSetPanResponder: (evt, gestureState) => {
-          // Sadece soldan sağa çekme hareketini algıla
-          return gestureState.dx > 50 && Math.abs(gestureState.dy) < 100;
+          // Sol kenardan başlayan ve sağa doğru hareket eden gesture'ları algıla
+          const startX = evt.nativeEvent.pageX - gestureState.dx;
+          const isFromLeftEdge = startX < 30;
+          const isRightwardSwipe = gestureState.dx > 20; // Daha düşük threshold
+          const isMostlyHorizontal = Math.abs(gestureState.dy) < Math.abs(gestureState.dx) * 2;
+          
+          return isFromLeftEdge && isRightwardSwipe && isMostlyHorizontal;
         },
         onPanResponderGrant: () => {
           // Swipe gesture başladı
@@ -309,7 +380,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
         },
         onPanResponderRelease: (evt, gestureState) => {
           // Eğer yeterince sağa çekildiyse chat history'yi aç
-          if (gestureState.dx > 100) {
+          // Threshold'u düşürdük - daha kolay tetiklenir
+          if (gestureState.dx > 50) {
             onOpenChatHistory();
           }
         },
@@ -319,12 +391,19 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
 
   const openModal = useCallback(async () => {
     // "+" butonuna basıldığında boş bir conversation oluştur
+    
+    // Eğer aktif bir streaming varsa, önce durdur
+    if (isStreaming) {
+      console.log('🛑 [HomeScreen] Yeni conversation açılıyor, eski streaming durduruluyor');
+      cancelStreamingResponse();
+    }
+    
     setPlusButtonPressed(true);
     
     // Boş bir conversation oluştur
     const conversationId = await createNewConversation("Yeni Sohbet", "");
     setCreatedConversationId(conversationId);
-  }, [createNewConversation]);
+  }, [createNewConversation, isStreaming, cancelStreamingResponse]);
 
   const openChatScreen = useCallback(async () => {
     // Header'daki chat butonuna veya logo'ya basıldığında:
@@ -332,6 +411,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     // 2. Yeni sohbet hazırlığı başlat - conversation'ı sıfırla
     // 3. Conversation hazırlığı başlar ama backend'e yollamak için ilk mesajı bekler
     // 4. İlk mesaj gönderildiğinde conversation oluşturulacak ve backend'e kaydedilecek
+    
+    // Eğer aktif bir streaming varsa, önce durdur
+    if (isStreaming) {
+      console.log('🛑 [HomeScreen] Yeni sohbet açılıyor, eski streaming durduruluyor');
+      cancelStreamingResponse();
+    }
     
     // selectedConversationId'yi sıfırla - ChatHistoryScreen'den seçilen conversation'ı temizle
     if (onConversationSelected) {
@@ -369,7 +454,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     // HeroSection otomatik olarak gösterilecek çünkü createdConversationId undefined olacak
     // Bu sayede yeni sohbet için hazırlık yapılmış olacak
     // İlk mesaj gönderildiğinde conversation oluşturulacak ve backend'e kaydedilecek
-  }, [dismissKeyboard, onConversationSelected]);
+  }, [dismissKeyboard, onConversationSelected, isStreaming, cancelStreamingResponse]);
 
 
   const handleArastirmaPress = useCallback(() => {
@@ -381,17 +466,32 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   const isSendingMessageRef = useRef(false);
 
   const handleSendMessage = useCallback(async () => {
+    console.log('📤 [HomeScreen] handleSendMessage çağrıldı:', {
+      inputText: inputText.substring(0, 50),
+      inputTextLength: inputText.length,
+      hasImages: selectedImages.length > 0,
+      hasFiles: selectedFiles.length > 0,
+      isLoading,
+      isStreaming,
+      isSendingMessage: isSendingMessageRef.current,
+      createdConversationId,
+      currentConversationId: currentConversation?.id
+    });
+    
     // Eğer zaten bir mesaj gönderiliyorsa, duplicate çağrıyı engelle
     if (isSendingMessageRef.current) {
+      console.log('⚠️ [HomeScreen] Zaten bir mesaj gönderiliyor, duplicate çağrı engellendi');
       return;
     }
 
     if (!inputText.trim() && selectedImages.length === 0 && selectedFiles.length === 0) {
+      console.log('⚠️ [HomeScreen] Mesaj gönderilemedi: içerik yok');
       return;
     }
 
     // Mesaj gönderme flag'ini set et
     isSendingMessageRef.current = true;
+    console.log('✅ [HomeScreen] Mesaj gönderme başlatılıyor...');
 
     try {
       let conversationId = createdConversationId;
@@ -400,6 +500,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
       // Bu sayede Chat ikonuna basıldığında sadece hazırlık yapılır, conversation oluşturulmaz
       // Conversation sadece ilk mesaj gönderildiğinde backend'e kaydedilir
       if (!conversationId) {
+        // Yeni conversation oluşturulmadan önce, eski conversation'daki streaming'i durdur
+        if (isStreaming) {
+          console.log('🛑 [HomeScreen] Yeni conversation oluşturuluyor, eski streaming durduruluyor');
+          cancelStreamingResponse();
+        }
+        
         const title = inputText.trim().length > 30 
           ? inputText.trim().substring(0, 30) + "..." 
           : inputText.trim() || "Yeni Sohbet";
@@ -416,6 +522,13 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
       
       // Mesaj gönder (conversation artık var, yeni mesajlar bu conversation içinde tutulacak)
       if (conversationId) {
+        console.log('📤 [HomeScreen] sendMessage çağrılıyor:', {
+          messageText: inputText.trim().substring(0, 50),
+          conversationId,
+          arastirmaModu,
+          imagesCount: selectedImages.length,
+          filesCount: selectedFiles.length
+        });
         await sendMessage(
           inputText.trim(),
           conversationId,
@@ -423,10 +536,18 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
           selectedImages,
           selectedFiles
         );
+        console.log('✅ [HomeScreen] sendMessage tamamlandı');
         
         // Mesaj gönderildikten sonra currentConversation'ın güncellenmesi için kısa bir bekleme
         // sendMessage zaten addMessage çağırıyor ve currentConversation'ı güncelliyor
         await new Promise(resolve => setTimeout(resolve, 100));
+      } else {
+        console.error('❌ [HomeScreen] conversationId yok, mesaj gönderilemedi:', {
+          createdConversationId,
+          currentConversationId: currentConversation?.id,
+          conversationId
+        });
+        Alert.alert("Hata", "Konuşma oluşturulamadı. Lütfen tekrar deneyin.");
       }
       
       // Clear input ve focus'u kapat
@@ -434,13 +555,46 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
       setSelectedImages([]);
       setSelectedFiles([]);
       setIsInputFocused(false);
-      dismissKeyboard();
+      
+      // Mesaj gönderildikten sonra klavyeyi kapat (kullanıcı odaklı)
+      // Kısa bir delay ile kapat - mesaj gönderilme animasyonu tamamlansın
+      setTimeout(() => {
+        dismissKeyboard();
+      }, 100);
     } catch (error) {
-      console.error("❌ Mesaj gönderme hatası:", error);
-      Alert.alert("Hata", "Mesaj gönderilirken bir hata oluştu.");
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      
+      // İnternet bağlantısı hatası zaten Alert gösterildi, tekrar gösterme
+      const isInternetError = errorMessage.includes('İnternet bağlantısı') || 
+                             errorMessage.includes('internet bağlantısı') ||
+                             errorMessage.includes('internet');
+      
+      if (!isInternetError) {
+        console.error("❌ [HomeScreen] Mesaj gönderme hatası:", {
+          error: errorMessage,
+          errorName: error instanceof Error ? error.name : undefined,
+          stack: errorStack,
+          inputText: inputText.substring(0, 50),
+          inputTextLength: inputText.length,
+          conversationId: createdConversationId || currentConversation?.id,
+          hasCreatedConversationId: !!createdConversationId,
+          hasCurrentConversation: !!currentConversation,
+          isLoading,
+          isStreaming
+        });
+        
+        // Hata mesajını kullanıcıya göster (internet hatası değilse)
+        const userFriendlyMessage = errorMessage || "Mesaj gönderilirken bir hata oluştu.";
+        Alert.alert("Hata", userFriendlyMessage);
+      } else {
+        // İnternet hatası - zaten Alert gösterildi, sadece log
+        console.warn("⚠️ [HomeScreen] İnternet bağlantısı hatası (Alert zaten gösterildi):", errorMessage);
+      }
     } finally {
       // Mesaj gönderme flag'ini reset et
       isSendingMessageRef.current = false;
+      console.log('✅ [HomeScreen] Mesaj gönderme flag\'i resetlendi');
     }
   }, [inputText, selectedImages, selectedFiles, createdConversationId, createNewConversation, sendMessage, arastirmaModu, dismissKeyboard, setIsInputFocused, currentConversation, selectConversation]);
 
@@ -457,6 +611,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
       // Eğer conversation yoksa (yeni sohbet modu), öneri seçildiğinde conversation oluştur
       // Bu sayede öneri seçimi de ilk mesaj gönderme gibi davranır
       if (!conversationId) {
+        // Yeni conversation oluşturulmadan önce, eski conversation'daki streaming'i durdur
+        if (isStreaming) {
+          console.log('🛑 [HomeScreen] Öneri ile yeni conversation oluşturuluyor, eski streaming durduruluyor');
+          cancelStreamingResponse();
+        }
+        
         // createNewConversation zaten currentConversation'ı set ediyor, bu yüzden
         // selectConversation çağrısına gerek yok
         conversationId = await createNewConversation(title);
@@ -484,7 +644,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
       console.error('❌ Öneri seçim hatası:', error);
       Alert.alert("Hata", "Öneri seçilirken bir hata oluştu.");
     }
-  }, [createdConversationId, createNewConversation, sendMessage, selectConversation]);
+  }, [createdConversationId, createNewConversation, sendMessage, isStreaming, cancelStreamingResponse]);
 
   // Handle selected conversation - ChatHistoryScreen'den seçilen conversation'ı kullan
   useEffect(() => {
@@ -497,17 +657,26 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
       // Yeni conversation seçildi - ChatHistoryScreen'den geldi
       console.log('📥 HomeScreen: selectedConversationId değişti, conversation seçiliyor:', selectedConversationId);
       
+      // Eğer farklı bir conversation seçildiyse ve aktif streaming varsa, durdur
+      const previousId = previousSelectedConversationIdRef.current;
+      if (previousId !== undefined && previousId !== selectedConversationId && isStreaming) {
+        console.log('🛑 [HomeScreen] Farklı conversation seçildi, eski streaming durduruluyor');
+        cancelStreamingResponse();
+      }
+      
       // createdConversationId'yi hemen set et - render'ın hemen mesajlaşma alanını göstermesi için
       // selectConversation async olduğu için state güncellemesi gecikebilir
       setCreatedConversationId(selectedConversationId);
       lastConversationLoadedRef.current = true;
       previousSelectedConversationIdRef.current = selectedConversationId;
       
-      // selectConversation'ı çağır - mesajları yükle ve currentConversation'ı güncelle
-      // ChatHistoryScreen'de zaten çağrılmış olabilir ama state güncellemesi gecikmiş olabilir
-      // Bu yüzden burada da çağırarak garanti ediyoruz
-      // selectConversation içinde deduplication var, bu yüzden duplicate çağrı sorun olmaz
-      selectConversation(selectedConversationId)
+      // CRITICAL FIX: selectConversation'ı sadece bir kez çağır
+      // ChatHistoryScreen'de zaten çağrılmış olabilir, bu yüzden duplicate çağrıyı önle
+      // selectConversation içinde deduplication var ama yine de gereksiz çağrıyı önle
+      const selectPromise = selectConversation(selectedConversationId);
+      
+      // Promise'i bekle ama hata durumunda da devam et
+      selectPromise
         .then(() => {
           console.log('✅ HomeScreen: Conversation seçildi ve mesajlar yüklendi:', selectedConversationId);
           
@@ -561,7 +730,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
       // İlk mount veya selectedConversationId zaten undefined
       previousSelectedConversationIdRef.current = undefined;
     }
-  }, [selectedConversationId, selectConversation]); // createdConversationId dependency'sini kaldırdık - sadece selectedConversationId değiştiğinde çalışmalı
+  }, [selectedConversationId, selectConversation, isStreaming, cancelStreamingResponse, createdConversationId]); // Streaming durdurma için isStreaming ve cancelStreamingResponse eklendi
 
   // createdConversationId değiştiğinde local storage'a kaydet (yeni conversation oluşturulduğunda)
   // Ancak sadece manuel olarak değiştirildiğinde kaydet (yükleme sırasında değil)
@@ -620,6 +789,20 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
 
   // Conversation oluşturulduğunda createNewConversation zaten currentConversation'ı set ediyor,
   // conversations array'inde arama yapmaya gerek yok
+  
+  // Yeni conversation oluşturulduğunda conversations array'ine eklenmesini bekle
+  // Eğer conversationFromArray bulunamıyorsa, currentConversation'ı kullan
+  useEffect(() => {
+    if (createdConversationId && !conversationFromArray && currentConversation && currentConversation.id === createdConversationId) {
+      // Yeni conversation oluşturuldu ama conversations array'inde henüz yok
+      // currentConversation'ı kullan - createNewConversation zaten set ediyor
+      console.log('🔄 [HomeScreen] Yeni conversation oluşturuldu, currentConversation kullanılıyor:', {
+        conversationId: createdConversationId,
+        hasCurrentConversation: !!currentConversation,
+        messagesCount: currentConversation.messages?.length || 0
+      });
+    }
+  }, [createdConversationId, conversationFromArray, currentConversation]);
   
   // Mesaj gönderildikten sonra currentConversation'ın güncellenmesini bekle
   useEffect(() => {
@@ -767,9 +950,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
               // messagesToShow zaten useMemo ile optimize edilmiş ve conversations array'inden alınıyor
               // Bu sayede mesajlar gecikme olmadan ekrana yansır
               
-              // Dev Mode: Pembe border'ın bottom değeri de animasyonlu olmalı
-              const devBorderBottom = messagesListPaddingBottom;
-              
               return (
                 <TouchableWithoutFeedback onPress={handleScreenPress} accessible={false}>
                   <Animated.View 
@@ -778,15 +958,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
                       { paddingBottom: messagesListPaddingBottom }
                     ]}
                   >
-                    {/* Dev Mode: Mesajlaşma alanının sınırını pembe çerçeve ile belirle */}
-                    {__DEV__ && (
-                      <Animated.View 
-                        style={[
-                          styles.devMessagesAreaBorder, 
-                          { bottom: devBorderBottom }
-                        ]} 
-                      />
-                    )}
                     <MessageList
                       messages={messagesToShow}
                       isLoading={isLoading}
@@ -795,8 +966,15 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
                       keyboardHeight={keyboardHeight}
                       conversationId={selectedConversationId || createdConversationId}
                       isDataLoading={isConversationDataLoading && (!currentConversation?.messages || currentConversation.messages.length === 0)}
+                      aiBubbleColor="#00DDA5"
                       onScrollToEnd={() => {
                         // Optional: Additional scroll handling
+                      }}
+                      onScrollBeginDrag={() => {
+                        // Scroll başladığında klavye kapat (kullanıcı mesajları okumak istiyor)
+                        if (isKeyboardVisible) {
+                          dismissKeyboard();
+                        }
                       }}
                     />
                   </Animated.View>
@@ -843,19 +1021,19 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
             onRemoveFile={removeFile}
             textInputRef={textInputRef}
             placeholder="Herhangi bir şey sor"
-            multiline={false}
+            multiline={true} // Home ekranında multiline aktif - satır satır yazabilmek için
             maxLength={1000}
             autoCorrect={true}
             autoCapitalize="sentences"
-            returnKeyType="send"
+            returnKeyType="default" // Multiline aktifken "default" kullan (yeni satır için)
             keyboardType="default"
             secureTextEntry={false}
             editable={true}
             selectTextOnFocus={false}
             clearButtonMode="while-editing"
             autoFocus={false}
-            blurOnSubmit={true}
-            onSubmitEditing={handleSendMessage}
+            blurOnSubmit={false} // Multiline aktifken blur yapma
+            onSubmitEditing={undefined} // Multiline aktifken onSubmitEditing'i devre dışı bırak
             testID="home-input"
             accessibilityLabel="Soru girişi"
             accessibilityHint="AI asistanınıza soru yazın veya sesli yazma kullanın"
@@ -923,19 +1101,6 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
     position: "relative",
     // paddingBottom dinamik olarak ayarlanacak (klavye durumuna göre)
-  },
-  devMessagesAreaBorder: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    // bottom değeri dinamik olarak ayarlanacak (input section yüksekliği kadar)
-    borderWidth: 3,
-    borderColor: "#FF69B4", // Pembe border
-    borderStyle: "solid",
-    borderRadius: 8,
-    zIndex: 10000,
-    pointerEvents: "none",
   },
   inputSectionContainer: {
     position: "absolute",

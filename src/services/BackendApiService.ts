@@ -1,7 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Backend API URL - Nircore backend
-const API_BASE_URL = 'https://nircore.io/api';
+// Local development için: http://localhost:3000/api
+// Fiziksel cihaz için: http://[BILGISAYAR_IP]:3000/api (örn: http://192.168.1.100:3000/api)
+const API_BASE_URL = 'http://10.172.1.103:3000/api';
 
 interface ApiResponse<T = any> {
   success: boolean;
@@ -64,14 +66,7 @@ class BackendApiService {
     this.authToken = token;
     await AsyncStorage.setItem('authToken', token);
     
-    // Token'ı console'a logla
-    console.log('🔑 Nirmind BackendApiService - Token set edildi:', token);
-    console.log('🔑 Nirmind BackendApiService - Token (full):', {
-      tokenLength: token.length,
-      tokenPreview: token.substring(0, 30) + '...' + token.substring(token.length - 20),
-      tokenStart: token.substring(0, 50),
-      tokenEnd: token.substring(token.length - 50)
-    });
+    // Token logları kaldırıldı (açılışta çok fazla log üretiyordu)
   }
 
   async getAuthToken(): Promise<string | null> {
@@ -128,63 +123,14 @@ class BackendApiService {
         const cleanToken = token.trim();
         headers['Authorization'] = `Bearer ${cleanToken}`;
         
-        // Token'ı console'a logla (debug için)
-        console.log('🔑 Nirmind BackendApiService - Token gönderiliyor:', {
-          tokenLength: cleanToken.length,
-          tokenPreview: cleanToken.substring(0, 30) + '...' + cleanToken.substring(cleanToken.length - 20),
-          hasBearer: headers['Authorization'].startsWith('Bearer '),
-          endpoint: endpoint
-        });
+        // Token gönderme logları kaldırıldı (açılışta çok fazla log üretiyordu)
       } else {
-        console.warn('⚠️ Nirmind BackendApiService - Token yok!');
+        // Token yok uyarısı kaldırıldı (açılışta çok fazla log üretiyordu)
       }
 
       const fullUrl = `${API_BASE_URL}${endpoint}`;
       
-      // Backend'e gönderilen tüm bilgileri logla
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('📤 NIRMIND - Backend\'e Gönderilen İstek:');
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('🌐 Method:', options.method || 'GET');
-      console.log('🌐 URL:', fullUrl);
-      console.log('🌐 Endpoint:', endpoint);
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('📋 Headers:');
-      console.log(JSON.stringify(headers, null, 2));
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      
-      // Request body varsa logla (tam içerik)
-      if (options.body) {
-        let bodyString: string;
-        let bodyObject: any = null;
-        
-        if (typeof options.body === 'string') {
-          bodyString = options.body;
-          try {
-            bodyObject = JSON.parse(bodyString);
-          } catch (e) {
-            // JSON değilse string olarak bırak
-          }
-        } else {
-          bodyString = JSON.stringify(options.body, null, 2);
-          bodyObject = options.body;
-        }
-        
-        console.log('📦 Body (String):');
-        console.log(bodyString);
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        
-        if (bodyObject) {
-          console.log('📦 Body (Parsed):');
-          console.log(JSON.stringify(bodyObject, null, 2));
-        }
-        
-        console.log('📦 Body Size:', bodyString.length, 'bytes');
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      } else {
-        console.log('📦 Body: (yok)');
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      }
+      // Request bilgileri logları kaldırıldı (açılışta çok fazla log üretiyordu)
       
       // Fetch options - Network timeout ve retry için optimize edilmiş
       const fetchOptions: RequestInit = {
@@ -243,14 +189,7 @@ class BackendApiService {
           
           clearTimeout(timeoutId);
           
-          // Response bilgilerini logla
-          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-          console.log('📥 NIRMIND - Backend\'den Gelen Yanıt:');
-          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-          console.log('📊 Status:', response.status, response.statusText);
-          console.log('📊 OK:', response.ok);
-          console.log('📊 URL:', response.url);
-          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+          // Backend response logları kaldırıldı (çok fazla log üretiyordu)
           
           // Rate limit hatası kontrolü - response başarılı geldi ama status 429 olabilir
           if (response.status === 429) {
@@ -346,15 +285,13 @@ class BackendApiService {
         };
       }
       
-      // Response headers'ı topla
+      // Response headers'ı topla (sadece hata durumunda kullanılıyor)
       const responseHeaders: Record<string, string> = {};
       response.headers.forEach((value, key) => {
         responseHeaders[key] = value;
       });
       
-      console.log('📥 Response Headers:');
-      console.log(JSON.stringify(responseHeaders, null, 2));
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      // Response headers logları kaldırıldı (çok fazla log üretiyordu)
 
       // Handle 429 Too Many Requests (Rate Limit)
       if (response.status === 429) {
@@ -404,9 +341,7 @@ class BackendApiService {
           data = JSON.parse(textData);
           
           // Response body'yi logla
-          console.log('📦 Response Body (JSON):');
-          console.log(JSON.stringify(data, null, 2));
-          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+          // Response body logları kaldırıldı
         } catch (parseError) {
           // JSON parse hatası
           console.error('❌ JSON parse hatası:', parseError);
@@ -418,10 +353,7 @@ class BackendApiService {
         const text = await response.text();
         
         // Response body'yi logla
-        console.log('📦 Response Body (Text):');
-        console.log(text.length > 1000 ? text.substring(0, 1000) + '... (truncated)' : text);
-        console.log('📦 Response Body Size:', text.length, 'bytes');
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        // Response body text logları kaldırıldı
         
         // Rate limit hatası HTML olarak dönebilir
         if (response.status === 429 || text.includes('Too many requests') || text.includes('rate limit')) {
@@ -626,7 +558,7 @@ class BackendApiService {
     onAIStart: () => void,
     onAIChunk: (chunk: string, fullContent: string) => void,
     onAIComplete: (aiMessage: any) => void,
-    onError: (error: string) => void
+    onError: (error: string) => void,
   ): Promise<() => void> {
     let xhr: XMLHttpRequest | null = null;
     let isAborted = false;
@@ -683,7 +615,13 @@ class BackendApiService {
         let eventCount = 0;
         let firstChunkTime: number | null = null;
         const requestStartTime = Date.now();
+        // CRITICAL FIX: Duplicate event kontrolü için daha güvenilir hash kullan
+        // Event type + message ID + content hash (ilk 200 karakter)
         const processedEvents = new Set<string>(); // İşlenen event'leri takip et (duplicate önlemek için)
+        let aiStartCalled = false; // ai_start event'inin sadece bir kez çağrılmasını sağla
+        // CRITICAL FIX: userMessageProcessed her yeni stream için sıfırlanmalı
+        // Her yeni mesaj gönderiminde yeni bir stream başlar, bu yüzden flag'i sıfırla
+        let userMessageProcessed = false; // user_message event'inin sadece bir kez işlenmesini sağla
         
         // Timeout mekanizması - ilk chunk gelene kadar kısa, sonrasında uzun
         const CONNECTION_TIMEOUT = 30000; // İlk bağlantı için 30 saniye
@@ -810,6 +748,8 @@ class BackendApiService {
             // Tamamlanmış event'leri parse et
             const eventBlocks = completeEvents.split('\n\n').filter(block => block.trim());
             
+            // Event block parse logları kaldırıldı (çok fazla log üretiyordu)
+            
             for (const eventBlock of eventBlocks) {
               if (!eventBlock.trim()) continue;
               
@@ -837,12 +777,57 @@ class BackendApiService {
                 }
                 
                 // Event key oluştur - event type + data hash (ilk 100 karakter)
-                const eventKey = `${eventType}:${eventData.substring(0, 100)}`;
+                // Thinking steps kaldırıldı - frontend'de artık işlenmiyor
+                // ai_thinking_step event'lerini tamamen ignore et
+                if (eventType === 'ai_thinking_step') {
+                  continue; // Thinking step event'lerini ignore et
+                }
                 
-                // Duplicate kontrolü - aynı event'i birden fazla kez işleme
+                // CRITICAL FIX: Duplicate kontrolü - daha güvenilir hash kullan
+                // Event type + message ID (varsa) + content hash (ilk 200 karakter)
+                let eventKey = `${eventType}:${eventData.substring(0, 200)}`;
+                let messageId: string | null = null;
+                
+                // Eğer event data içinde message ID varsa, onu da hash'e ekle
+                try {
+                  const tempData = JSON.parse(eventData);
+                  if (tempData?.data?.userMessage?.id) {
+                    messageId = tempData.data.userMessage.id;
+                    eventKey = `${eventType}:${messageId}:${eventData.substring(0, 100)}`;
+                  } else if (tempData?.data?.aiMessage?.id) {
+                    messageId = tempData.data.aiMessage.id;
+                    eventKey = `${eventType}:${messageId}:${eventData.substring(0, 100)}`;
+                  } else if (tempData?.userMessage?.id) {
+                    messageId = tempData.userMessage.id;
+                    eventKey = `${eventType}:${messageId}:${eventData.substring(0, 100)}`;
+                  } else if (tempData?.aiMessage?.id) {
+                    messageId = tempData.aiMessage.id;
+                    eventKey = `${eventType}:${messageId}:${eventData.substring(0, 100)}`;
+                  }
+                } catch (e) {
+                  // JSON parse hatası - normal hash kullan
+                }
+                
+                // CRITICAL FIX: Event type bazlı duplicate kontrolü
+                // Özellikle user_message ve ai_start event'leri için daha sıkı kontrol
+                if (eventType === 'user_message' && userMessageProcessed) {
+                  console.warn(`⚠️ Duplicate ${eventType} event atlandı (flag kontrolü): ${messageId || 'no ID'} (${eventCount}. event)`);
+                  continue;
+                }
+                
+                if (eventType === 'ai_start' && aiStartCalled) {
+                  console.warn(`⚠️ Duplicate ${eventType} event atlandı (flag kontrolü): (${eventCount}. event)`);
+                  continue;
+                }
+                
                 if (processedEvents.has(eventKey)) {
+                  if (eventCount <= 5) {
+                    console.warn(`⚠️ Duplicate event atlandı: ${eventType} (${eventCount}. event) - Key: ${eventKey.substring(0, 100)}`);
+                  }
                   continue; // Bu event zaten işlendi, sessizce atla
                 }
+                
+                // Event'i işlendi olarak işaretle
                 processedEvents.add(eventKey);
                 
                 eventCount++;
@@ -852,7 +837,11 @@ class BackendApiService {
                     continue; // Boş data, atla
                   }
                   
+                  // Thinking step logları kaldırıldı (çok fazla log üretiyordu)
+                  
                   const data = JSON.parse(eventData);
+                  
+                  // Thinking step parse logları kaldırıldı
                   
                   // Data validation
                   if (!data || typeof data !== 'object') {
@@ -860,12 +849,19 @@ class BackendApiService {
                     continue;
                   }
                   
-                  if (eventCount <= 5) {
-                    console.log(`📨 SSE event alindi: ${eventType} (${eventCount}. event)`);
+                  // Event logları azaltıldı - sadece önemli event'ler için log
+                  if (eventCount <= 5 || eventType === 'ai_complete' || eventType === 'error') {
+                    console.log(`📨 SSE event: ${eventType} (${eventCount}. event)`);
                   }
                   
                   switch (eventType) {
                     case 'user_message':
+                      // CRITICAL FIX: Duplicate user_message event'lerini engelle
+                      if (userMessageProcessed) {
+                        console.warn('⚠️ user_message event zaten işlendi, duplicate event atlanıyor');
+                        break;
+                      }
+                      
                       if (data.success && data.data?.userMessage) {
                         // UserMessage validation
                         const userMsg = data.data.userMessage;
@@ -873,23 +869,83 @@ class BackendApiService {
                           console.error('❌ Geçersiz userMessage:', userMsg);
                           break;
                         }
+                        userMessageProcessed = true; // İşlendi olarak işaretle
                         console.log('✅ User message event isleniyor');
                         onUserMessage(userMsg);
                       }
                       break;
                     case 'ai_start':
+                      // Duplicate ai_start event'lerini engelle
+                      if (aiStartCalled) {
+                        console.warn('⚠️ ai_start event zaten işlendi, duplicate event atlanıyor');
+                        break;
+                      }
+                      aiStartCalled = true;
                       console.log('✅ AI start event isleniyor');
                       onAIStart();
                       break;
+                    case 'ai_thinking_step':
+                      // Thinking step event - frontend'de artık işlenmiyor, ignore et
+                      // Bu case'e asla gelmemeli çünkü yukarıda continue ile atlanıyor
+                      break;
                     case 'ai_chunk':
-                      // Content validation
-                      if (data && typeof data.content === 'string' && typeof data.fullContent === 'string') {
+                      // YENİ FORMAT: Thinking steps ve ana mesajı ayrı field'larda gönder
+                      // Önce data.data.message formatını kontrol et (backend'den gelen yeni format)
+                      if (data && data.data && data.data.message && typeof data.data.message.content === 'string' && typeof data.data.message.fullContent === 'string') {
                         if (eventCount <= 3) {
-                          console.log(`📝 AI chunk alindi (${data.content.length} karakter)`);
+                          console.log(`📝 AI chunk alindi (data.data.message format, ${data.data.message.content.length} karakter)`);
+                        }
+                        // Ana mesajı gönder
+                        onAIChunk(data.data.message.content, data.data.message.fullContent);
+                      } else if (data && data.message && typeof data.message.content === 'string' && typeof data.message.fullContent === 'string') {
+                        // data.message formatı
+                        if (eventCount <= 3) {
+                          console.log(`📝 AI chunk alindi (${data.message.content.length} karakter)`);
+                        }
+                        // Ana mesajı gönder
+                        onAIChunk(data.message.content, data.message.fullContent);
+                      } else if (data && data.data && typeof data.data.content === 'string' && typeof data.data.fullContent === 'string') {
+                        // data.data.content formatı (backward compatibility)
+                        if (eventCount <= 3) {
+                          console.log(`📝 AI chunk alindi (data.data.content format, ${data.data.content.length} karakter)`);
+                        }
+                        onAIChunk(data.data.content, data.data.fullContent);
+                      } else if (data && typeof data.content === 'string' && typeof data.fullContent === 'string') {
+                        // Eski format desteği (backward compatibility)
+                        if (eventCount <= 3) {
+                          console.log(`📝 AI chunk alindi (eski format, ${data.content.length} karakter)`);
                         }
                         onAIChunk(data.content, data.fullContent);
+                      } else if (data && data.data && data.data.userMessage) {
+                        // CRITICAL FIX: Backend bazen userMessage gönderiyor, bu ai_chunk değil, atla
+                        // Bu durumda chunk yok, sadece userMessage var - bu event'i ignore et
+                        if (eventCount <= 3) {
+                          console.log('ℹ️ ai_chunk event\'inde userMessage var, chunk yok - atlanıyor');
+                        }
+                        // Bu event'i ignore et, chunk yok
+                        break;
                       } else {
-                        console.warn('⚠️ Geçersiz ai_chunk data:', data);
+                        // Geçersiz format - detaylı log (sadece ilk birkaç event için)
+                        if (eventCount <= 5) {
+                          console.warn('⚠️ Geçersiz ai_chunk data:', {
+                            hasData: !!data,
+                            hasDataData: !!data?.data,
+                            dataKeys: data ? Object.keys(data) : [],
+                            dataDataKeys: data?.data ? Object.keys(data.data) : [],
+                            hasMessage: data?.message ? true : false,
+                            hasDataMessage: data?.data?.message ? true : false,
+                            hasUserMessage: data?.data?.userMessage ? true : false,
+                            messageKeys: data?.message ? Object.keys(data.message) : [],
+                            dataMessageKeys: data?.data?.message ? Object.keys(data.data.message) : [],
+                            hasContent: typeof data?.content === 'string',
+                            hasDataContent: typeof data?.data?.content === 'string',
+                            hasFullContent: typeof data?.fullContent === 'string',
+                            hasDataFullContent: typeof data?.data?.fullContent === 'string',
+                            dataType: typeof data
+                          });
+                        }
+                        // Chunk yok, devam et
+                        break;
                       }
                       break;
                     case 'ai_complete':
@@ -912,6 +968,13 @@ class BackendApiService {
                           onError('AI mesajı geçersiz format');
                           break;
                         }
+                        
+                        // YENİ FORMAT: Response field'ını da handle et
+                        // Thinking steps kaldırıldı - frontend'de artık işlenmiyor
+                        if (data.data.response) {
+                          // Thinking steps log'u kaldırıldı
+                        }
+                        
                         onAIComplete(aiMsg);
                       } else {
                         console.error('❌ Geçersiz ai_complete data:', data);
@@ -938,9 +1001,51 @@ class BackendApiService {
                         clearTimeout(streamTimeout);
                         streamTimeout = null;
                       }
-                      const errorMsg = data?.message || data?.error || 'Bir hata oluştu';
-                      console.error('❌ SSE error event:', errorMsg);
-                      onError(errorMsg);
+                      
+                      // Error event formatını kontrol et - backend'den farklı formatlar gelebilir
+                      // data.message, data.error, data.data.message, data.data.error formatlarını kontrol et
+                      let errorMsg = 'Bir hata oluştu';
+                      if (data?.message) {
+                        errorMsg = data.message;
+                      } else if (data?.error) {
+                        errorMsg = data.error;
+                      } else if (data?.data?.message) {
+                        errorMsg = data.data.message;
+                      } else if (data?.data?.error) {
+                        errorMsg = data.data.error;
+                      }
+                      
+                      // Eğer success: true ise, bu gerçek bir error değil, yanlış parse edilmiş olabilir
+                      // Backend'den gelen error event'i kontrol et
+                      if (data?.success === true && !data?.error && !data?.message) {
+                        console.warn('⚠️ Error event ama success: true, yanlış parse edilmiş olabilir:', {
+                          eventType,
+                          dataKeys: Object.keys(data || {}),
+                          dataDataKeys: data?.data ? Object.keys(data.data) : [],
+                          fullData: data
+                        });
+                        // Gerçek bir error değilse, devam et (ai_chunk event'leri gelebilir)
+                        break; // return yerine break - diğer event'ler gelebilir
+                      }
+                      
+                      // Detaylı hata loglama
+                      console.error('❌ SSE error event:', {
+                        message: errorMsg,
+                        error: data?.error || data?.data?.error,
+                        errorType: data?.errorType || data?.data?.errorType,
+                        errorCode: data?.errorCode || data?.data?.errorCode,
+                        details: data?.details || data?.data?.details,
+                        success: data?.success,
+                        fullData: data
+                      });
+                      
+                      // Kullanıcıya daha detaylı mesaj göster (development'ta)
+                      const details = data?.details || data?.data?.details;
+                      const userErrorMsg = process.env.NODE_ENV === 'development' && details
+                        ? `${errorMsg}\n\nDetay: ${details}`
+                        : errorMsg;
+                      
+                      onError(userErrorMsg);
                       if (!isResolved && !isAborted) {
                         isResolved = true;
                       }
@@ -1209,7 +1314,7 @@ class BackendApiService {
 
   async verifyNirpaxToken(token: string): Promise<ApiResponse<any>> {
     // Nirpax token'ını doğrulamak için Nirpax backend'ini kullan
-    const response = await fetch('https://nircore.io/api/nirpax/auth/verify', {
+    const response = await fetch(`${API_BASE_URL}/nirpax/auth/verify`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

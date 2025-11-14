@@ -153,7 +153,7 @@ const Header: React.FC<HeaderProps> = ({
         <TouchableOpacity
           style={styles.headerButton}
           onPress={() => {
-            console.log("🔙 Header geri butonu tıklandı");
+            // Header geri butonu logları kaldırıldı
             onBackPress?.();
           }}
           accessible={true}
@@ -175,7 +175,7 @@ const Header: React.FC<HeaderProps> = ({
         ) : showLogo ? (
           <TouchableOpacity
             onPress={() => {
-              console.log("🏠 Logo tıklandı - Home ekranına gidiliyor");
+              // Logo tıklama logları kaldırıldı
               onLogoPress?.();
             }}
             accessible={true}
@@ -232,7 +232,7 @@ const Header: React.FC<HeaderProps> = ({
             <TouchableOpacity
               style={styles.headerButton}
               onPress={() => {
-                console.log("🔙 Header geri butonu tıklandı");
+                // Header geri butonu logları kaldırıldı
                 onBackPress?.();
               }}
               accessible={true}

@@ -316,10 +316,6 @@ const UploadModal: React.FC<UploadModalProps> = ({
           sortBy: 'creationTime',
         });
         
-        if (__DEV__) {
-          console.log('📸 Toplam fotoğraf sayısı:', assets.assets.length);
-        }
-        
         // Her fotoğraf için gerçek URI'yı al
         const photosWithRealUri = await Promise.all(
           assets.assets.slice(0, 10).map(async (asset: any) => {
@@ -342,9 +338,6 @@ const UploadModal: React.FC<UploadModalProps> = ({
           })
         );
         
-        if (__DEV__) {
-          console.log('📸 Son fotoğraflar yüklendi:', photosWithRealUri.length);
-        }
         setRecentPhotos(photosWithRealUri);
       } else {
         console.log('❌ Medya kütüphanesi izni verilmedi:', status);
