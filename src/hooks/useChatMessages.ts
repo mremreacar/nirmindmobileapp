@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Alert, AppState, AppStateStatus } from 'react-native';
 import { useChat } from '@/src/lib/context/ChatContext';
 import { ChatMessage } from '@/src/lib/mock/types';
@@ -33,6 +33,7 @@ export const useChatMessages = () => {
   const lastUpdateTimeRef = useRef<number>(0);
   const pendingUpdateRef = useRef<{ messageId: string; content: string; conversationId: string } | null>(null);
   const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const previousConversationIdRef = useRef<string | null>(null);
   
   // Dinamik "düşünüyor" mesajları
   const thinkingMessages = [
@@ -1418,6 +1419,73 @@ export const useChatMessages = () => {
 
     return true;
   }, [removeMessage]);
+
+  // Yeni sohbete geçildiğinde veya home'a dönüldüğünde streaming state'ini temizle
+  useEffect(() => {
+    const currentConversationId = currentConversation?.id || null;
+    
+    // Eğer conversation değiştiyse veya null olduysa (home'a dönüldüyse), streaming'i temizle
+    const conversationChanged = previousConversationIdRef.current !== null && 
+                                 previousConversationIdRef.current !== currentConversationId;
+    const isHomeScreen = currentConversationId === null && previousConversationIdRef.current !== null;
+    const isNewConversation = previousConversationIdRef.current === null && currentConversationId !== null;
+    
+    if (conversationChanged || isHomeScreen || isNewConversation) {
+      // Eğer aktif bir stream varsa, iptal et
+      const active = activeStreamRef.current;
+      if (active) {
+        // Eğer home'a dönüldüyse, yeni conversation açıldıysa veya farklı bir conversation'a geçildiyse
+        if (isHomeScreen || isNewConversation || active.conversationId !== currentConversationId) {
+          console.log('🔄 Conversation değişti, yeni sohbet açıldı veya home\'a dönüldü, streaming state\'i temizleniyor...', {
+            previousId: previousConversationIdRef.current,
+            currentId: currentConversationId,
+            activeStreamId: active.conversationId,
+            isNewConversation,
+            isHomeScreen
+          });
+          
+          // Stream'i iptal et
+          try {
+            if (active.state) {
+              active.state.cancelledByUser = true;
+            }
+            if (typeof active.abort === 'function') {
+              active.abort();
+            }
+          } catch (error) {
+            console.error('❌ Stream iptal edilirken hata:', error);
+          }
+          
+          // State'leri temizle
+          if (updateTimeoutRef.current) {
+            clearTimeout(updateTimeoutRef.current);
+            updateTimeoutRef.current = null;
+          }
+          pendingUpdateRef.current = null;
+          lastUpdateTimeRef.current = 0;
+          
+          activeStreamRef.current = null;
+          setIsStreaming(false);
+          setIsLoading(false);
+        }
+      } else {
+        // Eğer aktif stream yoksa ama conversation değiştiyse veya yeni sohbet açıldıysa, 
+        // state'leri kesin olarak temizle (yeni sohbet açıldığında durdur ikonu görünmemeli)
+        if (conversationChanged || isNewConversation || isHomeScreen) {
+          console.log('🧹 Conversation değişti veya yeni sohbet açıldı, streaming state\'leri temizleniyor (aktif stream yok)...', {
+            previousId: previousConversationIdRef.current,
+            currentId: currentConversationId,
+            isNewConversation
+          });
+          setIsStreaming(false);
+          setIsLoading(false);
+        }
+      }
+    }
+    
+    // Mevcut conversation ID'yi kaydet
+    previousConversationIdRef.current = currentConversationId;
+  }, [currentConversation?.id]);
 
   return {
     isLoading,

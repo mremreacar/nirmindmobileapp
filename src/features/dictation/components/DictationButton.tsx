@@ -6,7 +6,7 @@ import { SVG_ICONS } from '../../../constants';
 
 interface DictationButtonProps {
   isDictating: boolean;
-  isProcessing?: boolean; // Yeni: desifre durumu
+  isProcessing?: boolean; // Yeni: deşifre durumu
   onPress: () => void;
   waveAnimations: Animated.Value[];
   style?: any;
@@ -49,12 +49,12 @@ const DictationButton: React.FC<DictationButtonProps> = ({
       accessible={true}
       accessibilityLabel={
         isDictating ? "Dikteyi durdur" : 
-        isProcessing ? "Desifre ediliyor" : 
+        isProcessing ? "Deşifre ediliyor" : 
         "Dikteyi başlat"
       }
       accessibilityHint={
         isDictating ? "Dikteyi durdurmak için dokunun" : 
-        isProcessing ? "Ses desifre ediliyor, lütfen bekleyin" : 
+        isProcessing ? "Ses deşifre ediliyor, lütfen bekleyin" : 
         "Sesli mesaj göndermek için dokunun"
       }
       accessibilityRole="button"

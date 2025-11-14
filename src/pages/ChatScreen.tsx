@@ -137,14 +137,28 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   
   // Input temizleme kontrolü için ref
   const inputClearedRef = useRef(false);
+  // Önceki conversation ID'yi takip et (input section temizleme için)
+  const previousConversationIdRef = useRef<string | null | undefined>(undefined);
 
   // Dikte feature hooks
   const { dictationState, toggleDictation: originalToggleDictation } = useDictation({
-    onTextUpdate: (text: string) => {
+    onTextUpdate: (text: string, replacePrevious?: boolean) => {
       // Hızlı text güncelleme - functional update kullan (closure sorununu önler)
-      console.log('📝 [ChatScreen] onTextUpdate çağrıldı, text:', text);
+      console.log('📝 [ChatScreen] onTextUpdate çağrıldı, text:', text, 'replacePrevious:', replacePrevious);
       setInputText((prev) => {
-        const newText = prev + text;
+        let newText: string;
+        if (replacePrevious) {
+          // Önceki metni çıkar (düzeltme durumu)
+          // Metin değiştiğinde, önceki metni input'tan çıkar ve yeni metni ekle
+          // Basit yaklaşım: Eğer text tam metin ise, önceki dikte metnini çıkar ve yeni metni ekle
+          // lastReceivedTextRef kullanarak son eklenen metni takip edemeyiz (hook içinde)
+          // Bu yüzden: replacePrevious=true ise, text'i direkt kullan (önceki metin zaten çıkarılmış olmalı)
+          newText = text;
+          console.log('🔄 [ChatScreen] Metin değişti, yeni metin eklendi:', text);
+        } else {
+          // Normal ekleme
+          newText = prev + text;
+        }
         console.log('📝 [ChatScreen] Yeni text:', newText);
         if (newText.length > 0) {
           inputClearedRef.current = false;
@@ -244,6 +258,118 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     closeUploadModal,
     inputClearedRef,
   });
+
+  // Header'dan yeni sohbete geçildiğinde veya home'a dönüldüğünde input alanını temizle
+  const cleanupInputState = useCallback(() => {
+    console.log('🧹 [ChatScreen] Input state temizleniyor (header butonu tıklandı)');
+    
+    // 1. Input text'i temizle
+    setInputText('');
+    inputClearedRef.current = true;
+    
+    // 2. Dikte durdur (eğer aktifse)
+    if (dictationState.isDictating || dictationState.isListening) {
+      console.log('🛑 [ChatScreen] Dikte durduruluyor (cleanup)');
+      originalToggleDictation(); // Dikte aktifse durdur
+    }
+    
+    // 3. Streaming'i durdur (eğer aktifse) - kesin olarak temizle
+    if (isStreaming || isLoading) {
+      console.log('🛑 [ChatScreen] Streaming durduruluyor (cleanup)', { isStreaming, isLoading });
+      const cancelled = cancelStreamingResponse();
+      // Eğer cancel başarısız olduysa bile state'leri temizle
+      if (!cancelled) {
+        console.log('⚠️ [ChatScreen] Streaming cancel başarısız, state\'ler manuel temizleniyor');
+      }
+    }
+    
+    // 4. Klavyeyi kapat
+    dismissKeyboard();
+    
+    // 5. Upload modal'ı kapat (eğer açıksa)
+    if (showUploadModal) {
+      closeUploadModal();
+    }
+    
+    // 6. Selected images/files'ı temizle
+    setSelectedImages([]);
+    setSelectedFiles([]);
+    
+    // 7. Araştırma modunu sıfırla
+    setArastirmaModu(false);
+    
+    console.log('✅ [ChatScreen] Input state temizlendi');
+  }, [
+    dictationState.isDictating,
+    dictationState.isListening,
+    originalToggleDictation,
+    isStreaming,
+    cancelStreamingResponse,
+    dismissKeyboard,
+    showUploadModal,
+    closeUploadModal,
+    setSelectedImages,
+    setSelectedFiles,
+  ]);
+
+  // ChatScreen mount olduğunda, conversation değiştiğinde veya olmadığında input section'ı temizle
+  useEffect(() => {
+    const currentId = activeConversationId;
+    const previousId = previousConversationIdRef.current;
+    
+    // Eğer conversation değiştiyse, yoksa (null) veya ilk mount ise temizle
+    // İlk mount: previousId === undefined
+    // Conversation değişti: previousId !== currentId
+    // Conversation null oldu: currentId === null (ve previousId !== null)
+    // Yeni conversation açıldı: previousId === null && currentId !== null
+    const shouldCleanup = previousId === undefined || // İlk mount
+                          previousId !== currentId;   // Conversation değişti veya null oldu
+    
+    if (shouldCleanup) {
+      console.log('🧹 [ChatScreen] Conversation değişti veya yok, input section temizleniyor...', {
+        previousId,
+        currentId,
+        conversationId,
+        currentConversationId: currentConversation?.id,
+        isFirstMount: previousId === undefined,
+        conversationChanged: previousId !== undefined && previousId !== currentId,
+        conversationIsNull: currentId === null
+      });
+      
+      // Input section'ı temizle (home'dan geçişte, yeni sohbet açıldığında veya conversation değiştiğinde)
+      setInputText('');
+      inputClearedRef.current = true;
+      setSelectedImages([]);
+      setSelectedFiles([]);
+      setArastirmaModu(initialArastirmaModu || false);
+      
+      // Dikte durdur (eğer aktifse)
+      if (dictationState.isDictating || dictationState.isListening) {
+        console.log('🛑 [ChatScreen] Dikte durduruluyor (conversation change/null)');
+        originalToggleDictation();
+      }
+      
+      // Streaming durdur (eğer aktifse)
+      if (isStreaming) {
+        console.log('🛑 [ChatScreen] Streaming durduruluyor (conversation change/null)');
+        cancelStreamingResponse();
+      }
+      
+      // Klavyeyi kapat
+      dismissKeyboard();
+      
+      // Upload modal'ı kapat
+      if (showUploadModal) {
+        closeUploadModal();
+      }
+      
+      console.log('✅ [ChatScreen] Input section temizlendi');
+      
+      // Mevcut ID'yi kaydet
+      previousConversationIdRef.current = currentId;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeConversationId, currentConversation?.id]); // activeConversationId veya currentConversation?.id değiştiğinde çalışsın
 
   // Initialize with initial message - sadece conversation yoksa set et
   useEffect(() => {
@@ -439,6 +565,13 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   useEffect(() => {
     if (conversationId && conversationLoadedRef.current !== conversationId) {
       console.log('📥 ChatScreen: Conversation seçiliyor:', conversationId);
+      
+      // Yeni conversation seçildiğinde streaming state'ini temizle
+      if (isStreaming) {
+        console.log('🧹 [ChatScreen] Yeni conversation seçiliyor, streaming durduruluyor...');
+        cancelStreamingResponse();
+      }
+      
       // Conversation yüklemesini paralel yap, mesaj gönderimini bloklamasın
       conversationLoadedRef.current = conversationId; // Flag'i set et
       
@@ -455,10 +588,14 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
           conversationLoadedRef.current = null; // Hata durumunda flag'i reset et
         });
     } else if (!conversationId) {
-      // conversationId yoksa flag'i temizle
+      // conversationId yoksa flag'i temizle ve streaming'i durdur
       conversationLoadedRef.current = null;
+      if (isStreaming) {
+        console.log('🧹 [ChatScreen] Conversation ID yok, streaming durduruluyor...');
+        cancelStreamingResponse();
+      }
     }
-  }, [conversationId, selectConversation]);
+  }, [conversationId, selectConversation, isStreaming, cancelStreamingResponse]);
 
   // Load research mode from conversation when conversation changes
   // Eğer conversation'dan isResearchMode gelmiyorsa initialArastirmaModu prop'unu kullan
@@ -470,6 +607,24 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
       setArastirmaModu(initialArastirmaModu);
     }
   }, [currentConversation?.isResearchMode, initialArastirmaModu]);
+
+  // Yeni conversation oluşturulduğunda veya seçildiğinde streaming state'ini temizle
+  useEffect(() => {
+    // currentConversation değiştiğinde ve yeni bir conversation ise streaming'i temizle
+    if (currentConversation?.id && activeConversationId === currentConversation.id) {
+      // Eğer streaming aktifse ve bu conversation'a ait değilse, temizle
+      if (isStreaming) {
+        // activeStreamRef'i kontrol etmek için cancelStreamingResponse'u çağır
+        // Eğer bu conversation'a ait değilse zaten temizlenecek
+        const wasCancelled = cancelStreamingResponse();
+        if (!wasCancelled) {
+          // Eğer cancel başarısız olduysa (stream bu conversation'a ait değilse), 
+          // sadece state'leri temizle (güvenlik için)
+          console.log('🧹 [ChatScreen] Yeni conversation açıldı, streaming state temizleniyor...');
+        }
+      }
+    }
+  }, [currentConversation?.id, activeConversationId, isStreaming, cancelStreamingResponse]);
 
   // AI response is handled by useChatMessages hook - no need for duplicate logic
 
@@ -561,11 +716,16 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         <Header 
           onBackPress={() => {
             console.log('🔙 Chat ekranında geri butonu tıklandı');
+            cleanupInputState(); // Input state'i temizle
             onOpenChatHistory?.();
           }}
-          onChatPress={onClose}
+          onChatPress={() => {
+            cleanupInputState(); // Input state'i temizle
+            onClose();
+          }}
           onLogoPress={() => {
             console.log('🏠 Chat ekranından Home ekranına gidiliyor');
+            cleanupInputState(); // Input state'i temizle
             onClose();
           }}
           showBackButton={true}

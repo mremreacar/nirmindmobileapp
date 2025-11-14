@@ -84,32 +84,37 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
 
   // Memoize messagesToShow - conversations array'inden direkt al (daha güncel)
   // Bu sayede currentConversation güncellemesi gecikse bile mesajlar hemen görünür
+  // selectedConversationId'yi de kontrol et - ChatHistoryScreen'den seçilen conversation için
   const messagesToShow = useMemo(() => {
-    if (!createdConversationId) {
+    // Önce selectedConversationId'yi kontrol et (ChatHistoryScreen'den yeni seçilen conversation)
+    const conversationIdToUse = selectedConversationId || createdConversationId;
+    
+    if (!conversationIdToUse) {
       return [];
     }
     
     // Önce conversations array'inden bul (daha güncel olabilir)
-    const conversationFromArray = conversations.find(conv => conv.id === createdConversationId);
+    const conversationFromArray = conversations.find(conv => conv.id === conversationIdToUse);
     if (conversationFromArray && conversationFromArray.messages && Array.isArray(conversationFromArray.messages)) {
       return conversationFromArray.messages;
     }
     
     // Fallback: currentConversation'dan al
-    if (currentConversation && currentConversation.id === createdConversationId && currentConversation.messages) {
+    if (currentConversation && currentConversation.id === conversationIdToUse && currentConversation.messages) {
       return currentConversation.messages;
     }
     
     return [];
-  }, [createdConversationId, conversations, currentConversation]);
+  }, [selectedConversationId, createdConversationId, conversations, currentConversation]);
   
   // Check if conversation data is loading
   const isConversationDataLoading = useMemo(() => {
-    if (!createdConversationId) {
+    const conversationIdToUse = selectedConversationId || createdConversationId;
+    if (!conversationIdToUse) {
       return false;
     }
-    return loadingMessagesConversationIds.includes(createdConversationId);
-  }, [createdConversationId, loadingMessagesConversationIds]);
+    return loadingMessagesConversationIds.includes(conversationIdToUse);
+  }, [selectedConversationId, createdConversationId, loadingMessagesConversationIds]);
 
   // Keyboard handling
   const {
@@ -138,9 +143,22 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
 
   // Dikte feature hooks
   const { dictationState, toggleDictation: originalToggleDictation } = useDictation({
-    onTextUpdate: (text: string) => {
+    onTextUpdate: (text: string, replacePrevious?: boolean) => {
       setInputText((prev) => {
-        const newText = prev + text;
+        let newText: string;
+        if (replacePrevious) {
+          // Önceki metni çıkar (düzeltme durumu)
+          if (text === '') {
+            // Önceki metni çıkar (düzeltme için)
+            newText = '';
+          } else {
+            // Önceki metni çıkar ve yeni metni ekle
+            newText = text;
+          }
+        } else {
+          // Normal ekleme
+          newText = prev + text;
+        }
         if (newText.length > 0) {
           inputClearedRef.current = false;
         }
@@ -204,6 +222,64 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
 
   const heroReveal = useRef(new Animated.Value(1)).current;
 
+  // Conversation değiştiğinde veya olmadığında input section'ı temizle
+  const previousConversationIdRef = useRef<string | undefined | null>(undefined);
+  useEffect(() => {
+    // HomeScreen'de aktif conversation ID'yi belirle
+    const currentId = selectedConversationId || createdConversationId || currentConversation?.id || null;
+    const previousId = previousConversationIdRef.current;
+    
+    // Eğer conversation değiştiyse, yoksa (null) veya ilk mount ise temizle
+    const shouldCleanup = previousId === undefined || // İlk mount
+                          previousId !== currentId;   // Conversation değişti veya null oldu
+    
+    if (shouldCleanup) {
+      console.log('🧹 [HomeScreen] Conversation değişti veya yok, input section temizleniyor...', {
+        previousId,
+        currentId,
+        selectedConversationId,
+        createdConversationId,
+        currentConversationId: currentConversation?.id,
+        isFirstMount: previousId === undefined,
+        conversationChanged: previousId !== undefined && previousId !== currentId,
+        conversationIsNull: currentId === null
+      });
+      
+      // Input section'ı temizle
+      setInputText('');
+      inputClearedRef.current = true;
+      setSelectedImages([]);
+      setSelectedFiles([]);
+      setArastirmaModu(false);
+      
+      // Dikte durdur (eğer aktifse)
+      if (dictationState.isDictating || dictationState.isListening) {
+        console.log('🛑 [HomeScreen] Dikte durduruluyor (conversation change/null)');
+        originalToggleDictation();
+      }
+      
+      // Streaming durdur (eğer aktifse)
+      if (isStreaming) {
+        console.log('🛑 [HomeScreen] Streaming durduruluyor (conversation change/null)');
+        cancelStreamingResponse();
+      }
+      
+      // Klavyeyi kapat
+      dismissKeyboard();
+      
+      // Upload modal'ı kapat
+      if (showUploadModal) {
+        closeUploadModal();
+      }
+      
+      console.log('✅ [HomeScreen] Input section temizlendi');
+      
+      // Mevcut ID'yi kaydet
+      previousConversationIdRef.current = currentId;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedConversationId, createdConversationId, currentConversation?.id]); // Conversation ID'leri değiştiğinde çalışsın
+
   const [fontsLoaded, fontError] = useFonts({
     "Poppins-Regular": require("@assets/fonts/Poppins-Regular .ttf"),
     "Poppins-Medium": require("@assets/fonts/Poppins-Medium.ttf"),
@@ -257,6 +333,11 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     // 3. Conversation hazırlığı başlar ama backend'e yollamak için ilk mesajı bekler
     // 4. İlk mesaj gönderildiğinde conversation oluşturulacak ve backend'e kaydedilecek
     
+    // selectedConversationId'yi sıfırla - ChatHistoryScreen'den seçilen conversation'ı temizle
+    if (onConversationSelected) {
+      onConversationSelected();
+    }
+    
     // Mevcut conversation'ı sıfırla (Chat history'de zaten var)
     setCreatedConversationId(undefined);
     
@@ -269,6 +350,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     
     // Flag'i reset et - yeni sohbet açıldığı için
     lastConversationLoadedRef.current = false;
+    previousSelectedConversationIdRef.current = undefined;
     
     // currentConversation'ı da sıfırla - yeni sohbet için hazırlık
     // selectConversation(null) çağırmıyoruz çünkü bu conversation seçmek değil,
@@ -287,7 +369,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     // HeroSection otomatik olarak gösterilecek çünkü createdConversationId undefined olacak
     // Bu sayede yeni sohbet için hazırlık yapılmış olacak
     // İlk mesaj gönderildiğinde conversation oluşturulacak ve backend'e kaydedilecek
-  }, [dismissKeyboard]);
+  }, [dismissKeyboard, onConversationSelected]);
 
 
   const handleArastirmaPress = useCallback(() => {
@@ -406,15 +488,38 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
 
   // Handle selected conversation - ChatHistoryScreen'den seçilen conversation'ı kullan
   useEffect(() => {
+    // Duplicate çağrıları önle - aynı conversation zaten seçiliyse tekrar işlem yapma
+    if (selectedConversationId && previousSelectedConversationIdRef.current === selectedConversationId) {
+      return; // Zaten işlenmiş, tekrar işleme
+    }
+    
     if (selectedConversationId) {
-      // Yeni conversation seçildi
+      // Yeni conversation seçildi - ChatHistoryScreen'den geldi
+      console.log('📥 HomeScreen: selectedConversationId değişti, conversation seçiliyor:', selectedConversationId);
+      
+      // createdConversationId'yi hemen set et - render'ın hemen mesajlaşma alanını göstermesi için
+      // selectConversation async olduğu için state güncellemesi gecikebilir
       setCreatedConversationId(selectedConversationId);
-      lastConversationLoadedRef.current = true; // ChatHistoryScreen'den geldi, yükleme yapıldı
-      previousSelectedConversationIdRef.current = selectedConversationId; // Önceki değeri güncelle
-      // ChatHistoryScreen'den seçilen conversation'ı local storage'a kaydet
-      AsyncStorage.setItem(LAST_CONVERSATION_ID_KEY, selectedConversationId).catch(error => {
-        console.error('❌ Son conversation ID kaydedilirken hata:', error);
-      });
+      lastConversationLoadedRef.current = true;
+      previousSelectedConversationIdRef.current = selectedConversationId;
+      
+      // selectConversation'ı çağır - mesajları yükle ve currentConversation'ı güncelle
+      // ChatHistoryScreen'de zaten çağrılmış olabilir ama state güncellemesi gecikmiş olabilir
+      // Bu yüzden burada da çağırarak garanti ediyoruz
+      // selectConversation içinde deduplication var, bu yüzden duplicate çağrı sorun olmaz
+      selectConversation(selectedConversationId)
+        .then(() => {
+          console.log('✅ HomeScreen: Conversation seçildi ve mesajlar yüklendi:', selectedConversationId);
+          
+          // Local storage'a kaydet
+          AsyncStorage.setItem(LAST_CONVERSATION_ID_KEY, selectedConversationId).catch(error => {
+            console.error('❌ Son conversation ID kaydedilirken hata:', error);
+          });
+        })
+        .catch((error) => {
+          console.error('❌ HomeScreen: Conversation seçilirken hata:', error);
+          // Hata durumunda createdConversationId zaten set edilmiş, sorun yok
+        });
     } else if (selectedConversationId === undefined && previousSelectedConversationIdRef.current !== undefined) {
       // selectedConversationId undefined oldu ve daha önce bir conversation seçilmişti
       // Bu, Chat History'den geri dönüldüğünde ve conversation seçilmediğinde olur
@@ -456,7 +561,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
       // İlk mount veya selectedConversationId zaten undefined
       previousSelectedConversationIdRef.current = undefined;
     }
-  }, [selectedConversationId, createdConversationId, selectConversation]);
+  }, [selectedConversationId, selectConversation]); // createdConversationId dependency'sini kaldırdık - sadece selectedConversationId değiştiğinde çalışmalı
 
   // createdConversationId değiştiğinde local storage'a kaydet (yeni conversation oluşturulduğunda)
   // Ancak sadece manuel olarak değiştirildiğinde kaydet (yükleme sırasında değil)
@@ -649,12 +754,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
             // Orta kısım bottom section (input alanı) durumuna göre değişir
             const hasInputContent = inputText.trim().length > 0 || selectedImages.length > 0 || selectedFiles.length > 0;
             
-            // Conversation oluşturulduysa (createdConversationId varsa) mesajlaşma alanını göster
+            // Conversation oluşturulduysa (createdConversationId varsa) veya ChatHistoryScreen'den seçildiyse (selectedConversationId varsa) mesajlaşma alanını göster
             // Bu sayede mesaj gönderildikten sonra input temizlense bile conversation var olduğu için mesajlaşma alanı görünmeye devam eder
             // Input içeriği sadece conversation oluşturulmadan önce önemli (yeni conversation başlatılacaksa)
             // Eğer conversation yoksa ama input içeriği varsa, mesajlaşma alanını göster (yeni conversation oluşturulacak)
-            const shouldShowMessages = createdConversationId 
-              ? true // Conversation varsa her zaman mesajlaşma alanını göster
+            const shouldShowMessages = (selectedConversationId || createdConversationId)
+              ? true // Conversation varsa (seçilmiş veya oluşturulmuş) her zaman mesajlaşma alanını göster
               : hasInputContent; // Conversation yoksa sadece input içeriği varsa göster
             
             if (shouldShowMessages) {
@@ -688,7 +793,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
                       scrollViewRef={messagesScrollViewRef}
                       isKeyboardVisible={isKeyboardVisible}
                       keyboardHeight={keyboardHeight}
-                      conversationId={createdConversationId}
+                      conversationId={selectedConversationId || createdConversationId}
                       isDataLoading={isConversationDataLoading && (!currentConversation?.messages || currentConversation.messages.length === 0)}
                       onScrollToEnd={() => {
                         // Optional: Additional scroll handling

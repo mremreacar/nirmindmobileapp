@@ -14,8 +14,7 @@ const debounce = (func: Function, delay: number) => {
 export const useDictation = (callbacks: DictationCallbacks, config?: DictationConfig) => {
   const [isListening, setIsListening] = useState(false);
   const [isDictating, setIsDictating] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false); // Yeni state: desifre durumu
-  const [currentMessage, setCurrentMessage] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false); // Yeni state: deşifre durumu
   const isProcessingRef = useRef(false);
   // Dikte durumunu ref ile takip et (state güncellemesi beklemeden kontrol için)
   const isDictatingRef = useRef(false);
@@ -49,7 +48,6 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
       
       // Yeni dikte başladığında önceki state'leri temizle
       lastReceivedTextRef.current = ''; // Son alınan text'i reset et
-      setCurrentMessage(''); // Current message'ı temizle (yeni dikte için)
       
       isProcessingRef.current = true;
       isDictatingRef.current = true; // Ref'i güncelle
@@ -77,6 +75,9 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
             
             let textToAdd = '';
             
+            // Metin değişikliği kontrolü
+            const isTextChanged = lastText.length > 0 && !currentText.startsWith(lastText) && currentText !== lastText;
+            
             if (lastText === '') {
               // İlk final result - tam metni ekle
               textToAdd = currentText;
@@ -90,18 +91,17 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
                 textToAdd = ' ' + textToAdd;
               }
               console.log('✅ Final result - yeni eklenen kısım:', textToAdd);
-            } else if (currentText !== lastText) {
+            } else if (isTextChanged) {
               // Metin tamamen değişti veya düzeltme yapıldı
+              // React Native Voice metni düzelttiğinde (ör: "Test bir" -> "Test 1.02" -> "Test 123")
+              // Her seferinde tam metni döndürür, bu yüzden önceki metni input'tan çıkarıp yeni metni eklemeliyiz
+              
+              console.log('⚠️ Metin değişti/düzeltildi - önceki:', lastText, 'yeni:', currentText);
+              
               // Önceki metni input'tan çıkar ve yeni metni ekle
-              // Ancak bu karmaşık, bu yüzden sadece farkı ekle
-              const diff = currentText.replace(lastText, '');
-              if (diff) {
-                textToAdd = diff;
-              } else {
-                // Eğer replace sonucu boşsa, tamamını kullan (metin tamamen değişti)
-                textToAdd = currentText;
-              }
-              console.log('✅ Final result - metin değişti, yeni kısım:', textToAdd);
+              // replacePrevious=true ile önceki metni çıkar, sonra yeni metni ekle
+              textToAdd = currentText;
+              console.log('🔄 Önceki metin çıkarılacak:', lastText, 'yeni metin eklenecek:', currentText);
             } else {
               // Aynı metin tekrar geldi, ekleme
               console.log('⚠️ Aynı final result tekrar geldi, atlanıyor');
@@ -114,11 +114,20 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
             // Sadece yeni eklenen kısmı mesaj alanına ekle
             if (textToAdd) {
               console.log('📝 Mesaj alanına eklenecek text:', textToAdd);
-              // Debounce olmadan direkt ekle (daha hızlı ve güvenilir)
-              callbacks.onTextUpdate(textToAdd);
               
-              // Current message'a ekle (backup - dikte durdurulduğunda kullanılacak)
-              setCurrentMessage(prev => prev + textToAdd);
+              // Dikte ile eklenen metni terminale yazdır
+              console.log('───────────────────────────────────────────────────────');
+              console.log('✍️  DİKTE İLE EKLENEN METİN:', textToAdd);
+              console.log('📊 Toplam Metin:', currentText);
+              if (isTextChanged) {
+                console.log('🔄 Metin değişti - önceki metin çıkarılacak:', lastText);
+              }
+              console.log('───────────────────────────────────────────────────────');
+              
+              // Debounce olmadan direkt ekle (daha hızlı ve güvenilir)
+              // Eğer metin değiştiyse, replacePrevious=true ile önceki metni çıkar
+              // Direkt input'a yaz (başka bir yerden çağırmaya gerek yok - ikisi birbirine bağlı)
+              callbacks.onTextUpdate(textToAdd, isTextChanged);
             } else {
               console.log('⚠️ textToAdd boş, mesaj alanına eklenmiyor');
             }
@@ -173,7 +182,6 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
       isProcessing: isProcessingRef.current,
       isDictatingRef: isDictatingRef.current,
       isStoppingRef: isStoppingRef.current,
-      currentMessageLength: currentMessage.length,
       timestamp: new Date().toISOString()
     });
 
@@ -205,14 +213,13 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
         isDictating, 
         isListening, 
         isProcessing: isProcessingRef.current,
-        isDictatingRef: isDictatingRef.current,
-        currentMessageLength: currentMessage.length
+        isDictatingRef: isDictatingRef.current
       });
       
       // Önce state'leri kapat (hemen görünür olsun)
       setIsDictating(false);
       setIsListening(false);
-      setIsProcessing(true); // Desifre durumunu göster
+      setIsProcessing(true); // Deşifre durumunu göster
       isProcessingRef.current = false;
       
       // Sonra speech service'i durdur (hata olsa bile devam et)
@@ -225,26 +232,22 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
         // Hata olsa bile devam et - state'leri temizle
       }
       
-      // Eğer currentMessage'da text varsa ama input'a yazılmamışsa, yaz
-      if (currentMessage && currentMessage.trim()) {
-        console.log('📝 Dikte durduruldu, son mesaj input\'a ekleniyor:', currentMessage);
-        callbacks.onTextUpdate(currentMessage);
-        setCurrentMessage(''); // Ekledikten sonra temizle
-      }
+      // Final result'larda metin zaten direkt input'a yazılıyor
+      // Dikte durdurulduğunda ek bir işlem yapmaya gerek yok
       
       // lastReceivedTextRef'i reset et (bir sonraki dikte için)
       lastReceivedTextRef.current = '';
       
-      // Kısa bir gecikme sonra processing'i kapat (desifre tamamlandı)
+      // Kısa bir gecikme sonra processing'i kapat (deşifre tamamlandı)
       setTimeout(() => {
         // Haptic feedback kaldırıldı - kullanıcı titreşim istemiyor
         setIsProcessing(false);
         isStoppingRef.current = false; // Durdurma işlemi tamamlandı
         callbacks.onStop?.();
         console.log('✅ Dikte tamamen durduruldu ve temizlendi');
-      }, 800); // 800ms desifre süresi
+      }, 800); // 800ms deşifre süresi
       
-      console.log('✅ Dikte durduruldu, desifre başladı');
+      console.log('✅ Dikte durduruldu, deşifre başladı');
     } catch (error) {
       console.error('❌ Dikte durdurma hatası:', error);
       // Hata durumunda da state'leri temizle
@@ -257,7 +260,7 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
       lastReceivedTextRef.current = '';
       callbacks.onStop?.();
     }
-  }, [callbacks, isDictating, isListening, currentMessage]);
+  }, [callbacks, isDictating, isListening]);
 
   const toggleDictation = useCallback(async () => {
     console.log('🔄 [useDictation] toggleDictation çağrıldı', {
@@ -282,7 +285,6 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
   }, [isDictating, isListening, startDictation, stopDictation]);
 
   const resetDictation = useCallback(() => {
-    setCurrentMessage('');
     isDictatingRef.current = false;
     isStoppingRef.current = false;
     setIsDictating(false);
@@ -295,7 +297,7 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
     isListening,
     isDictating,
     isProcessing, // Yeni state'i ekle
-    currentMessage,
+    currentMessage: '', // Artık kullanılmıyor, boş string döndür (interface uyumluluğu için)
   };
 
   return {

@@ -3,12 +3,12 @@ import { Animated } from 'react-native';
 export interface DictationState {
   isListening: boolean;
   isDictating: boolean;
-  isProcessing: boolean; // Yeni: desifre durumu
+  isProcessing: boolean; // Yeni: deşifre durumu
   currentMessage: string;
 }
 
 export interface DictationCallbacks {
-  onTextUpdate: (text: string) => void;
+  onTextUpdate: (text: string, replacePrevious?: boolean) => void;
   onError: (error: string) => void;
   onStart?: () => void;
   onStop?: () => void;

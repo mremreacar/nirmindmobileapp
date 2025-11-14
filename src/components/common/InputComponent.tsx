@@ -65,7 +65,7 @@ interface InputComponentProps {
   
   // State props
   isDictating: boolean;
-  isProcessing?: boolean; // Yeni prop: desifre durumu
+  isProcessing?: boolean; // Yeni prop: deşifre durumu
   isLoading?: boolean; // Loading state
   isStreaming?: boolean;
   isInputFocused: boolean;
@@ -208,7 +208,6 @@ const InputComponent: React.FC<InputComponentProps> = ({
   // Input yükseklik güncellemelerini throttle etmek için ref'ler
   const heightUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastHeightRef = useRef<number>(getResponsiveInputMinHeight());
-  const animatedHeight = useRef(new Animated.Value(getResponsiveInputMinHeight())).current;
   
   // Dynamic height state
   const [inputHeight, setInputHeight] = useState(getResponsiveInputMinHeight());
@@ -226,21 +225,14 @@ const InputComponent: React.FC<InputComponentProps> = ({
 
   useEffect(() => {
     if (!inputText.trim()) {
-      // Input temizlendiğinde yüksekliği animasyonlu olarak sıfırla
-      Animated.timing(animatedHeight, {
-        toValue: MIN_INPUT_HEIGHT,
-        duration: 200,
-        easing: Easing.out(Easing.ease),
-        useNativeDriver: false,
-      }).start();
-      
+      // Input temizlendiğinde yüksekliği sıfırla (animasyon kaldırıldı - native driver uyumluluğu için)
       setInputHeight(MIN_INPUT_HEIGHT);
       lastHeightRef.current = MIN_INPUT_HEIGHT;
       setIsScrollable(false);
       setCanScrollUp(false);
       setCanScrollDown(false);
     }
-  }, [inputText, MIN_INPUT_HEIGHT, animatedHeight]);
+  }, [inputText, MIN_INPUT_HEIGHT]);
   
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -393,21 +385,13 @@ const InputComponent: React.FC<InputComponentProps> = ({
       clearTimeout(heightUpdateTimeoutRef.current);
     }
     
-    // Debounce: 150ms sonra güncelle (smooth geçiş için)
+    // Debounce: 150ms sonra güncelle
     heightUpdateTimeoutRef.current = setTimeout(() => {
-      // Yükseklik değişikliği yeterince büyükse animasyonlu güncelle
+      // Yükseklik değişikliği yeterince büyükse güncelle (animasyon kaldırıldı - native driver uyumluluğu için)
       if (Math.abs(boundedHeight - lastHeightRef.current) >= 8) {
-        // Animated value ile smooth geçiş
-        Animated.timing(animatedHeight, {
-          toValue: boundedHeight,
-          duration: 200,
-          easing: Easing.out(Easing.ease),
-          useNativeDriver: false, // Height için native driver kullanılamaz
-        }).start();
+        setInputHeight(boundedHeight);
+        lastHeightRef.current = boundedHeight;
       }
-      
-      setInputHeight(boundedHeight);
-      lastHeightRef.current = boundedHeight;
       setIsScrollable(adjustedHeight >= SCROLL_THRESHOLD);
       setContentHeight(adjustedHeight);
       
@@ -550,7 +534,7 @@ const InputComponent: React.FC<InputComponentProps> = ({
         styles.inputContainer,
         inputContainerStyle,
         {
-          height: animatedHeight, // Animated value kullan (smooth geçiş için)
+          height: inputHeight, // State kullan (native driver uyumluluğu için animasyon kaldırıldı)
           maxHeight: MAX_INPUT_HEIGHT,
         },
         // Attachment'lar seçildiğinde genişlik artır
@@ -676,7 +660,7 @@ const InputComponent: React.FC<InputComponentProps> = ({
             {/* Text Input, Processing, or Dictating */}
             {isProcessing ? (
               <Animated.View style={[styles.processingContainer, { transform: [{ scale: pulseAnim }] }]}>
-                <Text style={styles.processingText}>Desifre ediliyor...</Text>
+                <Text style={styles.processingText}>Deşifre ediliyor...</Text>
               </Animated.View>
             ) : isDictating ? (
               <Animated.View style={[styles.dictatingContainer, { transform: [{ scale: pulseAnim }] }]}>

@@ -1,5 +1,4 @@
 import { Platform, Alert, AppState } from 'react-native';
-import { Audio } from 'expo-av';
 
 // React Native Voice - Cihazın kendi speech recognition'ını kullan (speech-to-text)
 let Voice: any = null;
@@ -142,15 +141,6 @@ const loadSpeechModule = (): any => {
   
   return null;
 };
-import { 
-  AndroidOutputFormat, 
-  AndroidAudioEncoder, 
-  IOSOutputFormat, 
-  IOSAudioQuality,
-  RecordingOptionsPresets 
-} from 'expo-av/build/Audio/RecordingConstants';
-import BackendApiService from './BackendApiService';
-import * as FileSystem from 'expo-file-system/legacy';
 
 export interface SpeechRecognitionResult {
   text: string;
@@ -170,38 +160,46 @@ class SpeechService {
   private recognitionTimeout: NodeJS.Timeout | null = null;
   private onResultCallback: ((result: SpeechRecognitionResult) => void) | null = null;
   private onErrorCallback: ((error: string) => void) | null = null;
-  private recording: Audio.Recording | null = null;
-  private audioPermission: Audio.PermissionResponse | null = null;
-  private backendApiService = BackendApiService.getInstance();
   private appStateSubscription: any = null;
+  private isStarting = false; // Mutex: startListening işlemi devam ediyor mu?
+  private lastFinalResult: string = ''; // Son final result'ı takip et (interim result'ları filtrelemek için)
 
   async startListening(
     onResult: (result: SpeechRecognitionResult) => void,
     onError?: (error: string) => void,
     options: SpeechRecognitionOptions = {}
   ): Promise<boolean> {
+    // Mutex kontrolü: Eğer zaten başlatma işlemi devam ediyorsa, bekle
+    if (this.isStarting) {
+      console.log('⚠️ Speech recognition başlatma işlemi zaten devam ediyor, bekleniyor...');
+      // Maksimum 2 saniye bekle
+      let waitCount = 0;
+      while (this.isStarting && waitCount < 20) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        waitCount++;
+      }
+      if (this.isStarting) {
+        console.error('❌ Speech recognition başlatma işlemi timeout oldu');
+        onError?.('Dikte başlatılamadı. Lütfen tekrar deneyin.');
+        return false;
+      }
+    }
+
+    // Mutex'i set et
+    this.isStarting = true;
+
     try {
       // Eğer zaten listening ise, önce durdur ve temizle
-      if (this.isListening || this.recording) {
+      if (this.isListening) {
         console.log('⚠️ Speech recognition zaten aktif, önce durduruluyor...');
         await this.stopListening();
         // Kısa bir bekleme - temizleme işleminin tamamlanması için
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
 
       // Callback'leri sakla
       this.onResultCallback = onResult;
       this.onErrorCallback = onError || null;
-
-      // Mikrofon izni kontrol et
-      const permission = await Audio.requestPermissionsAsync();
-      if (!permission.granted) {
-        const errorMsg = `Mikrofon izni reddedildi. Status: ${permission.status}. Lütfen ayarlardan mikrofon iznini açın.`;
-        console.log('Permission denied:', errorMsg);
-        onError?.(errorMsg);
-        return false;
-      }
-      this.audioPermission = permission;
 
       // Uygulama state kontrolü - iOS'ta background'da audio session başlatılamaz
       const appState = AppState.currentState;
@@ -234,12 +232,23 @@ class SpeechService {
                 this.appStateSubscription = null;
               }
               
-              // Speech recognition başlat
+              // Speech recognition başlat (sadece Voice)
               const voiceModule = loadVoiceModule();
               if (voiceModule) {
-                this.startVoiceRecognition(options).then(resolve);
+                this.startVoiceRecognition(options).then((result) => {
+                  this.isStarting = false; // Mutex'i serbest bırak
+                  resolve(result);
+                }).catch((error) => {
+                  this.isStarting = false; // Mutex'i serbest bırak
+                  resolve(false);
+                });
               } else {
-                this.startWhisperRecognition(options).then(resolve);
+                const errorMsg = 'React Native Voice modülü mevcut değil. Development build gerekli: npx expo run:ios veya npx expo run:android';
+                console.error('❌ Voice modülü bulunamadı:', errorMsg);
+                this.isStarting = false; // Mutex'i serbest bırak
+                this.isListening = false;
+                onError?.(errorMsg);
+                resolve(false);
               }
             }
           };
@@ -255,6 +264,7 @@ class SpeechService {
             const errorMsg = 'Uygulama aktif olmadığı için audio session başlatılamadı. Lütfen uygulamayı ön plana getirin.';
             console.error('❌ AppState timeout:', errorMsg);
             this.isListening = false; // State'i temizle
+            this.isStarting = false; // Mutex'i serbest bırak
             onError?.(errorMsg);
             resolve(false);
           }, 5000);
@@ -264,19 +274,26 @@ class SpeechService {
       this.isListening = true;
       console.log('Starting speech recognition...');
 
-      // Önce React Native Voice ile deneyelim (cihazın kendi speech recognition'ı)
+      // React Native Voice kullan (cihazın kendi speech recognition'ı)
       const voiceModule = loadVoiceModule();
       if (voiceModule) {
         console.log('✅ React Native Voice kullanılıyor (cihazın kendi speech recognition\'ı)');
-        return this.startVoiceRecognition(options);
+        const result = await this.startVoiceRecognition(options);
+        this.isStarting = false; // Mutex'i serbest bırak
+        return result;
       } else {
-        // Voice modülü yoksa, fallback olarak Whisper API kullan (backend'e gönder)
-        console.log('⚠️ React Native Voice mevcut değil, Whisper API kullanılıyor (backend\'e gönderilecek)');
-        return this.startWhisperRecognition(options);
+        // Voice modülü yoksa hata döndür
+        const errorMsg = 'React Native Voice modülü mevcut değil. Development build gerekli: npx expo run:ios veya npx expo run:android';
+        console.error('❌ Voice modülü bulunamadı:', errorMsg);
+        this.isListening = false;
+        this.isStarting = false; // Mutex'i serbest bırak
+        onError?.(errorMsg);
+        return false;
       }
     } catch (error) {
       console.error('Speech recognition start error:', error);
       this.isListening = false;
+      this.isStarting = false; // Mutex'i serbest bırak
       onError?.(error instanceof Error ? error.message : 'Unknown error');
       return false;
     }
@@ -287,10 +304,12 @@ class SpeechService {
     try {
       const voiceModule = loadVoiceModule();
       if (!voiceModule) {
-        console.warn('⚠️ React Native Voice modülü mevcut değil, Whisper API\'ye fallback yapılıyor');
-        console.warn('⚠️ NOT: React Native Voice native modül gerektirir. Development build gerekli: npx expo run:ios veya npx expo run:android');
-        this.onErrorCallback?.('Dikte özelliği şu anda kullanılamıyor. React Native Voice modülü yüklenemedi. Lütfen uygulamayı development build ile çalıştırın.');
-        return this.startWhisperRecognition(options);
+        const errorMsg = 'React Native Voice modülü mevcut değil. Development build gerekli: npx expo run:ios veya npx expo run:android';
+        console.error('❌ Voice modülü bulunamadı:', errorMsg);
+        this.onErrorCallback?.(errorMsg);
+        this.isListening = false;
+        this.isStarting = false; // Mutex'i serbest bırak
+        return false;
       }
 
       console.log('🎤 React Native Voice ile speech recognition başlatılıyor...');
@@ -339,7 +358,23 @@ class SpeechService {
             // Final result için callback çağır
             // React Native Voice'da onSpeechResults genellikle final result'tur
             const trimmedText = text.trim();
+            
+            // Son final result ile aynı mı kontrol et (tekrar eklenmesini önle)
+            if (trimmedText === this.lastFinalResult) {
+              console.log('⚠️ Aynı final result tekrar geldi, ignore ediliyor:', trimmedText);
+              return;
+            }
+            
+            // Son final result'ı güncelle
+            this.lastFinalResult = trimmedText;
+            
             console.log('✅ Final result callback çağrılıyor:', trimmedText);
+            
+            // Dikte ile yazılan metni terminale yazdır
+            console.log('═══════════════════════════════════════════════════════');
+            console.log('🎤 DİKTE İLE YAZILAN METİN:', trimmedText);
+            console.log('═══════════════════════════════════════════════════════');
+            
             this.onResultCallback({
               text: trimmedText,
               confidence: 0.9,
@@ -358,11 +393,23 @@ class SpeechService {
         
         if (e.value && e.value.length > 0 && options.interimResults) {
           const text = e.value[0];
-          console.log('📝 Speech recognition ara sonuç:', text);
+          const trimmedText = text.trim();
           
-          if (this.onResultCallback && text && text.trim()) {
+          // Son final result ile aynı interim result'ı ignore et
+          // (Final result'tan hemen sonra gelen aynı metinli interim result gereksiz)
+          if (trimmedText === this.lastFinalResult) {
+            console.log('⚠️ Interim result son final result ile aynı, ignore ediliyor:', trimmedText);
+            return;
+          }
+          
+          console.log('📝 Speech recognition ara sonuç (interim):', trimmedText);
+          
+          if (this.onResultCallback && trimmedText) {
+            // Ara sonuçları da terminale yazdır (daha hafif format)
+            console.log('🎤 [ARA SONUÇ]', trimmedText);
+            
             this.onResultCallback({
-              text: text.trim(),
+              text: trimmedText,
               confidence: 0.7,
               isFinal: false
             });
@@ -400,119 +447,82 @@ class SpeechService {
           code: startError?.code,
           name: startError?.name
         });
+        
+        // Voice modülünü durdur (eğer başlatılmışsa)
+        try {
+          if (typeof voiceModule.stop === 'function') {
+            await voiceModule.stop();
+          }
+          if (typeof voiceModule.cancel === 'function') {
+            await voiceModule.cancel();
+          }
+          // Listener'ları temizle
+          if (typeof voiceModule.removeAllListeners === 'function') {
+            voiceModule.removeAllListeners();
+          } else {
+            voiceModule.onSpeechStart = undefined;
+            voiceModule.onSpeechEnd = undefined;
+            voiceModule.onSpeechResults = undefined;
+            voiceModule.onSpeechPartialResults = undefined;
+            voiceModule.onSpeechError = undefined;
+          }
+          console.log('✅ Voice modülü temizlendi');
+        } catch (cleanupError) {
+          console.warn('⚠️ Voice temizleme hatası (devam ediliyor):', cleanupError);
+        }
+        
         const errorMsg = startError?.message || 'Speech recognition başlatılamadı';
         this.onErrorCallback?.(errorMsg);
         this.isListening = false;
-        
-        // Hata durumunda Whisper API'ye fallback yap
-        console.warn('⚠️ Voice başlatılamadı, Whisper API\'ye fallback yapılıyor');
-        return this.startWhisperRecognition(options);
+        this.isStarting = false; // Mutex'i serbest bırak
+        return false;
       }
 
     } catch (error) {
       console.error('❌ Voice recognition start error:', error);
       this.isListening = false;
+      this.isStarting = false; // Mutex'i serbest bırak
       this.onErrorCallback?.(error instanceof Error ? error.message : 'Voice recognition failed');
       
-      // Hata durumunda Whisper API'ye fallback yap
-      console.log('⚠️ Voice recognition başarısız, Whisper API\'ye fallback yapılıyor');
-      return this.startWhisperRecognition(options);
-    }
-  }
-
-  private async startWhisperRecognition(options: SpeechRecognitionOptions = {}): Promise<boolean> {
-    try {
-      console.log('Starting Whisper recognition...');
-      
-      // Eğer zaten bir recording varsa, önce temizle
-      if (this.recording) {
-        console.log('⚠️ Mevcut recording temizleniyor...');
-        try {
-          const status = await this.recording.getStatusAsync();
-          if (status.isRecording) {
-            await this.recording.stopAndUnloadAsync();
-          } else if (status.canRecord) {
-            // Prepare edilmiş ama henüz başlatılmamış - stopAndUnloadAsync kullan
-            await this.recording.stopAndUnloadAsync();
+      // Voice modülünü temizle
+      try {
+        const voiceModule = loadVoiceModule();
+        if (voiceModule) {
+          if (typeof voiceModule.stop === 'function') {
+            await voiceModule.stop();
           }
-        } catch (cleanupError) {
-          console.warn('⚠️ Recording temizleme hatası (devam ediliyor):', cleanupError);
-          // Temizleme başarısız olsa bile null yap
-          try {
-            await this.recording.stopAndUnloadAsync();
-          } catch (unloadError) {
-            console.warn('⚠️ Recording zorla unload ediliyor:', unloadError);
+          if (typeof voiceModule.cancel === 'function') {
+            await voiceModule.cancel();
+          }
+          if (typeof voiceModule.removeAllListeners === 'function') {
+            voiceModule.removeAllListeners();
+          } else {
+            voiceModule.onSpeechStart = undefined;
+            voiceModule.onSpeechEnd = undefined;
+            voiceModule.onSpeechResults = undefined;
+            voiceModule.onSpeechPartialResults = undefined;
+            voiceModule.onSpeechError = undefined;
           }
         }
-        this.recording = null;
+      } catch (cleanupError) {
+        console.warn('⚠️ Voice temizleme hatası:', cleanupError);
       }
       
-      // Uygulama state kontrolü - iOS'ta background'da audio session başlatılamaz
-      const appState = AppState.currentState;
-      if (appState !== 'active') {
-        console.warn('⚠️ Uygulama background\'da, audio session başlatılamaz:', appState);
-        this.onErrorCallback?.('Uygulama aktif değil. Lütfen uygulamayı ön plana getirin.');
-        return false;
-      }
-      
-      // Audio session'ı configure et
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-      });
-
-      // Kısa bir delay - iOS'ta audio session'ın aktif olması için
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Recording başlat
-      this.recording = new Audio.Recording();
-      await this.recording.prepareToRecordAsync(RecordingOptionsPresets.HIGH_QUALITY);
-      await this.recording.startAsync();
-      console.log('Recording started for Whisper');
-
-      // 10 saniye timeout
-      this.recognitionTimeout = setTimeout(async () => {
-        await this.stopListening();
-      }, 10000);
-      
-      return true;
-    } catch (error) {
-      console.error('Whisper recognition start error:', error);
-      // Hata durumunda recording'i temizle
-      if (this.recording) {
-        try {
-          const status = await this.recording.getStatusAsync();
-          if (status.isRecording || status.canRecord) {
-            try {
-              await this.recording.stopAndUnloadAsync();
-            } catch (stopError) {
-              // stopAndUnloadAsync başarısız olursa, recording'i null yap
-              console.warn('⚠️ stopAndUnloadAsync başarısız:', stopError);
-            }
-          }
-        } catch (cleanupError) {
-          console.warn('⚠️ Recording temizleme hatası:', cleanupError);
-        }
-        this.recording = null;
-      }
-      this.isListening = false; // State'i temizle
-      this.onErrorCallback?.(error instanceof Error ? error.message : 'Whisper recognition failed');
       return false;
     }
   }
 
   async stopListening(): Promise<void> {
-    console.log('🛑 stopListening çağrıldı, isListening:', this.isListening, 'recording:', !!this.recording);
+    console.log('🛑 stopListening çağrıldı, isListening:', this.isListening);
     
     // Önce state'i false yap (diğer işlemler için) - her zaman yap
     const wasListening = this.isListening;
     this.isListening = false;
+    this.isStarting = false; // Mutex'i serbest bırak (eğer başlatma işlemi devam ediyorsa)
     console.log('✅ isListening false yapıldı (wasListening:', wasListening, ')');
     
-    // Eğer zaten listening değilse ve recording yoksa, sadece temizlik yap
-    if (!wasListening && !this.recording) {
+    // Eğer zaten listening değilse, sadece temizlik yap
+    if (!wasListening) {
       console.log('ℹ️ Zaten durdurulmuş, sadece temizlik yapılıyor');
       // Yine de temizlik yap
     }
@@ -589,77 +599,15 @@ class SpeechService {
     } catch (voiceError) {
       console.warn('⚠️ Voice durdurma hatası (devam ediliyor):', voiceError);
     }
-
-    try {
-      if (this.recording) {
-        console.log('Stopping recording...');
-        
-        // Recording durumunu kontrol et
-        try {
-          const status = await this.recording.getStatusAsync();
-          
-          if (status.isRecording) {
-            // Recording aktif, önce URI'yi al (stopAndUnloadAsync öncesi)
-            let uri: string | null = null;
-            let durationMillis: number | null = null;
-            
-            try {
-              uri = this.recording.getURI();
-              // Kayıt süresini kontrol et (durationMillis milisaniye cinsinden)
-              durationMillis = status.durationMillis || null;
-            } catch (uriError) {
-              console.warn('⚠️ Recording URI alınamadı (devam ediliyor):', uriError);
-            }
-            
-            // Sonra durdur ve unload et
-            await this.recording.stopAndUnloadAsync();
-            
-            // Minimum kayıt süresi kontrolü (1 saniye = 1000ms)
-            const MIN_RECORDING_DURATION_MS = 1000;
-            if (durationMillis !== null && durationMillis < MIN_RECORDING_DURATION_MS) {
-              console.log(`⚠️ Kayıt süresi çok kısa (${durationMillis}ms), transcription yapılmıyor`);
-              return;
-            }
-            
-            // URI varsa ses dosyasını işle
-            if (uri && this.onResultCallback) {
-              console.log('Recording stopped, URI:', uri, 'Duration:', durationMillis, 'ms');
-              // OpenAI Whisper API ile ses dosyasını işle
-              await this.processAudioWithWhisper(uri);
-            } else if (!uri) {
-              console.warn('⚠️ Recording URI alınamadı, transcription yapılamadı');
-              this.onErrorCallback?.('Recording URI could not be retrieved');
-            }
-          } else if (status.canRecord) {
-            // Prepare edilmiş ama henüz başlatılmamış, stopAndUnloadAsync kullan
-            console.log('Recording prepare edilmiş ama başlatılmamış, stopAndUnloadAsync çağrılıyor...');
-            await this.recording.stopAndUnloadAsync();
-          }
-        } catch (statusError) {
-          console.warn('⚠️ Recording status kontrolü hatası, stopAndUnloadAsync denenecek:', statusError);
-          // Status kontrolü başarısız olduysa, doğrudan stopAndUnloadAsync dene
-          try {
-            await this.recording.stopAndUnloadAsync();
-          } catch (unloadError) {
-            console.error('⚠️ Recording stopAndUnloadAsync hatası:', unloadError);
-          }
-        }
-        
-        this.recording = null;
-      }
-      console.log('✅ Whisper recognition stopped');
-    } catch (error) {
-      console.error('❌ Error stopping whisper recognition:', error);
-      // Hata durumunda recording'i null yap
-      this.recording = null;
-    }
     
     // Callback'leri temizle
     this.onResultCallback = null;
     this.onErrorCallback = null;
     
-    // State'i kesinlikle false yap
+    // State'leri kesinlikle temizle
     this.isListening = false;
+    this.isStarting = false; // Mutex'i serbest bırak
+    this.lastFinalResult = ''; // Son final result'ı temizle
     console.log('✅ stopListening tamamlandı, tüm state temizlendi');
   }
 
@@ -667,108 +615,7 @@ class SpeechService {
     return this.isListening;
   }
 
-  private async processAudioWithWhisper(audioUri: string): Promise<void> {
-    try {
-      console.log('🎤 Audio backend üzerinden transcription başlatılıyor...');
-      
-      // Audio dosyasını base64'e çevir
-      const base64Audio = await FileSystem.readAsStringAsync(audioUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
-      console.log('📤 Audio backend\'e gönderiliyor:', {
-        audioUri: audioUri.substring(0, 50),
-        base64Length: base64Audio.length
-      });
-
-      // Backend'e gönder
-      const response = await this.backendApiService.transcribeAudio(
-        base64Audio,
-        'tr',
-        'audio/m4a'
-      );
-
-      if (response.success && response.data) {
-        const transcribedText = response.data.text?.trim() || '';
-        
-        console.log('✅ Audio transcription başarılı:', {
-          text: transcribedText.substring(0, 50),
-          textLength: transcribedText.length
-        });
-
-        // Transkripsiyon sonucunu kontrol et
-        if (!this.isValidTranscription(transcribedText)) {
-          console.log('⚠️ Transkripsiyon sonucu geçersiz veya çok kısa, göz ardı ediliyor:', transcribedText);
-          
-          // Spam pattern'e yakalanan metinler için sessizce göz ardı et
-          const isSpamPattern = this.isSpamPattern(transcribedText);
-          if (isSpamPattern) {
-            // Spam pattern'ler için sessizce göz ardı et, kullanıcıya bilgi verme
-            console.log('⚠️ Spam pattern tespit edildi, sessizce göz ardı ediliyor:', transcribedText);
-            return;
-          }
-          
-          // "Altyazı" içeren metinler spam kabul edilir, sessizce göz ardı et
-          if (/altyazı/i.test(transcribedText.trim())) {
-            console.log('⚠️ "Altyazı" içeren metin spam olarak kabul edildi, sessizce göz ardı ediliyor:', transcribedText);
-            return;
-          }
-          
-          // Diğer geçersiz transkripsiyonlar için kullanıcıya bilgilendirme mesajı göster
-          this.onErrorCallback?.('Sesinizi net alamadık. Lütfen daha net konuşun.');
-          return;
-        }
-
-        if (this.onResultCallback && transcribedText) {
-          this.onResultCallback({
-            text: transcribedText,
-            confidence: 0.95,
-            isFinal: true
-          });
-        }
-      } else {
-        // Transcription başarısız oldu
-        let errorMessage = response.error || response.message || 'Desifre başarısız';
-        
-        // OpenAI API key hatası için özel mesaj
-        if (errorMessage.includes('OpenAI API key is not configured') || 
-            errorMessage.includes('Dikte özelliği şu anda kullanılamıyor')) {
-          errorMessage = 'Dikte özelliği şu anda kullanılamıyor. Lütfen metin olarak yazın.';
-        } else if (errorMessage.includes('EACCES') || errorMessage.includes('permission denied')) {
-          errorMessage = 'Sunucu izin hatası. Lütfen daha sonra tekrar deneyin.';
-        } else if (errorMessage.includes('Failed to transcribe audio')) {
-          errorMessage = 'Ses dosyası işlenirken bir hata oluştu. Lütfen tekrar deneyin.';
-        }
-        
-        console.error('❌ Audio transcription başarısız:', errorMessage);
-        this.onErrorCallback?.(errorMessage);
-      }
-
-    } catch (error) {
-      console.error('❌ Audio transcription error:', error);
-      let errorMessage = 'Desifre başarısız';
-      
-      if (error instanceof Error) {
-        errorMessage = error.message;
-        
-        // OpenAI API key hatası için özel mesaj
-        if (errorMessage.includes('OpenAI API key is not configured') || 
-            errorMessage.includes('Dikte özelliği şu anda kullanılamıyor')) {
-          errorMessage = 'Dikte özelliği şu anda kullanılamıyor. Lütfen metin olarak yazın.';
-        } else if (errorMessage.includes('EACCES') || errorMessage.includes('permission denied')) {
-          errorMessage = 'Sunucu izin hatası. Lütfen daha sonra tekrar deneyin.';
-        } else if (errorMessage.includes('Failed to transcribe audio')) {
-          errorMessage = 'Ses dosyası işlenirken bir hata oluştu. Lütfen tekrar deneyin.';
-        } else if (errorMessage.includes('Network') || errorMessage.includes('fetch')) {
-          errorMessage = 'Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edin.';
-        }
-      }
-      
-      this.onErrorCallback?.(errorMessage);
-    }
-  }
-
-  // Transkripsiyon sonucunun geçerli olup olmadığını kontrol et
+  // Transkripsiyon sonucunun geçerli olup olmadığını kontrol et (Voice için de kullanılabilir)
   private isValidTranscription(text: string): boolean {
     if (!text || typeof text !== 'string') {
       return false;
@@ -931,28 +778,6 @@ class SpeechService {
     }
 
     return false;
-  }
-
-  private async audioToBase64(audioUri: string): Promise<string> {
-    try {
-      const response = await fetch(audioUri);
-      const blob = await response.blob();
-      
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const base64 = reader.result as string;
-          // Remove data URL prefix
-          const base64Data = base64.split(',')[1];
-          resolve(base64Data);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-    } catch (error) {
-      console.error('Audio to base64 conversion error:', error);
-      throw error;
-    }
   }
 
   async speak(text: string, options?: { language?: string; rate?: number }): Promise<void> {
