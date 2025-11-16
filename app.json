@@ -3,6 +3,9 @@
     "name": "NirMind",
     "slug": "nirmind-app",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "orientation": "portrait",
     "icon": "./assets/images/icon/nirmind-app-icon.jpg",
     "userInterfaceStyle": "light",
