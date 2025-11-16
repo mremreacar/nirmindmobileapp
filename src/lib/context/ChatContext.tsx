@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect, useRef } from 'react';
+import { InteractionManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ChatConversation, ChatMessage } from '../mock/types';
 import BackendApiService from '../../services/BackendApiService';
@@ -17,7 +18,7 @@ interface ChatContextType {
   updateResearchMode: (conversationId: string, isResearchMode: boolean) => Promise<void>;
   loadConversations: (options?: { reset?: boolean; limit?: number }) => Promise<number>;
   updateConversationMessages: (conversationId: string, messages: ChatMessage[]) => void;
-  loadMoreMessages: (conversationId: string) => Promise<void>;
+  loadMoreMessages: (conversationId: string) => Promise<boolean>; // Returns true if messages were loaded, false if no more messages
   hasMoreConversations: boolean;
   isLoadingConversations: boolean;
   loadingMessagesConversationIds: string[];
@@ -85,8 +86,15 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   const messagePaginationRef = useRef<Map<string, { page: number; limit: number; hasMore: boolean; lastLoadTime: number }>>(new Map());
   const messageCacheRef = useRef<Map<string, { messages: ChatMessage[]; timestamp: number }>>(new Map());
   const MESSAGE_CACHE_TTL = 5 * 60 * 1000; // 5 dakika cache TTL
-  const DEFAULT_MESSAGE_PAGE_SIZE = 50; // İlk yüklemede 50 mesaj
+  const DEFAULT_MESSAGE_PAGE_SIZE = 3; // TEST: İlk yüklemede 3 mesaj (test için, sonra 50'ye alınacak)
   const MAX_MESSAGE_PAGE_SIZE = 200; // Maksimum sayfa boyutu
+  
+  // Request deduplication - aynı conversation ve sayfa için aynı anda birden fazla istek gönderme
+  const loadingMessagesRequestsRef = useRef<Map<string, Promise<void>>>(new Map());
+  
+  // Rate limiting - çok sık istek göndermeyi önle (minimum 500ms aralık)
+  const lastRequestTimeRef = useRef<Map<string, number>>(new Map());
+  const MIN_REQUEST_INTERVAL = 500; // 500ms minimum aralık
   
   // selectConversation için request deduplication - aynı conversation için birden fazla çağrıyı önle
   const selectingConversationsRef = useRef<Map<string, Promise<void>>>(new Map());
@@ -170,16 +178,13 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       return;
     }
     
-    // Conversation'ı bul veya oluştur (basit fallback)
-    let foundConversation: ChatConversation | undefined;
-    
-    setConversations(prev => {
-      foundConversation = prev.find(conv => conv.id === conversationId);
-      return prev;
-    });
+    // CRITICAL FIX: Conversation kontrolünü optimize et
+    // State güncellemelerini minimize etmek için önce mevcut state'i kontrol et
+    const existingConversation = conversations.find(conv => conv.id === conversationId);
+    const needsCurrentConversationUpdate = !currentConversation || currentConversation.id !== conversationId;
     
     // Conversation yoksa basit bir fallback oluştur (sendMessage zaten oluşturmuş olmalı)
-    if (!foundConversation) {
+    if (!existingConversation) {
       // Sessizce geçici conversation oluştur - bu normal bir durum olabilir
       const tempConversation: ChatConversation = {
         id: conversationId,
@@ -199,20 +204,21 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         return prevConvs;
       });
       
-      foundConversation = tempConversation;
-      
       // Eğer currentConversation yoksa veya farklıysa güncelle
-      if (!currentConversation || currentConversation.id !== conversationId) {
+      if (needsCurrentConversationUpdate) {
         setCurrentConversation(tempConversation);
       }
-    } else if (!currentConversation || currentConversation.id !== conversationId) {
+    } else if (needsCurrentConversationUpdate) {
       // Conversation var ama currentConversation farklı
-      setCurrentConversation(foundConversation);
+      setCurrentConversation(existingConversation);
     }
     
     // Duplicate kontrolü - aynı ID'ye sahip mesaj varsa ekleme
     let messageAdded = false;
+    let updatedConversationForCurrent: ChatConversation | null = null;
     
+    // CRITICAL FIX: State güncellemelerini hemen yapmak için önce conversations'ı güncelle
+    // Sonra currentConversation'ı aynı render cycle'da güncelle
     setConversations(prev => {
       const conversation = prev.find(conv => conv.id === conversationId);
       if (conversation) {
@@ -247,41 +253,47 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
           updatedAt: new Date()
         };
         updated.push(tempConversation);
-      }
-      
-      // currentConversation'ı da güncelle (eğer bu conversation ise)
-      const updatedConversation = updated.find(conv => conv.id === conversationId);
-      if (updatedConversation) {
-        // setCurrentConversation'ı hemen çağır (callback pattern ile güncel state'i al)
-        setCurrentConversation(prevConv => {
-          if (prevConv?.id === conversationId) {
-            // Aynı conversation'a mesaj ekleniyor
-            const messageExists = prevConv.messages.some(msg => msg.id === message.id);
-            if (!messageExists) {
-              console.log('✅ currentConversation güncellendi:', { conversationId, messageId: message.id });
-              return {
-                ...prevConv,
-                messages: [...prevConv.messages, message],
-                updatedAt: new Date()
-              };
-            } else {
-              console.log('⚠️ currentConversation\'da mesaj zaten var:', message.id);
-              return prevConv;
-            }
-          } else {
-            // Farklı conversation veya currentConversation undefined
-            // Mesaj eklenen conversation'ı currentConversation olarak ayarla
-            console.log('✅ currentConversation otomatik seçildi:', { 
-              previousId: prevConv?.id, 
-              newId: conversationId 
-            });
-            return updatedConversation;
-          }
-        });
+        updatedConversationForCurrent = tempConversation;
+      } else {
+        // Conversation var, güncellenmiş halini al
+        updatedConversationForCurrent = updated.find(conv => conv.id === conversationId) || null;
       }
       
       return updated;
     });
+    
+    // CRITICAL FIX: currentConversation'ı hemen güncelle (aynı render cycle'da)
+    // Bu sayede UI hemen güncellenir
+    // requestAnimationFrame kullanarak state güncellemesini bir sonraki frame'de yap
+    // Bu sayede UI daha hızlı güncellenir
+    if (updatedConversationForCurrent) {
+      // Hemen güncelle (senkron görünmesi için)
+      setCurrentConversation(prevConv => {
+        if (prevConv?.id === conversationId) {
+          // Aynı conversation'a mesaj ekleniyor
+          const messageExists = prevConv.messages.some(msg => msg.id === message.id);
+          if (!messageExists) {
+            console.log('✅ currentConversation güncellendi:', { conversationId, messageId: message.id });
+            return {
+              ...prevConv,
+              messages: [...prevConv.messages, message],
+              updatedAt: new Date()
+            };
+          } else {
+            console.log('⚠️ currentConversation\'da mesaj zaten var:', message.id);
+            return prevConv;
+          }
+        } else {
+          // Farklı conversation veya currentConversation undefined
+          // Mesaj eklenen conversation'ı currentConversation olarak ayarla
+          console.log('✅ currentConversation otomatik seçildi:', { 
+            previousId: prevConv?.id, 
+            newId: conversationId 
+          });
+          return updatedConversationForCurrent;
+        }
+      });
+    }
     
     // Cache'i invalidate et - yeni mesaj eklendi
     if (messageAdded) {
@@ -651,20 +663,50 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       return;
     }
 
-    // Eğer zaten yükleniyorsa tekrar yükleme (duplicate prevention)
+    // Pagination bilgilerini al veya oluştur (requestKey için gerekli)
+    const pagination = messagePaginationRef.current.get(conversationId) || {
+      page: 1,
+      limit: DEFAULT_MESSAGE_PAGE_SIZE,
+      hasMore: true,
+      lastLoadTime: 0
+    };
+    
+    const page = options?.page || pagination.page;
+    const limit = options?.limit || Math.min(pagination.limit, MAX_MESSAGE_PAGE_SIZE);
+    
+    // Request deduplication - aynı conversation ve sayfa için aynı anda birden fazla istek gönderme
+    const requestKey = `${conversationId}-page-${page}`;
+    const existingRequest = loadingMessagesRequestsRef.current.get(requestKey);
+    if (existingRequest) {
+      console.log('⚠️ Aynı sayfa zaten yükleniyor, mevcut request bekleniyor...', { conversationId, page });
+      await existingRequest; // Mevcut request'in tamamlanmasını bekle
+      return;
+    }
+    
+    // Rate limiting - çok sık istek göndermeyi önle (minimum 500ms aralık)
+    const lastRequestTime = lastRequestTimeRef.current.get(conversationId) || 0;
+    const timeSinceLastRequest = Date.now() - lastRequestTime;
+    if (timeSinceLastRequest < MIN_REQUEST_INTERVAL && !options?.forceRefresh) {
+      console.log('⚠️ Rate limit - çok sık istek gönderiliyor, bekleniyor...', {
+        conversationId,
+        timeSinceLastRequest,
+        minInterval: MIN_REQUEST_INTERVAL
+      });
+      // Kısa bir delay ile tekrar dene
+      await new Promise(resolve => setTimeout(resolve, MIN_REQUEST_INTERVAL - timeSinceLastRequest));
+    }
+    
+    // Eğer zaten yükleniyorsa tekrar yükleme (duplicate prevention - genel kontrol)
     if (loadingConversationsRef.current.has(conversationId)) {
       console.log('⚠️ Conversation mesajları zaten yükleniyor, atlanıyor...', conversationId);
       return;
     }
     
     // Cache kontrolü - forceRefresh yoksa ve cache geçerliyse cache'den dön
-    if (!options?.forceRefresh) {
+    // NOT: Pagination için cache'i bypass et (yeni mesajlar için)
+    if (!options?.forceRefresh && page === 1) {
       const cached = messageCacheRef.current.get(conversationId);
       if (cached && (Date.now() - cached.timestamp) < MESSAGE_CACHE_TTL) {
-        console.log('✅ Mesajlar cache\'den yüklendi (loadConversationMessages):', conversationId, {
-          cachedMessageCount: cached.messages.length
-        });
-        
         // Cache'den gelen mesajlarla conversation objesini oluştur
         const conversationWithCachedMessages: ChatConversation = {
           ...conversation,
@@ -687,31 +729,22 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         // State update'in tamamlanması için kısa bir delay
         await new Promise(resolve => setTimeout(resolve, 10));
         
-        console.log('✅ Cache\'den yükleme tamamlandı (loadConversationMessages):', conversationId);
         return;
       }
     }
     
-    // Pagination bilgilerini al veya oluştur
-    const pagination = messagePaginationRef.current.get(conversationId) || {
-      page: 1,
-      limit: DEFAULT_MESSAGE_PAGE_SIZE,
-      hasMore: true,
-      lastLoadTime: 0
-    };
-    
-    const page = options?.page || pagination.page;
-    const limit = options?.limit || Math.min(pagination.limit, MAX_MESSAGE_PAGE_SIZE);
-    
     // Yükleme işlemini başlat
     loadingConversationsRef.current.add(conversationId);
     setConversationMessagesLoading(conversationId, true);
+    lastRequestTimeRef.current.set(conversationId, Date.now());
     
-    try {
-      // Pagination ile mesajları yükle (ilk yüklemede 50, sonraki sayfalarda 100)
-      const messagesResponse = await backendApiService.getMessages(conversationId, page, limit);
-      
-      // Rate limit hatası kontrolü
+    // Request promise'ını oluştur ve kaydet (deduplication için)
+    const requestPromise = (async () => {
+      try {
+        // Pagination ile mesajları yükle (ilk yüklemede 50, sonraki sayfalarda 100)
+        const messagesResponse = await backendApiService.getMessages(conversationId, page, limit);
+        
+        // Rate limit hatası kontrolü
       if (!messagesResponse.success && 
           (messagesResponse.error === 'Çok fazla istek' || 
            messagesResponse.message?.includes('Çok fazla istek') ||
@@ -724,6 +757,18 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         const responseData = messagesResponse.data as any;
         const paginationInfo = responseData.pagination;
         const fetchedMessages = responseData.messages || [];
+        
+        console.log('📥 [ChatContext] Backend\'den mesajlar alındı:', {
+          conversationId,
+          page,
+          limit,
+          fetchedMessageCount: fetchedMessages.length,
+          paginationInfo: paginationInfo ? {
+            page: paginationInfo.page,
+            pages: paginationInfo.pages,
+            total: paginationInfo.total
+          } : null
+        });
         
         // Pagination bilgilerini güncelle
         const hasMore = paginationInfo 
@@ -902,6 +947,17 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
             // Sonraki sayfalar - yeni mesajları başa ekle (eski mesajlar)
             const existingIds = new Set(existingMessages.map((m: ChatMessage) => m.id));
             const newMessages = backendMessages.filter((m: ChatMessage) => !existingIds.has(m.id));
+            
+            console.log('📥 [ChatContext] Pagination merge:', {
+              conversationId,
+              page,
+              existingMessageCount: existingMessages.length,
+              backendMessageCount: backendMessages.length,
+              newMessageCount: newMessages.length,
+              existingIds: Array.from(existingIds).slice(0, 5), // İlk 5 ID'yi göster
+              newMessageIds: newMessages.map(m => m.id).slice(0, 5) // İlk 5 yeni mesaj ID'si
+            });
+            
             mergedMessages = [...newMessages, ...existingMessages]; // Eski mesajlar başa
           }
           
@@ -971,34 +1027,66 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
           fromCache: false
         });
       }
-    } catch (error) {
-      console.error('❌ Mesajlar yüklenirken hata:', error);
-    } finally {
-      // Yükleme işlemi tamamlandı (başarılı veya başarısız)
-      loadingConversationsRef.current.delete(conversationId);
-      setConversationMessagesLoading(conversationId, false);
-    }
+      } catch (error) {
+        console.error('❌ Mesajlar yüklenirken hata:', error);
+        throw error; // Hata durumunda promise'i reject et
+      } finally {
+        // Yükleme işlemi tamamlandı (başarılı veya başarısız)
+        loadingConversationsRef.current.delete(conversationId);
+        setConversationMessagesLoading(conversationId, false);
+        // Request promise'ını temizle (deduplication için)
+        loadingMessagesRequestsRef.current.delete(requestKey);
+      }
+    })();
+    
+    // Request promise'ını kaydet (deduplication için)
+    loadingMessagesRequestsRef.current.set(requestKey, requestPromise);
+    
+    // Request'i bekle
+    await requestPromise;
   }, [backendApiService, setConversationMessagesLoading, currentConversation]);
   
   // Load more messages (pagination) - lazy loading için
-  const loadMoreMessages = useCallback(async (conversationId: string) => {
+  // Returns: true if messages were loaded, false if no more messages
+  const loadMoreMessages = useCallback(async (conversationId: string): Promise<boolean> => {
     const pagination = messagePaginationRef.current.get(conversationId);
+    console.log('📄 [ChatContext] loadMoreMessages çağrıldı:', {
+      conversationId,
+      pagination: pagination ? {
+        page: pagination.page,
+        limit: pagination.limit,
+        hasMore: pagination.hasMore
+      } : null,
+      currentMessagesCount: conversations.find(c => c.id === conversationId)?.messages?.length || 0
+    });
+    
     if (!pagination || !pagination.hasMore) {
-      console.log('ℹ️ Yüklenecek daha fazla mesaj yok:', conversationId);
-      return;
+      console.log('ℹ️ Yüklenecek daha fazla mesaj yok:', {
+        conversationId,
+        hasPagination: !!pagination,
+        hasMore: pagination?.hasMore
+      });
+      return false; // No more messages
     }
     
     const conversation = conversations.find(c => c.id === conversationId);
     if (!conversation) {
       console.error('❌ Conversation bulunamadı:', conversationId);
-      return;
+      return false; // Conversation not found
     }
     
     // Sonraki sayfayı yükle
+    // NOT: forceRefresh: false - cache'i kullan, ama pagination için yeni mesajlar gerekiyor
+    // Backend'den yeni mesajları çek ama rate limiting ile
     await loadConversationMessages(conversationId, conversation, {
       page: pagination.page + 1,
-      limit: Math.min(pagination.limit * 2, MAX_MESSAGE_PAGE_SIZE) // Her sayfada limit'i artır
+      limit: Math.min(pagination.limit * 2, MAX_MESSAGE_PAGE_SIZE), // Her sayfada limit'i artır
+      forceRefresh: false // Cache'i kullan ama yeni sayfa için backend'den çek
     });
+    
+    // Yeni pagination durumunu kontrol et
+    const newPagination = messagePaginationRef.current.get(conversationId);
+    return newPagination?.hasMore ?? false; // Return true if there are more messages
   }, [conversations, loadConversationMessages]);
 
   const selectConversation = useCallback(async (conversationId: string) => {
@@ -1062,10 +1150,6 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       
       // Eğer cache geçerliyse ve mesajlar varsa cache'den yükle
       if (cacheValid && cached && cached.messages.length > 0) {
-        console.log('✅ Mesajlar cache\'den yüklendi (selectConversation):', conversationId, {
-          cachedMessageCount: cached.messages.length
-        });
-        
         // Cache'den gelen mesajlarla conversation objesini oluştur
         const conversationWithCachedMessages: ChatConversation = {
           ...foundConversation,
@@ -1089,13 +1173,6 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         // State update'in tamamlanması için kısa bir delay
         // React 18'de automatic batching var, ama yine de garanti için delay ekle
         await new Promise(resolve => setTimeout(resolve, 50));
-        
-        // Double-check: currentConversation'ın doğru set edildiğini kontrol et
-        // Bu check sadece debug için, production'da kaldırılabilir
-        console.log('✅ Cache\'den yükleme tamamlandı, state güncellendi:', conversationId, {
-          cachedMessageCount: cached.messages.length,
-          conversationId: conversationWithCachedMessages.id
-        });
         
         return; // Cache'den yüklendi, backend'e istek yok
       }
@@ -1667,12 +1744,10 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     if (conversationId) {
       messageCacheRef.current.delete(conversationId);
       messagePaginationRef.current.delete(conversationId);
-      console.log('🧹 Message cache temizlendi:', conversationId);
     } else {
       // Tüm cache'i temizle
       messageCacheRef.current.clear();
       messagePaginationRef.current.clear();
-      console.log('🧹 Tüm message cache temizlendi');
     }
   }, []);
   
@@ -1690,7 +1765,6 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       
       toDelete.forEach(id => {
         messageCacheRef.current.delete(id);
-        console.log('🧹 Eski cache temizlendi:', id);
       });
     }, 60000); // Her 1 dakikada bir kontrol et
     

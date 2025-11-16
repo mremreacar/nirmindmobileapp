@@ -22,6 +22,7 @@ export const messageStyles = StyleSheet.create({
     marginVertical: 6,
     flexDirection: 'row',
     width: '100%',
+    position: 'relative',
   },
   userMessage: {
     justifyContent: 'flex-end',
@@ -31,7 +32,10 @@ export const messageStyles = StyleSheet.create({
   },
   messageWrapper: {
     maxWidth: '90%',
-    minWidth: 'auto',
+    // CRITICAL FIX: Kısa mesajlar için minimum genişlik ekle
+    // Böylece çok kısa mesajlarda balon çok küçük olmaz
+    // Flexbox sayesinde mesaj uzunluğuna göre otomatik genişler (içeriğe göre)
+    minWidth: 80, // Minimum 80px genişlik (kısa mesajlar için)
   },
   userMessageWrapper: {
     alignItems: 'flex-end',
@@ -53,7 +57,7 @@ export const messageStyles = StyleSheet.create({
     borderBottomLeftRadius: 20,
   },
   aiBubble: {
-    backgroundColor: '#3532A8',
+    backgroundColor: '#3532A8', // Koyu mor - tema rengi
     borderBottomLeftRadius: 4,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
@@ -61,21 +65,62 @@ export const messageStyles = StyleSheet.create({
   },
   messageText: {
     fontFamily: 'Poppins-Regular',
-    fontSize: 16,
-    lineHeight: 24,
+    fontSize: 15,
+    lineHeight: 22,
     flexShrink: 1,
     flexWrap: 'wrap',
   },
   userMessageText: {
     color: '#FFFFFF',
   },
+  userMessageTextContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'flex-end',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  userMessageTextContainerInline: {
+    // Kısa mesajlar için: saat bilgisi yanında
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+  },
+  userMessageTextContainerBlock: {
+    // Uzun mesajlar için: saat bilgisi altında
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+  },
   aiMessageText: {
     color: '#FFFFFF',
   },
-  messageTime: {
-    fontSize: 11,
+  inlineTimeContainer: {
+    alignSelf: 'flex-end',
+    marginTop: 2,
+    marginLeft: 4,
+  },
+  inlineTimeContainerAI: {
+    alignSelf: 'flex-start',
+    marginTop: 2,
+    marginRight: 4,
+  },
+  footerTimeContainer: {
+    // Uzun mesajlarda saat bilgisi alt satırda (user mesajları için)
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
     marginTop: 4,
-    opacity: 0.7,
+    paddingRight: 4,
+  },
+  footerTimeContainerAI: {
+    // Uzun mesajlarda saat bilgisi alt satırda (AI mesajları için)
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    marginTop: 4,
+    paddingLeft: 4,
+  },
+  messageTime: {
+    fontSize: 10,
+    opacity: 0.8,
+    lineHeight: 14,
   },
   userMessageTime: {
     color: '#FFFFFF',
@@ -85,20 +130,119 @@ export const messageStyles = StyleSheet.create({
     color: '#FFFFFF',
     textAlign: 'left',
   },
+  messageFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  userMessageFooter: {
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  aiMessageFooter: {
+    justifyContent: 'flex-start',
+    gap: 8,
+  },
+  copyButton: {
+    padding: 6,
+    borderRadius: 12,
+    backgroundColor: 'transparent',
+    justifyContent: 'center',
+    alignItems: 'center',
+    minWidth: 32,
+    minHeight: 32,
+  },
+  copyButtonIcon: {
+    width: 16,
+    height: 16,
+    tintColor: '#FFFFFF',
+  },
+  successIconContainer: {
+    width: 16,
+    height: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  successIcon: {
+    fontSize: 14,
+    color: '#00DDA5',
+    fontWeight: 'bold',
+  },
+  // Seçim modu stilleri
+  fullScreenBlurOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 5,
+    elevation: 5, // Android için
+  },
+  selectedMessageContainer: {
+    position: 'relative',
+    zIndex: 15,
+    elevation: 15, // Android için
+  },
+  messageBlurOverlay: {
+    position: 'absolute',
+    top: -6,
+    left: -10,
+    right: -10,
+    bottom: -6,
+    zIndex: 5,
+    borderRadius: 20,
+    overflow: 'hidden',
+  },
+  selectedActionsContainer: {
+    marginTop: 8,
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    zIndex: 20,
+    elevation: 20, // Android için
+    position: 'relative',
+  },
+  selectedCopyButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    backgroundColor: '#7E7AE9',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 120,
+    flex: 1,
+  },
+  selectedCopyButtonText: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 16,
+    color: '#FFFFFF',
+  },
+  selectedDeleteButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    backgroundColor: '#FF6B6B',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 120,
+    flex: 1,
+  },
+  selectedDeleteButtonText: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 16,
+    color: '#FFFFFF',
+  },
   // Thinking state styles - Temaya uygun
   thinkingContainer: {
     flexDirection: 'column',
     alignItems: 'flex-start',
     gap: 10,
     position: 'relative',
-    backgroundColor: '#6B7280', // Farklı renk - gri ton
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 20,
-    borderBottomLeftRadius: 4,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    borderBottomRightRadius: 20,
+    backgroundColor: 'transparent', // Gri renk kaldırıldı - ana balon rengi kullanılacak
+    paddingHorizontal: 0, // Ana balon zaten padding'e sahip
+    paddingVertical: 0,
   },
   thinkingText: {
     fontFamily: 'Poppins-Medium',
@@ -116,6 +260,11 @@ export const messageStyles = StyleSheet.create({
   messageContentWrapper: {
     width: '100%',
     marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
+    flexWrap: 'wrap',
+    gap: 6,
   },
   messageSeparator: {
     flexDirection: 'row',
@@ -298,6 +447,78 @@ export const messageStyles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontFamily: 'Poppins-Medium',
+  },
+  // Action Menu Styles - Temaya uygun
+  actionMenuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  actionMenuContainer: {
+    width: '100%',
+    maxWidth: width - 40,
+    gap: 12,
+  },
+  actionMenuContent: {
+    backgroundColor: '#1A1A2E',
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  actionMenuTitle: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.6)',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
+    textAlign: 'center',
+  },
+  actionMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: 'transparent',
+  },
+  actionMenuItemDanger: {
+    // Silme butonu için özel stil
+  },
+  actionMenuIcon: {
+    fontSize: 20,
+    marginRight: 12,
+    width: 24,
+    textAlign: 'center',
+  },
+  actionMenuText: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 16,
+    color: '#FFFFFF',
+    flex: 1,
+  },
+  actionMenuTextDanger: {
+    color: '#FF6B6B',
+  },
+  actionMenuDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    marginHorizontal: 20,
+  },
+  actionMenuCancel: {
+    backgroundColor: '#1A1A2E',
+    borderRadius: 20,
+    paddingVertical: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  actionMenuCancelText: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 16,
+    color: '#FFFFFF',
   },
 });
 

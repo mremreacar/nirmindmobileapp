@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Alert, AppState, AppStateStatus } from 'react-native';
+import { Alert, AppState, AppStateStatus, InteractionManager } from 'react-native';
 import { useChat } from '@/src/lib/context/ChatContext';
 import { ChatMessage } from '@/src/lib/mock/types';
 import BackendApiService from '../services/BackendApiService';
@@ -77,7 +77,6 @@ export const useChatMessages = () => {
     if (currentActiveStream) {
       const streamConversationId = (currentActiveStream as ActiveStreamState).conversationId;
       if (streamConversationId && streamConversationId !== conversationId) {
-        console.log('🔄 Farklı conversation\'a mesaj gönderiliyor, önceki streaming temizleniyor');
         activeStreamRef.current = null;
         setIsStreaming(false);
       }
@@ -92,6 +91,7 @@ export const useChatMessages = () => {
     
     let finalConversationId = conversationId;
     let conversationCreated = false;
+    let optimisticMessageId: string | null = null;
     
     // Streaming state değişkenleri (scope için try dışında tanımla)
     let streamingAIMessageId: string | null = null;
@@ -140,6 +140,29 @@ export const useChatMessages = () => {
           
           // Conversation'ı state'e ekle ve seç
           await selectConversation(finalConversationId);
+          
+          // CRITICAL FIX: Conversation oluşturulduktan hemen sonra optimistic mesajı ekle
+          // Bu sayede mesaj anında ekranda görünür
+          if (finalConversationId && (messageText.trim() || selectedImages.length > 0 || selectedFiles.length > 0)) {
+            optimisticMessageId = `optimistic-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+            
+            const optimisticUserMessage: ChatMessage = {
+              id: optimisticMessageId,
+              text: messageText.trim(),
+              isUser: true,
+              timestamp: new Date(),
+              images: selectedImages.length > 0 ? selectedImages : undefined,
+              files: selectedFiles.length > 0 ? selectedFiles.map(f => ({
+                name: f.name || 'Dosya',
+                uri: f.uri
+              })) : undefined
+            };
+            
+            // Hemen ekle - await etmeden
+            addMessage(finalConversationId, optimisticUserMessage).catch((error) => {
+              console.error('❌ Optimistic mesaj eklenirken hata:', error);
+            });
+          }
         } else {
           throw new Error(createResponse.error || 'Conversation oluşturulamadı');
         }
@@ -148,31 +171,80 @@ export const useChatMessages = () => {
         const conversationExists = conversations.find(conv => conv.id === finalConversationId) || 
                                   (currentConversation?.id === finalConversationId ? currentConversation : null);
         
+        console.log('🔍 [useChatMessages] Conversation var, kontrol ediliyor:', {
+          finalConversationId,
+          conversationExists: !!conversationExists,
+          foundInConversations: !!conversations.find(conv => conv.id === finalConversationId),
+          currentConversationId: currentConversation?.id,
+          matchesCurrentConversation: currentConversation?.id === finalConversationId
+        });
+        
         if (!conversationExists) {
           // Conversation backend'de var ama local state'de yok, yükle
+          console.log('📥 [useChatMessages] Conversation local state\'de yok, selectConversation çağrılıyor:', finalConversationId);
           await selectConversation(finalConversationId);
+          console.log('✅ [useChatMessages] selectConversation tamamlandı:', finalConversationId);
         } else if (!currentConversation || currentConversation.id !== finalConversationId) {
           // Conversation var ama seçili değil, seç
           await selectConversation(finalConversationId);
+        } else {
+          console.log('ℹ️ [useChatMessages] Conversation zaten seçili, selectConversation çağrılmıyor');
+        }
+        
+        // CRITICAL FIX: Conversation seçildikten hemen sonra optimistic mesajı ekle
+        // Bu sayede mesaj anında ekranda görünür
+        if (finalConversationId && (messageText.trim() || selectedImages.length > 0 || selectedFiles.length > 0)) {
+          optimisticMessageId = `optimistic-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+          
+          const optimisticUserMessage: ChatMessage = {
+            id: optimisticMessageId,
+            text: messageText.trim(),
+            isUser: true,
+            timestamp: new Date(),
+            images: selectedImages.length > 0 ? selectedImages : undefined,
+            files: selectedFiles.length > 0 ? selectedFiles.map(f => ({
+              name: f.name || 'Dosya',
+              uri: f.uri
+            })) : undefined
+          };
+          
+          // Hemen ekle - await etmeden
+          addMessage(finalConversationId, optimisticUserMessage).catch((error) => {
+            console.error('❌ Optimistic mesaj eklenirken hata:', error);
+          });
         }
       }
 
       // ADIM 2: İnternet bağlantısı kontrolü
-      let isConnected = false;
+      // NOT: Backend'e zaten bağlanabildiysek (conversation oluşturuldu, selectConversation çalıştı)
+      // internet bağlantısı var demektir. Bu kontrolü atlayalım veya sadece log olarak tutalım.
+      console.log('🌐 [useChatMessages] İnternet bağlantısı kontrol ediliyor...');
+      let isConnected = true; // Optimistic - backend'e zaten bağlanabildiysek internet var
       try {
-        isConnected = await hasInternetConnection();
+        // İnternet kontrolünü yap ama hata olsa bile devam et
+        // Çünkü backend'e zaten bağlanabildiysek internet var demektir
+        const connectionCheck = await hasInternetConnection();
+        isConnected = connectionCheck;
+        console.log('🌐 [useChatMessages] İnternet bağlantısı kontrol sonucu:', {
+          isConnected,
+          note: 'Backend\'e zaten bağlanabildiysek internet var demektir'
+        });
       } catch (connectionError) {
-        console.error('❌ İnternet bağlantısı kontrolü hatası:', connectionError);
-        isConnected = true; // Optimistic - backend kontrol edecek
+        console.warn('⚠️ İnternet bağlantısı kontrolü hatası (devam ediliyor):', connectionError);
+        isConnected = true; // Optimistic - backend kontrol edecek, zaten bağlanabildiysek internet var
       }
       
+      // İnternet kontrolünü atla - backend'e zaten bağlanabildiysek internet var
+      // Sadece log olarak tut
       if (!isConnected) {
-        setIsLoading(false);
-        setIsStreaming(false);
-        return;
+        console.warn('⚠️ [useChatMessages] İnternet bağlantısı kontrolü false döndü, ama backend\'e bağlanabildiysek devam ediyoruz');
+        // Return etme - backend kontrol edecek
       }
+      
+      console.log('✅ [useChatMessages] İnternet bağlantısı kontrolü tamamlandı, devam ediliyor');
 
       // ADIM 3: Önceki boş streaming mesajlarını temizle
+      console.log('🧹 [useChatMessages] Önceki boş streaming mesajları kontrol ediliyor...');
       if (finalConversationId) {
         const conversation = conversations.find(conv => conv.id === finalConversationId) || 
                             (currentConversation?.id === finalConversationId ? currentConversation : null);
@@ -195,6 +267,14 @@ export const useChatMessages = () => {
       // ADIM 4: Attachments yükle
       const finalMessage = messageText.trim();
       const attachments: any[] = [];
+      
+      console.log('📦 [useChatMessages] Attachments yükleme başlıyor:', {
+        finalMessage: finalMessage.substring(0, 50),
+        finalMessageLength: finalMessage.length,
+        selectedImagesCount: selectedImages.length,
+        selectedFilesCount: selectedFiles.length,
+        finalConversationId
+      });
       
       // messageStartTime'ı güncelle
       messageStartTime = Date.now();
@@ -369,14 +449,16 @@ export const useChatMessages = () => {
         throw new Error('Mesaj veya görsel/dosya gereklidir. Lütfen bir mesaj yazın veya görsel/dosya seçin.');
       }
 
-      console.log('📤 Backend\'e gönderilecek attachment\'lar:', {
+      console.log('📤 [useChatMessages] Backend\'e gönderilecek attachment\'lar:', {
         attachmentCount: attachments.length,
         attachments: attachments.map(att => ({
           type: att.type,
           url: att.url ? att.url.substring(0, 100) : 'no url',
           filename: att.filename || 'no filename',
           size: att.size || 0
-        }))
+        })),
+        finalMessage: finalMessage.substring(0, 50),
+        finalConversationId
       });
 
       // Streaming endpoint kullan - ChatGPT gibi gerçek zamanlı yazma efekti
@@ -385,6 +467,7 @@ export const useChatMessages = () => {
         messageStartTime: Date.now(),
         userMessageReceivedTime: null as number | null,
         aiStartTime: null as number | null,
+        placeholderCreateTime: null as number | null,
         firstChunkTime: null as number | null,
         aiCompleteTime: null as number | null,
         abortStream: null as (() => void) | null,
@@ -414,8 +497,12 @@ export const useChatMessages = () => {
         messageLength: finalMessage.length,
         attachmentsCount: attachments.length,
         timestamp: new Date().toISOString(),
-        startTime: messageStartTime
+        startTime: messageStartTime,
+        optimisticMessageId: optimisticMessageId || 'none'
       });
+      
+      // CRITICAL FIX: Optimistic mesaj zaten yukarıda (sendMessage başında) eklendi
+      // Burada sadece log tutuyoruz
       
       try {
         // sendMessageStream artık abort fonksiyonu döndürüyor (Promise döndürüyor, resolve değeri abort fonksiyonu)
@@ -449,8 +536,17 @@ export const useChatMessages = () => {
               const messageExists = conversation.messages.some(msg => msg.id === userMessage.id);
               if (messageExists) {
                 console.log('ℹ️ [onUserMessage] Mesaj zaten mevcut, eklenmedi:', userMessage.id);
+                // Optimistic mesajı kaldır (backend mesajı zaten var)
+                if (optimisticMessageId && optimisticMessageId !== userMessage.id && finalConversationId) {
+                  removeMessage(finalConversationId, optimisticMessageId);
+                }
                 return;
               }
+            }
+            
+            // Optimistic mesajı backend mesajı ile değiştir
+            if (optimisticMessageId && optimisticMessageId !== userMessage.id && finalConversationId) {
+              removeMessage(finalConversationId, optimisticMessageId);
             }
             
             // Backend'den gelen mesajı ekle
@@ -512,10 +608,11 @@ export const useChatMessages = () => {
             const aiStartDuration = aiStartTime - messageStartTime;
             const timeToAIStart = userMessageReceivedTime ? (aiStartTime - userMessageReceivedTime) : aiStartDuration;
             
-            console.log('🤖 [AI AÇIK] AI cevabı başladı:', {
+            console.log('🤖 [TIMING] [AI AÇIK] AI cevabı başladı:', {
               conversationId: finalConversationId,
               totalDuration: `${aiStartDuration}ms`,
-              timeToAIStart: `${timeToAIStart}ms`
+              timeToAIStart: `${timeToAIStart}ms`,
+              timestamp: new Date(aiStartTime).toISOString()
             });
             
             // AI cevabı başladı - placeholder mesaj oluştur
@@ -545,8 +642,19 @@ export const useChatMessages = () => {
                 
                 streamingMessageRef.current = aiPlaceholderMessage;
                 if (finalConversationId) {
+                  const placeholderCreateTime = Date.now();
+                  streamState.placeholderCreateTime = placeholderCreateTime;
+                  const timeToPlaceholder = placeholderCreateTime - aiStartTime;
+                  
+                  // CRITICAL FIX: Placeholder mesajı hemen ekle - "Düşünüyorum" göstergesi hemen görünsün
+                  // requestAnimationFrame kullanmadan direkt güncelle (hızlı görünmesi için)
                   updateMessage(finalConversationId, aiPlaceholderMessage);
-                  console.log('✅ Streaming mesajı oluşturuldu:', streamingAIMessageId);
+                  
+                  console.log('✅ [TIMING] Streaming mesajı oluşturuldu (Düşünüyorum göstergesi aktif):', {
+                    streamingAIMessageId,
+                    timeFromAIStart: `${timeToPlaceholder}ms`,
+                    timestamp: new Date(placeholderCreateTime).toISOString()
+                  });
                 }
               }
 
@@ -578,16 +686,22 @@ export const useChatMessages = () => {
             
             if (!firstChunkTime) {
               firstChunkTime = Date.now();
+              streamState.firstChunkTime = firstChunkTime;
               const timeToFirstChunk = firstChunkTime - messageStartTime;
               const timeToFirstChunkFromAIStart = aiStartTime ? (firstChunkTime - aiStartTime) : timeToFirstChunk;
+              const placeholderCreateTime = streamState.placeholderCreateTime;
+              const timeToFirstChunkFromPlaceholder = placeholderCreateTime ? (firstChunkTime - placeholderCreateTime) : null;
               
-              console.log('💬 [AI YAZIYOR] İlk AI chunk alındı:', {
+              console.log('💬 [TIMING] [AI YAZIYOR] İlk AI chunk alındı:', {
                 conversationId,
                 chunkLength: chunk.length,
                 fullContentLength: fullContent.length,
                 hasContent: fullContent.length > 0,
+                timeFromRequestStart: `${timeToFirstChunk}ms`,
                 timeFromAIStart: `${timeToFirstChunkFromAIStart}ms`,
-                streamingMessageId: streamingAIMessageId
+                timeFromPlaceholder: timeToFirstChunkFromPlaceholder ? `${timeToFirstChunkFromPlaceholder}ms` : 'N/A',
+                streamingMessageId: streamingAIMessageId,
+                timestamp: new Date(firstChunkTime).toISOString()
               });
               
               if (timeToFirstChunk > 10000) {
@@ -601,11 +715,15 @@ export const useChatMessages = () => {
             
             streamingAIMessageText = fullContent;
             
-            // Performans optimizasyonu: Chunk güncellemelerini throttle et (her 100ms'de bir güncelle)
-            // Bu sayede çok sık UI güncellemesi yapılmaz, daha smooth bir akış sağlanır ve render problemi önlenir
+            // CRITICAL FIX: İlk chunk için hemen güncelle - kullanıcı cevabı hemen görsün
+            const isFirstChunk = !firstChunkTime;
+            
+            // Performans optimizasyonu: Chunk güncellemelerini throttle et (her 50ms'de bir güncelle)
+            // İlk chunk için throttle yok - hemen göster
+            // Sonraki chunk'lar için 50ms throttle (20 FPS - smooth akış için)
             const now = Date.now();
             const timeSinceLastUpdate = now - lastUpdateTimeRef.current;
-            const THROTTLE_INTERVAL = 100; // 100ms throttle (10 FPS - render problemi önlemek için)
+            const THROTTLE_INTERVAL = 50; // 50ms throttle (20 FPS - daha hızlı ve smooth akış)
             
             // Pending update'i kaydet
             if (streamingAIMessageId && finalConversationId) {
@@ -616,8 +734,8 @@ export const useChatMessages = () => {
               };
             }
             
-            // Eğer throttle interval'ı geçtiyse veya ilk chunk ise, hemen güncelle
-            if (timeSinceLastUpdate >= THROTTLE_INTERVAL || !firstChunkTime) {
+            // CRITICAL FIX: İlk chunk için hemen güncelle, sonraki chunk'lar için throttle uygula
+            if (isFirstChunk || timeSinceLastUpdate >= THROTTLE_INTERVAL) {
               if (updateTimeoutRef.current) {
                 clearTimeout(updateTimeoutRef.current);
                 updateTimeoutRef.current = null;
@@ -628,7 +746,14 @@ export const useChatMessages = () => {
                 if (convId) {
                   lastUpdateTimeRef.current = now;
                   
-                  requestAnimationFrame(() => {
+                  // CRITICAL FIX: İlk chunk için requestAnimationFrame kullanma - hemen güncelle
+                  // Sonraki chunk'lar için requestAnimationFrame kullan (smooth animasyon için)
+                  if (isFirstChunk) {
+                    // İlk chunk - hemen güncelle (kullanıcı cevabı hemen görsün)
+                    const firstChunkUITime = Date.now();
+                    const timeToFirstChunkUI = firstChunkUITime - firstChunkTime;
+                    const timeToFirstChunkUIFromPlaceholder = streamState.placeholderCreateTime ? (firstChunkUITime - streamState.placeholderCreateTime) : null;
+                    
                     const updatedAIMessage: ChatMessage = {
                       id: messageId,
                       text: content,
@@ -639,7 +764,29 @@ export const useChatMessages = () => {
                     
                     streamingMessageRef.current = updatedAIMessage;
                     updateMessage(convId, updatedAIMessage);
-                  });
+                    
+                    console.log('✅ [TIMING] İlk chunk UI\'da gösterildi:', {
+                      conversationId: convId,
+                      timeFromChunkReceived: `${timeToFirstChunkUI}ms`,
+                      timeFromPlaceholder: timeToFirstChunkUIFromPlaceholder ? `${timeToFirstChunkUIFromPlaceholder}ms` : 'N/A',
+                      contentLength: content.length,
+                      timestamp: new Date(firstChunkUITime).toISOString()
+                    });
+                  } else {
+                    // Sonraki chunk'lar - requestAnimationFrame ile smooth güncelle
+                    requestAnimationFrame(() => {
+                      const updatedAIMessage: ChatMessage = {
+                        id: messageId,
+                        text: content,
+                        isUser: false,
+                        timestamp: new Date(),
+                        isStreaming: true
+                      };
+                      
+                      streamingMessageRef.current = updatedAIMessage;
+                      updateMessage(convId, updatedAIMessage);
+                    });
+                  }
                 }
                 
                 pendingUpdateRef.current = null;
@@ -679,7 +826,15 @@ export const useChatMessages = () => {
             }
           },
           // onAIComplete
-          (aiMessage: any) => {
+          async (aiMessage: any) => {
+            console.log('📥 [onAIComplete] Callback çağrıldı:', {
+              hasAiMessage: !!aiMessage,
+              messageId: aiMessage?.id,
+              textLength: aiMessage?.text?.length || 0,
+              conversationId: finalConversationId,
+              streamingAIMessageId
+            });
+            
             // Cleanup pending updates
             if (updateTimeoutRef.current) {
               clearTimeout(updateTimeoutRef.current);
@@ -713,14 +868,8 @@ export const useChatMessages = () => {
             // AI cevabı tamamlandı - backend'den gelen mesaj zaten kaydedildi
             // Streaming mesajını backend mesajı ile değiştir
             if (!streamState.cancelledByUser) {
-              let timestamp: Date;
-              try {
-                const tsValue = aiMessage.timestamp || aiMessage.createdAt;
-                timestamp = tsValue ? new Date(tsValue) : new Date();
-                if (isNaN(timestamp.getTime())) timestamp = new Date();
-              } catch (error) {
-                timestamp = new Date();
-              }
+              // CRITICAL: AI mesajları için telefonun saat bilgisini kullan (backend timestamp yerine)
+              const timestamp = new Date(); // Telefonun şu anki saati
               
               // Backend text'i kullan, yoksa streaming text'ini kullan
               let finalText = aiMessage.text || '';
@@ -742,26 +891,46 @@ export const useChatMessages = () => {
               
               // Streaming mesajını backend mesajı ile değiştir
               if (finalConversationId) {
+                console.log('🔄 [onAIComplete] Mesaj state\'e ekleniyor:', {
+                  conversationId: finalConversationId,
+                  streamingAIMessageId,
+                  aiMessageId: aiMessage.id,
+                  isDifferentId: streamingAIMessageId !== aiMessage.id,
+                  textLength: finalText.length
+                });
+                
                 if (streamingAIMessageId && streamingAIMessageId !== aiMessage.id) {
                   // Farklı ID'ler - streaming mesajını kaldır, backend mesajını ekle
+                  console.log('🗑️ [onAIComplete] Streaming mesajı kaldırılıyor:', streamingAIMessageId);
                   removeMessage(finalConversationId, streamingAIMessageId);
-                  requestAnimationFrame(() => {
-                    if (finalConversationId) {
-                      addMessage(finalConversationId, aiChatMessage);
-                      console.log('✅ Backend AI mesajı eklendi:', {
-                        conversationId: finalConversationId,
-                        messageId: aiChatMessage.id
-                      });
-                    }
-                  });
-                } else {
-                  // Aynı ID - sadece güncelle
-                  updateMessage(finalConversationId, aiChatMessage);
-                  console.log('✅ Streaming mesaj güncellendi:', {
+                  
+                  // CRITICAL FIX: requestAnimationFrame kaldırıldı, direkt await ile çağrılıyor
+                  // Bu sayede mesaj hemen state'e ekleniyor ve refresh gerekmiyor
+                  console.log('➕ [onAIComplete] addMessage çağrılıyor:', {
                     conversationId: finalConversationId,
                     messageId: aiChatMessage.id
                   });
+                  await addMessage(finalConversationId, aiChatMessage);
+                  console.log('✅ [onAIComplete] Backend AI mesajı eklendi:', {
+                    conversationId: finalConversationId,
+                    messageId: aiChatMessage.id,
+                    textLength: finalText.length
+                  });
+                } else {
+                  // Aynı ID - sadece güncelle
+                  console.log('🔄 [onAIComplete] updateMessage çağrılıyor:', {
+                    conversationId: finalConversationId,
+                    messageId: aiChatMessage.id
+                  });
+                  updateMessage(finalConversationId, aiChatMessage);
+                  console.log('✅ [onAIComplete] Streaming mesaj güncellendi:', {
+                    conversationId: finalConversationId,
+                    messageId: aiChatMessage.id,
+                    textLength: finalText.length
+                  });
                 }
+              } else {
+                console.error('❌ [onAIComplete] finalConversationId eksik!');
               }
             }
             
@@ -808,11 +977,29 @@ export const useChatMessages = () => {
               thinkingMessageIntervalRef.current = null;
             }
             
+            // Optimistic mesajı kaldır (hata durumunda)
+            if (optimisticMessageId && finalConversationId) {
+              removeMessage(finalConversationId, optimisticMessageId);
+              console.log('🧹 Optimistic mesaj hata nedeniyle kaldırıldı:', optimisticMessageId);
+            }
+            
             if (streamState.cancelledByUser) {
               console.log('ℹ️ AI cevabı kullanıcı tarafından durduruldu:', error);
-              if (streamingAIMessageId && finalConversationId) {
+              
+              // Mesajı silmek yerine "Durduruldu" etiketi ekle
+              if (streamingAIMessageId && finalConversationId && streamingMessageRef.current) {
+                const currentText = streamingMessageRef.current.text || '';
+                const updatedMessage: ChatMessage = {
+                  ...streamingMessageRef.current,
+                  text: currentText + (currentText.trim() ? '\n\n' : '') + '[Durduruldu]',
+                  isStreaming: false
+                };
+                updateMessage(finalConversationId, updatedMessage);
+              } else if (streamingAIMessageId && finalConversationId) {
+                // Eğer streamingMessageRef yoksa, mesajı sil
                 removeMessage(finalConversationId, streamingAIMessageId);
               }
+              
               streamingAIMessageId = null;
               if (updateTimeoutRef.current) {
                 clearTimeout(updateTimeoutRef.current);
@@ -1001,6 +1188,13 @@ export const useChatMessages = () => {
         if (isRateLimitError) {
           console.error('❌ Rate limit hatası (catch bloğu):', errorMessage);
           
+          // Kullanıcıya bilgi ver
+          Alert.alert(
+            "Çok Fazla İstek",
+            "Çok fazla istek gönderildi. Lütfen birkaç dakika sonra tekrar deneyin.",
+            [{ text: "Tamam" }]
+          );
+          
           if (streamingAIMessageId && finalConversationId) {
             removeMessage(finalConversationId, streamingAIMessageId);
           }
@@ -1032,6 +1226,13 @@ export const useChatMessages = () => {
         }
         
         console.error('❌ Streaming endpoint hatası, normal endpoint kullanılıyor:', errorMessage);
+        
+        // Kullanıcıya bilgi ver - fallback deneniyor
+        Alert.alert(
+          "Yeniden Deneniyor",
+          "Streaming başarısız oldu, normal yöntemle yeniden deneniyor...",
+          [{ text: "Tamam" }]
+        );
         
         if (streamingAIMessageId && finalConversationId) {
           removeMessage(finalConversationId, streamingAIMessageId);
@@ -1088,6 +1289,12 @@ export const useChatMessages = () => {
         // Streaming mesajını kaldır (eğer oluşturulduysa)
         if (streamingAIMessageId && finalConversationId) {
           removeMessage(finalConversationId, streamingAIMessageId);
+        }
+        
+        // Optimistic mesajı kaldır (fallback endpoint kullanılıyor)
+        if (optimisticMessageId && finalConversationId) {
+          removeMessage(finalConversationId, optimisticMessageId);
+          console.log('🧹 Optimistic mesaj fallback nedeniyle kaldırıldı:', optimisticMessageId);
         }
         
         // Normal endpoint'i kullan
@@ -1158,10 +1365,10 @@ export const useChatMessages = () => {
               files: finalFiles
             };
             
-            // Backend'den gelen mesajı ekle
+            // Backend'den gelen mesajı ekle (optimistic mesaj zaten kaldırıldı)
             try {
               await addMessage(finalConversationId, userChatMessage);
-              console.log('✅ Kullanıcı mesajı backend\'den eklendi');
+              console.log('✅ Kullanıcı mesajı backend\'den eklendi (fallback)');
             } catch (addError) {
               console.error('❌ Kullanıcı mesajı eklenirken hata:', addError);
             }
@@ -1169,23 +1376,8 @@ export const useChatMessages = () => {
           
           // AI cevabını ekle
           if (aiMessage && aiMessage.id) {
-            // Timestamp validation
-            let timestamp: Date;
-            try {
-              const tsValue = aiMessage.timestamp || aiMessage.createdAt;
-              if (tsValue) {
-                timestamp = new Date(tsValue);
-                if (isNaN(timestamp.getTime())) {
-                  console.warn('⚠️ Geçersiz aiMessage timestamp (fallback), şu anki zaman kullanılıyor');
-                  timestamp = new Date();
-                }
-              } else {
-                timestamp = new Date();
-              }
-            } catch (error) {
-              console.error('❌ Timestamp parse hatası (fallback):', error);
-              timestamp = new Date();
-            }
+            // CRITICAL: AI mesajları için telefonun saat bilgisini kullan (backend timestamp yerine)
+            const timestamp = new Date(); // Telefonun şu anki saati
             
             const aiChatMessage: ChatMessage = {
               id: aiMessage.id,
@@ -1483,8 +1675,21 @@ export const useChatMessages = () => {
     pendingUpdateRef.current = null;
     lastUpdateTimeRef.current = 0;
 
+    // Mesajı silmek yerine "Durduruldu" etiketi ekle
     if (active.conversationId && active.streamingMessageId) {
-      removeMessage(active.conversationId, active.streamingMessageId);
+      const currentMessage = streamingMessageRef.current;
+      if (currentMessage && currentMessage.text) {
+        const currentText = currentMessage.text || '';
+        const updatedMessage: ChatMessage = {
+          ...currentMessage,
+          text: currentText + (currentText.trim() ? '\n\n' : '') + '[Durduruldu]',
+          isStreaming: false
+        };
+        updateMessage(active.conversationId, updatedMessage);
+      } else {
+        // Eğer mesaj içeriği yoksa, mesajı sil
+        removeMessage(active.conversationId, active.streamingMessageId);
+      }
     }
 
     activeStreamRef.current = null;
@@ -1492,7 +1697,7 @@ export const useChatMessages = () => {
     setIsLoading(false);
 
     return true;
-  }, [removeMessage]);
+  }, [removeMessage, updateMessage]);
 
   // Yeni sohbete geçildiğinde veya home'a dönüldüğünde streaming state'ini temizle
   // Aynı conversation'a geri döndüğünde de streaming state'ini temizle (yeni mesaj yazabilmek için)
@@ -1518,13 +1723,6 @@ export const useChatMessages = () => {
     if (returnedToSameConversation) {
       // Aynı conversation'a geri döndük - streaming state'ini temizle (yeni mesaj yazabilmek için)
       const active = activeStreamRef.current;
-      console.log('🔄 Aynı conversation\'a geri dönüldü, streaming state\'i temizleniyor (yeni mesaj yazabilmek için)...', {
-        conversationId: currentConversationId,
-        previousId: previousConversationId,
-        lastBeforeChange: lastConversationBeforeChangeRef.current,
-        hasActiveStream: !!active,
-        activeStreamId: active?.conversationId
-      });
       
       // Streaming state'ini temizle (stream zaten durmuş olabilir)
       activeStreamRef.current = null;
@@ -1554,13 +1752,6 @@ export const useChatMessages = () => {
       if (active) {
         // Eğer home'a dönüldüyse, yeni conversation açıldıysa veya farklı bir conversation'a geçildiyse
         if (isHomeScreen || isNewConversation || active.conversationId !== currentConversationId) {
-          console.log('🔄 Conversation değişti, yeni sohbet açıldı veya home\'a dönüldü, streaming state\'i temizleniyor...', {
-            previousId: previousConversationIdRef.current,
-            currentId: currentConversationId,
-            activeStreamId: active.conversationId,
-            isNewConversation,
-            isHomeScreen
-          });
           
           // Stream'i iptal et
           try {
@@ -1572,6 +1763,23 @@ export const useChatMessages = () => {
             }
           } catch (error) {
             console.error('❌ Stream iptal edilirken hata:', error);
+          }
+          
+          // Mesajı silmek yerine "Durduruldu" etiketi ekle (conversation değiştiğinde)
+          if (active.conversationId && active.streamingMessageId) {
+            const currentMessage = streamingMessageRef.current;
+            if (currentMessage && currentMessage.text) {
+              const currentText = currentMessage.text || '';
+              const updatedMessage: ChatMessage = {
+                ...currentMessage,
+                text: currentText + (currentText.trim() ? '\n\n' : '') + '[Durduruldu]',
+                isStreaming: false
+              };
+              updateMessage(active.conversationId, updatedMessage);
+            } else if (active.streamingMessageId) {
+              // Eğer mesaj içeriği yoksa, mesajı sil
+              removeMessage(active.conversationId, active.streamingMessageId);
+            }
           }
           
           // State'leri temizle

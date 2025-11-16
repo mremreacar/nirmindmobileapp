@@ -1,5 +1,5 @@
-import React, { useRef, useEffect, memo, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Animated, Dimensions, Platform, Easing, Image, ScrollView, Keyboard } from 'react-native';
+import React, { useRef, useEffect, memo, useState, useCallback, useMemo } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Animated, Dimensions, Platform, Easing, Image, ScrollView, Keyboard, PanResponder } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SvgXml } from 'react-native-svg';
 import { DictationButton } from '../../features/dictation';
@@ -70,6 +70,7 @@ interface InputComponentProps {
   isStreaming?: boolean;
   isInputFocused: boolean;
   setIsInputFocused: (focused: boolean) => void;
+  isKeyboardVisible?: boolean; // Klavye durumu (layout bug'ını önlemek için)
   
   // File handling
   hasSelectedFiles?: boolean;
@@ -126,6 +127,15 @@ interface InputComponentProps {
   
   // Wave animation for dictation (optional)
   waveAnimations?: Animated.Value[];
+  
+  // CRITICAL: Dictation state for enhanced UX
+  dictationState?: {
+    isStopping?: boolean;
+    hasError?: boolean;
+    errorMessage?: string;
+    audioLevel?: number;
+    duration?: number;
+  };
 }
 
 const InputComponent: React.FC<InputComponentProps> = ({
@@ -143,6 +153,7 @@ const InputComponent: React.FC<InputComponentProps> = ({
   isStreaming = false,
   isInputFocused,
   setIsInputFocused,
+  isKeyboardVisible = false, // Klavye durumu (default: false)
   
   // File handling
   hasSelectedFiles = false,
@@ -193,6 +204,9 @@ const InputComponent: React.FC<InputComponentProps> = ({
   
   // Wave animation
   waveAnimations,
+  
+  // CRITICAL: Dictation state
+  dictationState,
 }) => {
   const internalTextInputRef = useRef<TextInput | null>(null);
   const textInputRef = externalTextInputRef || internalTextInputRef;
@@ -218,11 +232,17 @@ const InputComponent: React.FC<InputComponentProps> = ({
   const [canScrollUp, setCanScrollUp] = useState(false);
   const [canScrollDown, setCanScrollDown] = useState(false);
   
+  // CRITICAL: İlk kullanım deneyimi için tooltip
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [buttonLayout, setButtonLayout] = useState<{ x: number; y: number; width: number; height: number } | undefined>();
+  const buttonRef = useRef<TouchableOpacity | null>(null);
+  
   // Constants for dynamic sizing - Daha iyi genişleme
   const MIN_INPUT_HEIGHT = getResponsiveInputMinHeight() + 10; // 10px daha yüksek (daha dengeli)
-  // 4 satır sonra scroll aktif olsun: 4 satır × 24px (lineHeight) + 16px (padding) = 112px
-  // Margin için +8px = 120px
-  const MAX_INPUT_HEIGHT = isTablet ? 140 : (isLargeScreen ? 130 : 120); // 4 satır sonra scroll için ayarlandı
+  // CRITICAL FIX: 3 satır sonra scroll aktif olsun - kullanıcı 3. satıra kadar görebilsin
+  // 3 satır × 24px (lineHeight) + 16px (padding) = 88px
+  // Margin için +8px = 96px, ama daha güvenli için 100px
+  const MAX_INPUT_HEIGHT = isTablet ? 110 : (isLargeScreen ? 105 : 100); // 3 satır sonra scroll için ayarlandı
   const SCROLL_THRESHOLD = MAX_INPUT_HEIGHT - 16;
 
   useEffect(() => {
@@ -294,12 +314,53 @@ const InputComponent: React.FC<InputComponentProps> = ({
 
   const handleKeyPress = (e: any) => {
     const key = e.nativeEvent.key;
+    const shiftKey = e.nativeEvent.shiftKey || false;
+    const metaKey = e.nativeEvent.metaKey || false; // Cmd (Mac) veya Windows key
+    const ctrlKey = e.nativeEvent.ctrlKey || false;
     
-    // Enter tuşu kontrolü - multiline aktifken
+    // Mobil için sadeleştirilmiş klavye özellikleri
     if (key === 'Enter') {
-      // Shift+Enter veya normal Enter: Her durumda yeni satır ekle (multiline aktif)
-      // Mesaj göndermek için gönder butonunu kullan
-      return; // Enter tuşu ile mesaj gönderme kaldırıldı - sadece gönder butonu ile gönder
+      // Shift+Enter: Yeni satır ekle (multiline aktifken) - Mobil ve Desktop'ta çalışır
+      if (shiftKey && multiline) {
+        // Yeni satır ekle - TextInput bunu otomatik yapar
+        return;
+      }
+      
+      // Desktop/Tablet: Cmd/Ctrl + Enter = Mesaj gönder (her durumda)
+      // Mobil: Fiziksel klavye yoksa bu çalışmaz
+      if ((metaKey || ctrlKey) && (Platform.OS === 'web' || Platform.OS === 'macos')) {
+        if (onSendMessage && inputText.trim()) {
+          handleSendPress();
+          return;
+        }
+      }
+      
+      // Normal Enter: Multiline aktifken yeni satır, değilse gönder
+      if (multiline) {
+        // Yeni satır ekle - TextInput bunu otomatik yapar
+        return;
+      } else {
+        // Multiline kapalıysa mesaj gönder (mobil için uygun)
+        if (onSendMessage && inputText.trim()) {
+          handleSendPress();
+          return;
+        }
+      }
+    }
+    
+    // Escape: Klavyeyi kapat (sadece fiziksel klavye varsa çalışır)
+    if (key === 'Escape') {
+      Keyboard.dismiss();
+      setIsInputFocused(false);
+      return;
+    }
+    
+    // Arrow keys: Mesaj geçmişinde gezinme (sadece fiziksel klavye varsa)
+    // Mobilde genelde ok tuşları yok, bu yüzden sadece callback'e gönder
+    if ((key === 'ArrowUp' || key === 'ArrowDown') && !shiftKey && !metaKey && !ctrlKey) {
+      // onKeyPress callback'i ile mesaj geçmişinde gezinme yapılacak (fiziksel klavye varsa)
+      onKeyPress?.(key);
+      return;
     }
     
     onKeyPress?.(key);
@@ -311,35 +372,61 @@ const InputComponent: React.FC<InputComponentProps> = ({
     // Bu fonksiyon multiline modda çağrılmamalı
   };
 
-  const handleSendPress = () => {
-    console.log('📤 [InputComponent] handleSendPress çağrıldı:', {
-      inputText: inputText.substring(0, 50),
-      inputTextLength: inputText.length,
-      hasSelectedFiles,
-      isLoading,
-      isStreaming
-    });
-    
+  const handleSendPress = useCallback(() => {
     // Loading guard - eğer mesaj işleniyorsa gönderme
     if (isLoading || isStreaming) {
-      console.log('⚠️ [InputComponent] Mesaj işleniyor, yeni mesaj gönderilemiyor:', {
-        isLoading,
-        isStreaming
-      });
       return;
     }
     
     // Çift gönderimi engelle - eğer input boşsa gönderme
     if (!inputText.trim() && !hasSelectedFiles) {
-      console.log('⚠️ [InputComponent] Input boş, mesaj gönderilemiyor');
       return;
     }
     
-    console.log('✅ [InputComponent] onSendMessage çağrılıyor');
-    // Input'u temizleme - ChatScreen'de yapılacak
-    // Send message - ChatScreen input'u temizleyecek
+    // Send message - input'u temizleyecek
     onSendMessage();
-  };
+  }, [inputText, hasSelectedFiles, isLoading, isStreaming, onSendMessage]);
+
+  // Durdurma butonu için optimize edilmiş handler
+  const handleCancelStreaming = useCallback(() => {
+    // Çift basmayı ve çakışmayı önle - debounce süresini azalt
+    const now = Date.now();
+    if (isActionInProgressRef.current || (now - lastActionTimeRef.current < 100)) {
+      return; // 100ms debounce (300ms'den 100ms'ye düşürüldü)
+    }
+    isActionInProgressRef.current = true;
+    lastActionTimeRef.current = now;
+    
+    // Hemen işlemi başlat
+    onCancelStreaming();
+    
+    // Flag'i daha hızlı reset et
+    setTimeout(() => {
+      isActionInProgressRef.current = false;
+    }, 100);
+  }, [onCancelStreaming]);
+
+  // Dikte butonu için optimize edilmiş handler
+  const handleDictatePress = useCallback(() => {
+    // Çift basmayı ve çakışmayı önle - debounce süresini azalt
+    const now = Date.now();
+    if (isActionInProgressRef.current || (now - lastActionTimeRef.current < 100)) {
+      return; // 100ms debounce (300ms'den 100ms'ye düşürüldü)
+    }
+    if (isStreaming) {
+      return; // Streaming aktifken dikte başlatma
+    }
+    isActionInProgressRef.current = true;
+    lastActionTimeRef.current = now;
+    
+    // Hemen işlemi başlat
+    onDictate();
+    
+    // Flag'i daha hızlı reset et
+    setTimeout(() => {
+      isActionInProgressRef.current = false;
+    }, 100);
+  }, [onDictate, isStreaming]);
 
   // Optimized text change handler - performans ve smooth yazma için
   const handleTextChange = useCallback((text: string) => {
@@ -374,6 +461,15 @@ const InputComponent: React.FC<InputComponentProps> = ({
   }, [onTextChange]);
 
   const handleContentSizeChange = (event: any) => {
+    // CRITICAL FIX: Klavye açıkken content size değişikliklerini ignore et
+    // Klavye açılınca TextInput'un layout'u değişiyor ve bu handler'ı tetikliyor
+    // Bu da input yüksekliğini değiştiriyor ve layout'u bozuyor
+    if (isKeyboardVisible) {
+      // Klavye açıkken sadece callback'i çağır, yükseklik güncellemesi yapma
+      onContentSizeChange?.(event);
+      return;
+    }
+    
     const { height } = event.nativeEvent.contentSize;
     const adjustedHeight = height + 22; // Alt satırın kesilmemesi için fazladan boşluk
     const boundedHeight = Math.max(MIN_INPUT_HEIGHT, Math.min(Math.ceil(adjustedHeight), MAX_INPUT_HEIGHT));
@@ -532,21 +628,24 @@ const InputComponent: React.FC<InputComponentProps> = ({
     }
   }, [inputText.length]);
 
-  // Auto scroll to bottom when typing - Her karakter yazıldığında son satıra scroll
+  // CRITICAL FIX: Auto scroll to bottom when typing - Her karakter yazıldığında son satıra scroll
+  // Input alanı scroll edilebilir olduğunda, kullanıcı yazdığı metni görebilsin
   useEffect(() => {
-    if (inputText.length > 0) {
-      // Her karakter yazıldığında son satıra scroll yap
-      // requestAnimationFrame ile smooth scroll
+    if (inputText.length > 0 && isScrollable && scrollViewRef.current) {
+      // Scroll aktif olduğunda her karakter yazıldığında son satıra scroll yap
+      // Bu sayede kullanıcı yazdığı metni görebilir (3. satırdan sonrasını görebilir)
       requestAnimationFrame(() => {
-        if (scrollViewRef.current) {
-          scrollViewRef.current.scrollTo({
-            y: Number.MAX_SAFE_INTEGER,
-            animated: false, // Anında scroll (yazma sırasında daha smooth)
-          });
-        }
+        requestAnimationFrame(() => {
+          if (scrollViewRef.current) {
+            scrollViewRef.current.scrollTo({
+              y: Number.MAX_SAFE_INTEGER,
+              animated: false, // Anında scroll (yazma sırasında daha smooth)
+            });
+          }
+        });
       });
     }
-  }, [inputText]);
+  }, [inputText, isScrollable]);
 
 
   const shouldShowSendButton = !isStreaming && (inputText.trim() || hasSelectedFiles);
@@ -557,14 +656,74 @@ const InputComponent: React.FC<InputComponentProps> = ({
     onOpenUploadModal();
   }, [onOpenUploadModal]);
 
+  // UX: Klavyeyi kapatma için smooth dismiss fonksiyonu
+  const dismissKeyboardSmoothly = useCallback(() => {
+    if (isKeyboardVisible || isInputFocused) {
+      Keyboard.dismiss();
+      setIsInputFocused(false);
+    }
+  }, [isKeyboardVisible, isInputFocused, setIsInputFocused]);
+
+  // UX: Swipe down gesture ile klavyeyi kapatma (WhatsApp, iMessage tarzı)
+  const swipeDownPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false, // Başlangıçta yakalama
+        onMoveShouldSetPanResponder: (_, gestureState) => {
+          // Sadece aşağı doğru kaydırma hareketlerini yakala
+          // Yeterince aşağı kaydırıldıysa ve dikey hareket yataydan fazlaysa
+          const isDownwardSwipe = gestureState.dy > 10; // 10px'den fazla aşağı
+          const isMostlyVertical = Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.5; // Dikey hareket yataydan 1.5x fazla
+          
+          return isDownwardSwipe && isMostlyVertical && (isKeyboardVisible || isInputFocused);
+        },
+        onPanResponderGrant: () => {
+          // Gesture başladı - hafif haptic feedback eklenebilir
+        },
+        onPanResponderMove: (_, gestureState) => {
+          // Hareket sırasında görsel feedback (opsiyonel - şimdilik sadece gesture takibi)
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          // Yeterince aşağı kaydırıldıysa klavyeyi kapat
+          const swipeThreshold = 30; // 30px aşağı kaydırma threshold'u
+          const velocityThreshold = 0.3; // Hızlı kaydırma için velocity threshold
+          
+          if (gestureState.dy > swipeThreshold || gestureState.vy > velocityThreshold) {
+            // Smooth dismiss
+            dismissKeyboardSmoothly();
+          }
+        },
+      }),
+    [isKeyboardVisible, isInputFocused, dismissKeyboardSmoothly]
+  );
+
+  // CRITICAL: Buton layout'unu ölç (tooltip için)
+  const handleButtonLayout = useCallback((event: any) => {
+    const { x, y, width, height } = event.nativeEvent.layout;
+    setButtonLayout({ x, y, width, height });
+  }, []);
+
   return (
-    <View style={[styles.inputSectionContainer, containerStyle]}>
+    <View 
+      style={[styles.inputSectionContainer, containerStyle]}
+      {...swipeDownPanResponder.panHandlers} // UX: Swipe down gesture desteği
+    >
+      {/* CRITICAL: İlk kullanım deneyimi - tooltip */}
+      {showTooltip && buttonLayout && (
+        <DictationTooltip
+          onDismiss={() => setShowTooltip(false)}
+          buttonPosition={buttonLayout}
+        />
+      )}
+      
       <Animated.View style={[
         styles.inputContainer,
         inputContainerStyle,
         {
-          height: inputHeight, // State kullan (native driver uyumluluğu için animasyon kaldırıldı)
-          maxHeight: MAX_INPUT_HEIGHT,
+          // CRITICAL FIX: Input alanının maksimum yüksekliği aşmamasını garanti et
+          // Kullanıcı 3. satıra kadar görebilsin, sonrası scroll ile görünsün
+          height: Math.min(inputHeight, MAX_INPUT_HEIGHT), // MAX_INPUT_HEIGHT'i aşmasın
+          maxHeight: MAX_INPUT_HEIGHT, // Maksimum yükseklik sınırı
         },
         // Attachment'lar seçildiğinde genişlik artır
         (selectedImages.length > 0 || selectedFiles.length > 0) && {
@@ -684,8 +843,10 @@ const InputComponent: React.FC<InputComponentProps> = ({
             style={[
               styles.messageSection,
               {
-                // Küçük ekranda ve boşken içeriği ortala
-                justifyContent: isSmallScreen && inputText.length === 0 && !isInputFocused ? 'center' : 'flex-start',
+                // CRITICAL: Dikte veya processing durumunda içeriği ortala
+                justifyContent: (isDictating || isProcessing) 
+                  ? 'center' 
+                  : (isSmallScreen && inputText.length === 0 && !isInputFocused ? 'center' : 'flex-start'),
               }
             ]}
             onLayout={(event) => {
@@ -695,35 +856,71 @@ const InputComponent: React.FC<InputComponentProps> = ({
             {/* Text Input, Processing, or Dictating */}
             {isProcessing ? (
               <Animated.View style={[styles.processingContainer, { transform: [{ scale: pulseAnim }] }]}>
-                <Text style={styles.processingText}>Deşifre ediliyor...</Text>
+                <Text style={styles.processingText}>
+                  {dictationState?.isStopping ? 'Durduruluyor...' : 'Deşifre ediliyor...'}
+                </Text>
               </Animated.View>
             ) : isDictating ? (
               <Animated.View style={[styles.dictatingContainer, { transform: [{ scale: pulseAnim }] }]}>
                 <View style={styles.waveContainer}>
                   {waveAnimations && waveAnimations.length > 0 ? (
                     <View style={styles.waveRow}>
-                      {waveAnimations.map((anim, index) => (
-                        <Animated.View
-                          key={index}
-                          style={[
-                            styles.inputWave,
-                            {
-                              transform: [{ scale: anim }],
-                              opacity: anim.interpolate({
-                                inputRange: [1, 2.2],
-                                outputRange: [0.2, 0.8],
-                              }),
-                              backgroundColor: anim.interpolate({
-                                inputRange: [1, 2.2],
-                                outputRange: ['rgba(126, 122, 233, 0.3)', 'rgba(126, 122, 233, 0.7)'],
-                              }),
-                            },
-                          ]}
-                        />
-                      ))}
+                      {waveAnimations.map((anim, index) => {
+                        // CRITICAL: Gerçek zamanlı ses seviyesine göre animasyon yoğunluğu
+                        const audioLevel = dictationState?.audioLevel || 0;
+                        const baseOpacity = 0.2 + (audioLevel * 0.6); // 0.2 - 0.8 arası
+                        const baseScale = 1 + (audioLevel * 0.3); // 1.0 - 1.3 arası
+                        
+                        return (
+                          <Animated.View
+                            key={index}
+                            style={[
+                              styles.inputWave,
+                              {
+                                transform: [{ scale: Animated.multiply(anim, baseScale) }],
+                                opacity: anim.interpolate({
+                                  inputRange: [1, 2.2],
+                                  outputRange: [baseOpacity * 0.5, baseOpacity],
+                                }),
+                                backgroundColor: anim.interpolate({
+                                  inputRange: [1, 2.2],
+                                  outputRange: [
+                                    `rgba(126, 122, 233, ${0.3 + audioLevel * 0.2})`,
+                                    `rgba(126, 122, 233, ${0.7 + audioLevel * 0.2})`,
+                                  ],
+                                }),
+                              },
+                            ]}
+                          />
+                        );
+                      })}
                     </View>
                   ) : null}
                 </View>
+                
+                {/* CRITICAL: Gerçek zamanlı feedback - süre ve ses seviyesi göstergesi */}
+                {(dictationState?.duration !== undefined || dictationState?.audioLevel !== undefined) && (
+                  <View style={styles.realtimeFeedbackContainer}>
+                    {dictationState.duration !== undefined && dictationState.duration > 0 && (
+                      <Text style={styles.realtimeFeedbackText}>
+                        {Math.floor(dictationState.duration / 60)}:{(dictationState.duration % 60).toString().padStart(2, '0')}
+                      </Text>
+                    )}
+                    {dictationState.audioLevel !== undefined && dictationState.audioLevel > 0 && (
+                      <View style={styles.audioLevelIndicator}>
+                        <View 
+                          style={[
+                            styles.audioLevelBar,
+                            { 
+                              width: `${dictationState.audioLevel * 100}%`,
+                              opacity: 0.6 + (dictationState.audioLevel * 0.4),
+                            }
+                          ]} 
+                        />
+                      </View>
+                    )}
+                  </View>
+                )}
               </Animated.View>
             ) : (
               <>
@@ -768,7 +965,7 @@ const InputComponent: React.FC<InputComponentProps> = ({
                         {
                               // height kaldırıldı - multiline TextInput kendi yüksekliğini ayarlasın
                               minHeight: MIN_INPUT_HEIGHT, // Minimum yükseklik
-                              paddingRight: isScrollable ? 12 : 8,
+                              paddingRight: isScrollable ? 8 : 4, // CRITICAL: Scroll indicator için yeterli boşluk: 12/8 -> 8/4
                               // paddingTop ve paddingBottom stil dosyasında ayarlanıyor
                               opacity: isProcessing ? 0.6 : 1,
                               width: '100%',
@@ -776,7 +973,7 @@ const InputComponent: React.FC<InputComponentProps> = ({
                               fontSize: 17, // Daha büyük font - daha iyi okunabilirlik
                               lineHeight: 24, // Daha büyük line height - daha iyi okunabilirlik
                               textAlign: 'left', // Her zaman sol hizalı
-                              paddingTop: 8,
+                              paddingTop: 24, // CRITICAL: Text alanı ikinci satırda başlamalı - ilk satır boş kalsın (12 -> 24, lineHeight kadar)
                               paddingBottom: 8,
                         },
                         isDictating && {
@@ -845,56 +1042,33 @@ const InputComponent: React.FC<InputComponentProps> = ({
       {/* Öncelik sırası: 1. Dikte aktifse dikte butonu, 2. AI cevap yazıyorsa AI durdurma butonu, 3. Mesaj gönderilebilir durumda gönder butonu, 4. Değilse dikte başlatma butonu */}
       {isDictating || isProcessing ? (
         // Dikte aktifse veya işleniyorsa → Dikte butonu (durdurma/başlatma)
-        <DictationButton
-          isDictating={isDictating}
-          isProcessing={isProcessing}
-          onPress={() => {
-            // Çift basmayı ve çakışmayı önle
-            const now = Date.now();
-            if (isActionInProgressRef.current || (now - lastActionTimeRef.current < 300)) {
-              return; // 300ms debounce
-            }
-            if (isStreaming) {
-              return; // Streaming aktifken dikte başlatma
-            }
-            isActionInProgressRef.current = true;
-            lastActionTimeRef.current = now;
-            
-            try {
-              onDictate();
-            } finally {
-              // 300ms sonra flag'i reset et
-              setTimeout(() => {
-                isActionInProgressRef.current = false;
-              }, 300);
-            }
-          }}
-          waveAnimations={waveAnimations || []}
-          style={[styles.micButton, buttonStyle]}
-        />
+        <View
+          ref={buttonRef}
+          onLayout={handleButtonLayout}
+          collapsable={false}
+        >
+          <DictationButton
+            isDictating={isDictating}
+            isProcessing={isProcessing}
+            isStopping={dictationState?.isStopping}
+            hasError={dictationState?.hasError}
+            errorMessage={dictationState?.errorMessage}
+            audioLevel={dictationState?.audioLevel}
+            duration={dictationState?.duration}
+            onPress={handleDictatePress}
+            onRetry={handleDictatePress} // CRITICAL: Hata durumunda retry
+            waveAnimations={waveAnimations || []}
+            style={[styles.micButton, buttonStyle]}
+          />
+        </View>
       ) : isStreaming ? (
         // AI cevap yazıyorsa → AI cevabını durdurma butonu
         <TouchableOpacity
           style={[styles.cancelButton, buttonStyle]}
-          onPress={() => {
-            // Çift basmayı ve çakışmayı önle
-            const now = Date.now();
-            if (isActionInProgressRef.current || (now - lastActionTimeRef.current < 300)) {
-              return; // 300ms debounce
-            }
-            isActionInProgressRef.current = true;
-            lastActionTimeRef.current = now;
-            
-            try {
-              onCancelStreaming();
-            } finally {
-              // 300ms sonra flag'i reset et
-              setTimeout(() => {
-                isActionInProgressRef.current = false;
-              }, 300);
-            }
-          }}
+          onPress={handleCancelStreaming}
           disabled={isActionInProgressRef.current || isDictating || isProcessing}
+          activeOpacity={0.6}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           accessible={true}
           accessibilityLabel="Yanıtı durdur"
           accessibilityHint="Devam eden AI yanıtını durdurmak için dokunun"
@@ -909,8 +1083,8 @@ const InputComponent: React.FC<InputComponentProps> = ({
           >
             <SvgXml 
               xml={SVG_ICONS.stop}
-              width="22"
-              height="22"
+              width="26"
+              height="26"
             />
           </LinearGradient>
         </TouchableOpacity>
@@ -919,6 +1093,8 @@ const InputComponent: React.FC<InputComponentProps> = ({
         <TouchableOpacity
           style={[styles.micButton, buttonStyle]}
           onPress={handleSendPress}
+          activeOpacity={0.6}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           accessible={true}
           accessibilityLabel="Mesaj gönder"
           accessibilityHint="Mesajı göndermek için dokunun"
@@ -940,33 +1116,25 @@ const InputComponent: React.FC<InputComponentProps> = ({
         </TouchableOpacity>
       ) : (
         // Mesaj gönderilemez durumda → Dikte başlatma butonu
-        <DictationButton
-          isDictating={isDictating}
-          isProcessing={isProcessing}
-          onPress={() => {
-            // Çift basmayı ve çakışmayı önle
-            const now = Date.now();
-            if (isActionInProgressRef.current || (now - lastActionTimeRef.current < 300)) {
-              return; // 300ms debounce
-            }
-            if (isStreaming) {
-              return; // Streaming aktifken dikte başlatma
-            }
-            isActionInProgressRef.current = true;
-            lastActionTimeRef.current = now;
-            
-            try {
-              onDictate();
-            } finally {
-              // 300ms sonra flag'i reset et
-              setTimeout(() => {
-                isActionInProgressRef.current = false;
-              }, 300);
-            }
-          }}
-          waveAnimations={waveAnimations || []}
-          style={[styles.micButton, buttonStyle]}
-        />
+        <View
+          ref={buttonRef}
+          onLayout={handleButtonLayout}
+          collapsable={false}
+        >
+          <DictationButton
+            isDictating={isDictating}
+            isProcessing={isProcessing}
+            isStopping={dictationState?.isStopping}
+            hasError={dictationState?.hasError}
+            errorMessage={dictationState?.errorMessage}
+            audioLevel={dictationState?.audioLevel}
+            duration={dictationState?.duration}
+            onPress={handleDictatePress}
+            onRetry={handleDictatePress} // CRITICAL: Hata durumunda retry
+            waveAnimations={waveAnimations || []}
+            style={[styles.micButton, buttonStyle]}
+          />
+        </View>
       )}
     </View>
   );
@@ -985,8 +1153,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#FFFFFF0D',
     borderRadius: getResponsiveInputBorderRadius(),
-    paddingLeft: 12, // Kenarlara göre optimize edildi: 10 -> 12 (daha dengeli)
-    paddingRight: 12, // Kenarlara göre optimize edildi: 16 -> 12 (simetrik)
+    paddingLeft: 16, // CRITICAL: Text alanı sınırına çok yakın olmaması için artırıldı: 12 -> 16
+    paddingRight: 16, // CRITICAL: Text alanı sınırına çok yakın olmaması için artırıldı: 12 -> 16
     paddingVertical: getResponsiveInputPaddingVertical(),
     gap: 8, // Kenarlara göre optimize edildi: 10 -> 8
     flex: 1,
@@ -1026,9 +1194,9 @@ const styles = StyleSheet.create({
     // height kaldırıldı - multiline TextInput kendi yüksekliğini ayarlasın
     minHeight: 50, // Minimum yükseklik
     paddingBottom: 8, // Alt padding eklendi - daha iyi görünürlük
-    paddingLeft: 4, // Sol padding eklendi
-    paddingRight: 0, // Sağ padding kaldırıldı (scroll indicator için)
-    paddingTop: 8, // Üst padding eklendi - daha iyi görünürlük
+    paddingLeft: 8, // CRITICAL: Text alanı sınırına çok yakın olmaması için artırıldı: 4 -> 8
+    paddingRight: 4, // CRITICAL: Scroll indicator için minimal padding: 0 -> 4
+    paddingTop: 24, // CRITICAL: Text alanı ikinci satırda başlamalı - ilk satır boş kalsın (12 -> 24, lineHeight kadar)
     lineHeight: 24, // Artırıldı: 20 -> 24 (daha iyi okunabilirlik) - satırlar arası boşluk
     // marginTop kaldırıldı - attachment'lardan bağımsız
     // Uzun mesajlarda daha iyi okunabilirlik için
@@ -1069,7 +1237,7 @@ const styles = StyleSheet.create({
   cancelButton: {
     width: isSmallScreen ? 52 : 58,
     height: isSmallScreen ? 52 : 58,
-    borderRadius: 16,
+    borderRadius: isSmallScreen ? 26 : 29, // CRITICAL: Tam yuvarlak - width/height'in yarısı (diğer butonlarla uyumlu)
     borderWidth: 1.6,
     borderColor: 'rgba(126, 122, 233, 0.6)',
     overflow: 'hidden',
@@ -1079,7 +1247,7 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 16,
+    borderRadius: isSmallScreen ? 26 : 29, // CRITICAL: Tam yuvarlak - width/height'in yarısı
   },
   // Attachment Preview Styles
   attachmentPreview: {
@@ -1168,6 +1336,39 @@ const styles = StyleSheet.create({
     paddingHorizontal: isTablet ? 24 : isLargeScreen ? 20 : 16, // Responsive padding - büyük ekranlarda daha fazla
     width: '100%', // Tam genişlik kullan
     maxWidth: '100%', // Maksimum genişlik sınırı yok
+    position: 'relative',
+  },
+  realtimeFeedbackContainer: {
+    position: 'absolute',
+    bottom: -30,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+  },
+  realtimeFeedbackText: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 12,
+    color: '#7E7AE9',
+    fontWeight: '600',
+    backgroundColor: 'rgba(126, 122, 233, 0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  audioLevelIndicator: {
+    width: 60,
+    height: 4,
+    backgroundColor: 'rgba(126, 122, 233, 0.2)',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  audioLevelBar: {
+    height: '100%',
+    backgroundColor: '#7E7AE9',
+    borderRadius: 2,
   },
   waveContainer: {
     position: 'relative',
@@ -1593,11 +1794,11 @@ const styles = StyleSheet.create({
   },
   placeholderContainer: {
     position: 'absolute',
-    top: 0,
+    top: 24, // CRITICAL: Placeholder da ikinci satırda başlamalı - textInput ile aynı hizada (0 -> 24)
     left: 0,
     right: 0,
     bottom: 0,
-    justifyContent: 'center',
+    justifyContent: 'flex-start', // CRITICAL: Üstten hizala - ikinci satırda başlasın (center -> flex-start)
     alignItems: 'center',
     zIndex: 1,
     pointerEvents: 'none', // Tıklamaları TextInput'a geçir
@@ -1606,8 +1807,9 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins-Regular',
     fontSize: 17,
     color: '#9CA3AF',
-    textAlign: 'center',
+    textAlign: 'left', // CRITICAL: TextInput ile aynı hizada olması için left (center -> left)
     width: '100%',
+    paddingLeft: 8, // CRITICAL: TextInput'un paddingLeft'i ile aynı (8px)
   },
   textScrollView: {
     width: '100%',
@@ -1615,9 +1817,10 @@ const styles = StyleSheet.create({
     // maxHeight kaldırıldı - inline style'da ayarlanıyor
   },
   textScrollViewContent: {
-    paddingRight: 6,
-    paddingTop: 0, // Padding kaldırıldı - TextInput textAlignVertical ile hizalanacak
+    paddingRight: 8, // CRITICAL: Text alanı sınırına çok yakın olmaması için artırıldı: 6 -> 8
+    paddingTop: 0, // CRITICAL: TextInput'un kendi paddingTop'u var (24px), burada padding gerekmez
     paddingBottom: 8,
+    paddingLeft: 0, // TextInput'un kendi paddingLeft'i var
     // flexGrow: 1 kaldırıldı - minHeight dinamik olarak ayarlanacak
   },
   scrollFade: {

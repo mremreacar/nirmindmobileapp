@@ -68,7 +68,7 @@ export const useChatMessaging = ({
 
     const targetConversationId = resolveConversationId();
     if (!targetConversationId) {
-      console.error('❌ ChatScreen: conversationId eksik, mesaj gönderilemedi', {
+      console.error('❌ conversationId eksik, mesaj gönderilemedi', {
         hasPropConversationId: !!conversationId,
         hasCurrentConversation: !!currentConversation,
         hasCurrentConversationId: !!currentConversation?.id,
@@ -139,7 +139,7 @@ export const useChatMessaging = ({
 
     const targetConversationId = resolveConversationId();
     if (!targetConversationId) {
-      console.error('❌ ChatScreen: conversationId eksik, dosyalar gönderilemedi', {
+      console.error('❌ conversationId eksik, dosyalar gönderilemedi', {
         hasPropConversationId: !!conversationId,
         hasCurrentConversation: !!currentConversation,
         hasCurrentConversationId: !!currentConversation?.id,

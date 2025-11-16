@@ -25,6 +25,13 @@ interface ChatInputSectionProps {
   // Dictation state
   isDictating: boolean;
   isProcessing?: boolean;
+  dictationState?: {
+    isStopping?: boolean;
+    hasError?: boolean;
+    errorMessage?: string;
+    audioLevel?: number;
+    duration?: number;
+  };
   
   // Streaming state
   isStreaming?: boolean;
@@ -41,6 +48,7 @@ interface ChatInputSectionProps {
   
   // Keyboard handling
   getKeyboardAwarePaddingBottom?: () => number;
+  isKeyboardVisible?: boolean; // Klavye durumu (InputComponent için)
   
   // Additional InputComponent props
   onKeyPress?: (key: string) => void;
@@ -71,7 +79,7 @@ interface ChatInputSectionProps {
   animatedPaddingBottom?: Animated.Value | number;
   animatedBottom?: Animated.Value | number;
   
-  // Input cleared ref (for ChatScreen specific behavior)
+  // Input cleared ref (for input clearing behavior)
   inputClearedRef?: React.MutableRefObject<boolean>;
 }
 
@@ -90,6 +98,7 @@ const ChatInputSection: React.FC<ChatInputSectionProps> = ({
   isResearchMode,
   isDictating,
   isProcessing,
+  dictationState,
   isStreaming,
   onCancelStreaming,
   selectedImages,
@@ -98,6 +107,7 @@ const ChatInputSection: React.FC<ChatInputSectionProps> = ({
   onRemoveFile,
   textInputRef,
   getKeyboardAwarePaddingBottom,
+  isKeyboardVisible,
   onKeyPress,
   onFocus,
   onBlur,
@@ -192,11 +202,13 @@ const ChatInputSection: React.FC<ChatInputSectionProps> = ({
           onOpenUploadModal={onOpenUploadModal}
           isDictating={isDictating}
           isProcessing={isProcessing}
+          dictationState={dictationState} // CRITICAL: Dictation state'i geç
           isLoading={isLoading}
           isStreaming={isStreaming}
           onCancelStreaming={onCancelStreaming}
           isInputFocused={isInputFocused}
           setIsInputFocused={setIsInputFocused}
+          isKeyboardVisible={isKeyboardVisible}
           textInputRef={textInputRef}
           hasSelectedFiles={selectedImages.length > 0 || selectedFiles.length > 0}
           selectedFilesCount={selectedFiles.length}

@@ -171,7 +171,7 @@ export const validateFile = async (
   }
 
   // Dosya türü kontrolü
-  const typeValidation = validateFileType(file.mimeType, file.name, config);
+  const typeValidation = validateFileType(file.mimeType || null, file.name, config);
   if (!typeValidation.isValid) {
     return typeValidation;
   }

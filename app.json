@@ -42,6 +42,16 @@
           "nirmind",
           "nirpax",
           "nirpay"
+        ],
+        "UTImportedTypeDeclarations": [
+          {
+            "UTTypeIdentifier": "public.avif",
+            "UTTypeDescription": "AVIF Image",
+            "UTTypeTagSpecification": {
+              "public.filename-extension": ["avif"],
+              "public.mime-type": ["image/avif"]
+            }
+          }
         ]
       },
       "appleTeamId": "5B43Y4572U"

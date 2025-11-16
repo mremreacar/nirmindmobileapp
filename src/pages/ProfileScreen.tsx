@@ -463,7 +463,7 @@ const styles = StyleSheet.create({
   },
   profileContent: {
     flex: 1,
-    paddingHorizontal: 20,
+    paddingHorizontal: 32,
   },
   profileInfoSection: {
     alignItems: 'center',
@@ -569,7 +569,7 @@ const styles = StyleSheet.create({
   },
   footerText: {
     fontFamily: 'Poppins-Regular',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '400',
     color: '#9CA3AF',
     textAlign: 'center',

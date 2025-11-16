@@ -299,7 +299,7 @@ const UploadModal: React.FC<UploadModalProps> = ({
     }
 
     try {
-      console.log('🔄 Son fotoğraflar yükleniyor...');
+      // Son fotoğraflar yükleniyor
       setIsLoadingPhotos(true);
       
       // İzin kontrolü ve isteme
@@ -493,7 +493,7 @@ const UploadModal: React.FC<UploadModalProps> = ({
                             
                             // HEIC formatı ise JPEG'e dönüştür
                             if (isHEIC) {
-                              console.log('🔄 HEIC dönüştürülüyor...');
+                              // HEIC dönüştürülüyor
                               try {
                                 const convertedUri = await convertHEICToJPEG(photo.uri);
                                 console.log('✅ HEIC JPEG\'e dönüştürüldü:', convertedUri);

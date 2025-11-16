@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 
@@ -25,6 +25,14 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
   isLoading,
   isResearchMode
 }) => {
+  const handleResearchPress = useCallback(() => {
+    // Gerçek işlemi hemen başlat (renk değişimi için)
+    onResearch();
+  }, [onResearch]);
+
+  const handleSuggestionsPress = useCallback(() => {
+    onSuggestions();
+  }, [onSuggestions]);
   const onerilerIcon = `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
 <path d="M15.7067 2.29326C17.5587 4.14526 16.0574 8.64929 12.3534 12.3533C8.64942 16.0573 4.1454 17.5586 2.29341 15.7066C0.44141 13.8546 1.94275 9.35061 5.64674 5.6466C9.35073 1.9426 13.8547 0.441259 15.7067 2.29326ZM2.29326 2.29336C0.441262 4.14537 1.9426 8.64939 5.64659 12.3534C9.35058 16.0574 13.8546 17.5587 15.7066 15.7067C17.5586 13.8547 16.0573 9.35071 12.3533 5.64671C8.64927 1.94271 4.14525 0.441364 2.29326 2.29336Z" stroke="white" stroke-opacity="0.7"/>
 <path d="M10.875 9C10.875 10.0355 10.0355 10.875 9 10.875C7.96447 10.875 7.125 10.0355 7.125 9C7.125 7.96447 7.96447 7.125 9 7.125C10.0355 7.125 10.875 7.96447 10.875 9Z" stroke="white" stroke-opacity="0.7"/>
@@ -40,8 +48,10 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
     <View style={styles.actionButtonsContainer}>
       <TouchableOpacity 
         style={[styles.actionButton, styles.onerilerButton]}
-        onPress={onSuggestions}
+        onPress={handleSuggestionsPress}
         disabled={isLoading}
+        activeOpacity={0.7}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       >
         <SvgXml 
           xml={onerilerIcon}
@@ -53,12 +63,14 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
       
       <TouchableOpacity 
         style={[
-          styles.actionButton, 
+          styles.actionButton,
           styles.arastirmaButton,
           isResearchMode && styles.arastirmaButtonActive
         ]}
-        onPress={onResearch}
+        onPress={handleResearchPress}
         disabled={isLoading}
+        activeOpacity={0.7}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       >
         <SvgXml 
           xml={arastirmaIcon}

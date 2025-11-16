@@ -92,11 +92,18 @@ const useFileUpload = (options: FileUploadOptions = {}) => {
       Alert.alert(
         'Uyarılar',
         warningMessages,
-        [{ text: 'Devam Et', style: 'default' }, { text: 'İptal', style: 'cancel' }],
-        (buttonIndex) => {
-          if (buttonIndex === 1) return; // İptal edildi
-          processValidFiles(validation.validFiles);
-        }
+        [
+          { 
+            text: 'İptal', 
+            style: 'cancel',
+            onPress: () => {} // İptal edildi
+          },
+          { 
+            text: 'Devam Et', 
+            style: 'default',
+            onPress: () => processValidFiles(validation.validFiles)
+          }
+        ]
       );
     } else {
       processValidFiles(validation.validFiles);

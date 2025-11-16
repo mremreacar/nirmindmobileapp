@@ -15,6 +15,8 @@ export const useWaveAnimation = (isActive: boolean): WaveAnimation => {
     new Animated.Value(1),
   ]).current;
 
+  const activeAnimationsRef = useRef<Animated.CompositeAnimation[]>([]);
+
   const startAnimations = () => {
     const createWaveAnimation = (index: number) => {
       // Gerçekçi ses dalgaları için farklı frekanslar
@@ -47,12 +49,14 @@ export const useWaveAnimation = (isActive: boolean): WaveAnimation => {
 
     const animations = waveAnimations.map((_, index) => createWaveAnimation(index));
     animations.forEach(animation => animation.start());
+    activeAnimationsRef.current = animations;
     
     return animations;
   };
 
   const stopAnimations = () => {
-    waveAnimations.forEach(anim => anim.stop());
+    activeAnimationsRef.current.forEach(animation => animation.stop());
+    activeAnimationsRef.current = [];
   };
 
   const resetAnimations = () => {

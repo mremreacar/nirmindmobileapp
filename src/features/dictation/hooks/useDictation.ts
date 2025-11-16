@@ -15,10 +15,19 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
   const [isListening, setIsListening] = useState(false);
   const [isDictating, setIsDictating] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false); // Yeni state: deşifre durumu
+  const [isStopping, setIsStopping] = useState(false); // CRITICAL: Durdurma animasyonu için
+  const [hasError, setHasError] = useState(false); // CRITICAL: Hata durumu
+  const [errorMessage, setErrorMessage] = useState<string | undefined>(); // CRITICAL: Hata mesajı
+  const [audioLevel, setAudioLevel] = useState(0); // CRITICAL: Gerçek zamanlı ses seviyesi (0-1)
+  const [duration, setDuration] = useState(0); // CRITICAL: Konuşma süresi (saniye)
+  
   const isProcessingRef = useRef(false);
   // Dikte durumunu ref ile takip et (state güncellemesi beklemeden kontrol için)
   const isDictatingRef = useRef(false);
   const isStoppingRef = useRef(false); // Durdurma işlemi devam ediyor mu?
+  const durationIntervalRef = useRef<NodeJS.Timeout | null>(null); // CRITICAL: Süre takibi için
+  const audioLevelIntervalRef = useRef<NodeJS.Timeout | null>(null); // CRITICAL: Ses seviyesi simülasyonu için
+  const startTimeRef = useRef<number | null>(null); // CRITICAL: Başlangıç zamanı
   
   // Son alınan text'i takip et (React Native Voice her seferinde tam metni döndürür)
   const lastReceivedTextRef = useRef('');
@@ -44,7 +53,9 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
     }
 
     try {
-      // Haptic feedback kaldırıldı - kullanıcı titreşim istemiyor
+      // CRITICAL: Hata durumunu temizle
+      setHasError(false);
+      setErrorMessage(undefined);
       
       // Yeni dikte başladığında önceki state'leri temizle
       lastReceivedTextRef.current = ''; // Son alınan text'i reset et
@@ -53,6 +64,33 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
       isDictatingRef.current = true; // Ref'i güncelle
       isStoppingRef.current = false; // Durdurma işlemi yok
       setIsDictating(true);
+      setIsStopping(false);
+      setDuration(0);
+      setAudioLevel(0);
+      
+      // CRITICAL: Süre takibini başlat
+      startTimeRef.current = Date.now();
+      if (durationIntervalRef.current) {
+        clearInterval(durationIntervalRef.current);
+      }
+      durationIntervalRef.current = setInterval(() => {
+        if (startTimeRef.current) {
+          const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
+          setDuration(elapsed);
+        }
+      }, 1000);
+      
+      // CRITICAL: Ses seviyesi simülasyonu (wave animasyonlarına göre)
+      // Gerçek implementasyon için speechService'den alınmalı
+      if (audioLevelIntervalRef.current) {
+        clearInterval(audioLevelIntervalRef.current);
+      }
+      audioLevelIntervalRef.current = setInterval(() => {
+        // Simüle edilmiş ses seviyesi (0.3 - 0.9 arası rastgele)
+        const simulatedLevel = 0.3 + Math.random() * 0.6;
+        setAudioLevel(simulatedLevel);
+        callbacks.onAudioLevelUpdate?.(simulatedLevel);
+      }, 100); // 100ms'de bir güncelle
       
       callbacks.onStart?.();
 
@@ -101,7 +139,7 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
               // Önceki metni input'tan çıkar ve yeni metni ekle
               // replacePrevious=true ile önceki metni çıkar, sonra yeni metni ekle
               textToAdd = currentText;
-              console.log('🔄 Önceki metin çıkarılacak:', lastText, 'yeni metin eklenecek:', currentText);
+              // Önceki metin çıkarılacak
             } else {
               // Aynı metin tekrar geldi, ekleme
               console.log('⚠️ Aynı final result tekrar geldi, atlanıyor');
@@ -120,7 +158,7 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
               console.log('✍️  DİKTE İLE EKLENEN METİN:', textToAdd);
               console.log('📊 Toplam Metin:', currentText);
               if (isTextChanged) {
-                console.log('🔄 Metin değişti - önceki metin çıkarılacak:', lastText);
+                // Metin değişti - önceki metin çıkarılacak
               }
               console.log('───────────────────────────────────────────────────────');
               
@@ -138,11 +176,28 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
         },
         (error: string) => {
           console.error('Dikte hatası:', error);
-          // Hata durumunda titreşim yapma - kullanıcı Alert ile bilgilendirilecek
+          // CRITICAL: Hata durumunu set et
+          setHasError(true);
+          setErrorMessage(error);
           callbacks.onError(error);
           setIsDictating(false);
           setIsListening(false);
           isProcessingRef.current = false;
+          
+          // CRITICAL: Süre takibini durdur
+          if (durationIntervalRef.current) {
+            clearInterval(durationIntervalRef.current);
+            durationIntervalRef.current = null;
+          }
+          // CRITICAL: Ses seviyesi simülasyonunu durdur
+          if (audioLevelIntervalRef.current) {
+            clearInterval(audioLevelIntervalRef.current);
+            audioLevelIntervalRef.current = null;
+          }
+          startTimeRef.current = null;
+          setDuration(0);
+          setAudioLevel(0);
+          
           callbacks.onStop?.();
         },
         {
@@ -157,20 +212,47 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
         console.log('Dikte başarıyla başlatıldı');
       } else {
         console.log('Dikte başlatılamadı');
+        // CRITICAL: Hata durumunu set et
+        setHasError(true);
+        setErrorMessage('Dikte başlatılamadı. Lütfen tekrar deneyin.');
         isDictatingRef.current = false;
         isStoppingRef.current = false;
         setIsDictating(false);
         isProcessingRef.current = false;
+        
+        // CRITICAL: Süre takibini durdur
+        if (durationIntervalRef.current) {
+          clearInterval(durationIntervalRef.current);
+          durationIntervalRef.current = null;
+        }
+        startTimeRef.current = null;
+        setDuration(0);
+        setAudioLevel(0);
+        
+        callbacks.onError('Dikte başlatılamadı');
         callbacks.onStop?.();
       }
     } catch (error) {
       console.error('Dikte başlatma hatası:', error);
+      // CRITICAL: Hata durumunu set et
+      setHasError(true);
+      setErrorMessage('Dikte başlatılamadı. Lütfen tekrar deneyin.');
       isDictatingRef.current = false;
       isStoppingRef.current = false;
       callbacks.onError('Dikte başlatılamadı');
       setIsDictating(false);
       setIsListening(false);
       isProcessingRef.current = false;
+      
+      // CRITICAL: Süre takibini durdur
+      if (durationIntervalRef.current) {
+        clearInterval(durationIntervalRef.current);
+        durationIntervalRef.current = null;
+      }
+      startTimeRef.current = null;
+      setDuration(0);
+      setAudioLevel(0);
+      
       callbacks.onStop?.();
     }
   }, [callbacks]);
@@ -216,11 +298,22 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
         isDictatingRef: isDictatingRef.current
       });
       
+      // CRITICAL: Durdurma animasyonu için state set et
+      setIsStopping(true);
+      
       // Önce state'leri kapat (hemen görünür olsun)
       setIsDictating(false);
       setIsListening(false);
       setIsProcessing(true); // Deşifre durumunu göster
       isProcessingRef.current = false;
+      
+      // CRITICAL: Süre takibini durdur
+      if (durationIntervalRef.current) {
+        clearInterval(durationIntervalRef.current);
+        durationIntervalRef.current = null;
+      }
+      startTimeRef.current = null;
+      setAudioLevel(0);
       
       // Sonra speech service'i durdur (hata olsa bile devam et)
       console.log('🛑 Speech service durduruluyor...');
@@ -237,6 +330,11 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
       
       // lastReceivedTextRef'i reset et (bir sonraki dikte için)
       lastReceivedTextRef.current = '';
+      
+      // CRITICAL: Durdurma animasyonu için kısa gecikme
+      setTimeout(() => {
+        setIsStopping(false);
+      }, 300); // 300ms durdurma animasyonu
       
       // Kısa bir gecikme sonra processing'i kapat (deşifre tamamlandı)
       setTimeout(() => {
@@ -256,22 +354,25 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
       setIsDictating(false);
       setIsListening(false);
       setIsProcessing(false);
+      setIsStopping(false);
       isProcessingRef.current = false;
       lastReceivedTextRef.current = '';
+      
+      // CRITICAL: Süre takibini durdur
+      if (durationIntervalRef.current) {
+        clearInterval(durationIntervalRef.current);
+        durationIntervalRef.current = null;
+      }
+      startTimeRef.current = null;
+      setDuration(0);
+      setAudioLevel(0);
+      
       callbacks.onStop?.();
     }
   }, [callbacks, isDictating, isListening]);
 
   const toggleDictation = useCallback(async () => {
-    console.log('🔄 [useDictation] toggleDictation çağrıldı', {
-      isDictating,
-      isDictatingRef: isDictatingRef.current,
-      isListening,
-      isProcessing: isProcessingRef.current,
-      isStoppingRef: isStoppingRef.current,
-      action: (isDictatingRef.current || isStoppingRef.current || isDictating || isListening) ? 'DURDUR' : 'BAŞLAT',
-      timestamp: new Date().toISOString()
-    });
+    // toggleDictation çağrıldı
 
     // Ref'e ve state'e göre kontrol et (state güncellemesi beklemeden)
     // Eğer dikte aktifse veya durduruluyorsa, durdur
@@ -289,14 +390,39 @@ export const useDictation = (callbacks: DictationCallbacks, config?: DictationCo
     isStoppingRef.current = false;
     setIsDictating(false);
     setIsListening(false);
+    setIsProcessing(false);
+    setIsStopping(false);
+    setHasError(false);
+    setErrorMessage(undefined);
     isProcessingRef.current = false;
     lastReceivedTextRef.current = ''; // Reset last received text
+    
+    // CRITICAL: Süre takibini durdur
+    if (durationIntervalRef.current) {
+      clearInterval(durationIntervalRef.current);
+      durationIntervalRef.current = null;
+    }
+    startTimeRef.current = null;
+    setDuration(0);
+    setAudioLevel(0);
   }, []);
+
+  // CRITICAL: Ses seviyesi güncellemesi (simüle edilmiş - gerçek implementasyon için speechService'den alınmalı)
+  // Bu örnekte wave animasyonlarına göre ses seviyesi simüle ediliyor
+  const updateAudioLevel = useCallback((level: number) => {
+    setAudioLevel(Math.max(0, Math.min(1, level))); // 0-1 arası sınırla
+    callbacks.onAudioLevelUpdate?.(level);
+  }, [callbacks]);
 
   const dictationState: DictationState = {
     isListening,
     isDictating,
-    isProcessing, // Yeni state'i ekle
+    isProcessing,
+    isStopping, // CRITICAL: Durdurma animasyonu için
+    hasError, // CRITICAL: Hata durumu
+    errorMessage, // CRITICAL: Hata mesajı
+    audioLevel, // CRITICAL: Gerçek zamanlı ses seviyesi
+    duration, // CRITICAL: Konuşma süresi
     currentMessage: '', // Artık kullanılmıyor, boş string döndür (interface uyumluluğu için)
   };
 
