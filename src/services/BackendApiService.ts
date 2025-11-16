@@ -1,9 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-// Backend API URL - Nircore backend
-// Local development için: http://localhost:3000/api
-// Fiziksel cihaz için: http://[BILGISAYAR_IP]:3000/api (örn: http://192.168.1.100:3000/api)
-const API_BASE_URL = 'http://10.172.1.103:3000/api';
+import { API_BASE_URL } from '../config/api';
 
 interface ApiResponse<T = any> {
   success: boolean;
@@ -105,7 +101,7 @@ class BackendApiService {
 
   private async makeRequest<T = any>(
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestInit & { timeout?: number; maxRetries?: number } = {}
   ): Promise<ApiResponse<T>> {
     try {
       const token = await this.getAuthToken();
@@ -130,25 +126,33 @@ class BackendApiService {
 
       const fullUrl = `${API_BASE_URL}${endpoint}`;
       
-      // Request bilgileri logları kaldırıldı (açılışta çok fazla log üretiyordu)
+      // Production URL kontrolü - sadece ilk birkaç istekte log göster
+      if (endpoint.includes('/profile') || endpoint.includes('/faq') || endpoint.includes('/health')) {
+        console.log('🌐 API Request URL:', fullUrl);
+      }
+      
+      // Custom timeout ve retry ayarları
+      const requestTimeout = options.timeout || 30000; // Varsayılan 30 saniye
+      const maxRetries = options.maxRetries !== undefined ? options.maxRetries : 3; // Varsayılan 3 retry
       
       // Fetch options - Network timeout ve retry için optimize edilmiş
+      // timeout ve maxRetries'i options'tan çıkar (RequestInit'te yok)
+      const { timeout: _, maxRetries: __, ...fetchOptionsBase } = options;
       const fetchOptions: RequestInit = {
         method: options.method || 'GET',
         headers: headers as HeadersInit,
-        ...options,
+        ...fetchOptionsBase,
         cache: 'no-cache',
         credentials: 'omit', // CORS için
       };
       
       // Network timeout için AbortController kullan
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 saniye timeout (artırıldı)
+      const timeoutId = setTimeout(() => controller.abort(), requestTimeout);
       fetchOptions.signal = controller.signal;
       
       let response: Response | undefined;
       let lastError: any = null;
-      const maxRetries = 3; // Toplam 4 deneme (1 ilk + 3 retry)
       let rateLimitDetected = false; // Rate limit hatası tespit edildi mi?
       
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -162,12 +166,12 @@ class BackendApiService {
             
             // Retry için bekleme süresi (exponential backoff)
             const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000); // 1s, 2s, 4s, max 5s
-            console.log(`🔄 Retry attempt ${attempt}/${maxRetries} after ${delay}ms...`);
+            // Retry attempt
             await new Promise(resolve => setTimeout(resolve, delay));
             
             // Yeni timeout için yeni controller oluştur
             const retryController = new AbortController();
-            const retryTimeoutId = setTimeout(() => retryController.abort(), 30000);
+            const retryTimeoutId = setTimeout(() => retryController.abort(), requestTimeout);
             fetchOptions.signal = retryController.signal;
             
             // Cleanup function
@@ -247,7 +251,12 @@ class BackendApiService {
                                 fetchError.message?.includes('ETIMEDOUT');
           
           if (isNetworkError && attempt < maxRetries) {
-            console.error(`❌ Network error (attempt ${attempt + 1}/${maxRetries + 1}):`, fetchError.message || fetchError.name);
+            const errorType = fetchError.name === 'AbortError' 
+              ? `Timeout (${requestTimeout / 1000}s içinde yanıt gelmedi)` 
+              : fetchError.message || fetchError.name || 'Bilinmeyen network hatası';
+            console.error(`❌ Network error (attempt ${attempt + 1}/${maxRetries + 1}): ${errorType}`);
+            console.error(`   Endpoint: ${endpoint}`);
+            console.error(`   Backend URL: ${API_BASE_URL}`);
             continue; // Retry yap
           } else {
             // Son deneme veya network hatası değil
@@ -467,8 +476,13 @@ class BackendApiService {
   }
 
   // Get user profile
-  async getUserProfile(): Promise<ApiResponse<any>> {
-    return this.makeRequest('/nirmind/users/profile');
+  async getUserProfile(timeout?: number): Promise<ApiResponse<any>> {
+    // Profil kontrolü için daha kısa timeout (varsayılan 10 saniye) ve daha az retry
+    // Bu sayede uygulama açılışı daha hızlı olur
+    return this.makeRequest('/nirmind/users/profile', {
+      timeout: timeout || 10000, // 10 saniye
+      maxRetries: 1, // Sadece 1 retry (toplam 2 deneme)
+    });
   }
 
   // Update user profile
@@ -672,15 +686,105 @@ class BackendApiService {
           }
         };
         
+        // Helper function: responseText'ten ai_complete event'ini bul ve işle
+        // Bu fonksiyon streamTimeout, xhr.onload, xhr.onerror, xhr.ontimeout içinde kullanılacak
+        const processRemainingEvents = (responseText: string) => {
+          // CRITICAL FIX: Abort edildiyse hiçbir event'i işleme
+          if (isAborted) {
+            console.log('ℹ️ [processRemainingEvents] Stream abort edildi, eventler işlenmiyor');
+            return;
+          }
+          
+          if (!responseText || !responseText.trim()) return;
+          
+          // Tüm responseText'i kontrol et (sadece buffer değil)
+          const allEventBlocks = responseText.split('\n\n').filter(block => block.trim());
+          
+          for (const eventBlock of allEventBlocks) {
+            // CRITICAL FIX: Her event block işlemeden önce abort kontrolü yap
+            if (isAborted) {
+              console.log('ℹ️ [processRemainingEvents] Stream abort edildi, event işleme durduruldu');
+              return;
+            }
+            
+            if (!eventBlock.trim()) continue;
+            
+            let eventType = '';
+            const dataLines: string[] = [];
+            
+            const lines = eventBlock.split('\n');
+            for (const line of lines) {
+              if (line.startsWith('event: ')) {
+                eventType = line.substring(7).trim();
+              } else if (line.startsWith('data: ')) {
+                const dataLine = line.substring(6);
+                dataLines.push(dataLine);
+              }
+            }
+            
+            const eventData = dataLines.join('\n').trim();
+            
+            if (eventType === 'ai_complete' && eventData) {
+              // CRITICAL FIX: ai_complete event'ini işlemeden önce abort kontrolü yap
+              if (isAborted) {
+                console.log('ℹ️ [processRemainingEvents] Stream abort edildi, ai_complete eventi işlenmiyor');
+                return;
+              }
+              
+              try {
+                const data = JSON.parse(eventData);
+                
+                if (data.success && data.data?.aiMessage) {
+                  const aiMsg = data.data.aiMessage;
+                  if (aiMsg && aiMsg.id) {
+                    // CRITICAL FIX: Callback'i çağırmadan önce tekrar abort kontrolü yap
+                    if (isAborted) {
+                      console.log('ℹ️ [processRemainingEvents] Stream abort edildi, onAIComplete callback çağrılmıyor');
+                      return;
+                    }
+                    
+                    // Duplicate kontrolü - eğer zaten işlendiyse tekrar işleme
+                    const eventKey = `ai_complete:${aiMsg.id}`;
+                    if (processedEvents.has(eventKey)) {
+                      console.log('ℹ️ [processRemainingEvents] ai_complete zaten işlendi:', aiMsg.id);
+                      continue;
+                    }
+                    processedEvents.add(eventKey);
+                    
+                    console.log('✅ [processRemainingEvents] ai_complete event bulundu ve işleniyor:', {
+                      messageId: aiMsg.id,
+                      textLength: aiMsg.text?.length || 0,
+                      isResolved
+                    });
+                    
+                    // CRITICAL FIX: isResolved flag'ini set etmeden önce callback'i çağır
+                    onAIComplete(aiMsg);
+                    console.log('✅ [processRemainingEvents] onAIComplete callback çağrıldı');
+                    // CRITICAL FIX: isResolved flag'ini callback'ten SONRA set et
+                    isResolved = true;
+                    return; // Bulundu, işlendi, çık
+                  }
+                }
+              } catch (parseError) {
+                console.warn('⚠️ [processRemainingEvents] ai_complete parse hatası:', {
+                  error: parseError instanceof Error ? parseError.message : String(parseError)
+                });
+              }
+            }
+          }
+        };
+        
         xhr.onprogress = () => {
           if (isAborted || !xhr) return;
           
           if (!firstChunkTime) {
             firstChunkTime = Date.now();
             const timeToFirstChunk = firstChunkTime - requestStartTime;
-            console.log('✅ Ilk SSE chunk alindi:', {
+            console.log('✅ [BACKEND RESPONSE] İlk SSE chunk alındı - Backend bağlantısı başarılı!', {
               timeToFirstChunk: `${timeToFirstChunk}ms`,
-              timeToFirstChunkSeconds: `${(timeToFirstChunk / 1000).toFixed(2)}s`
+              timeToFirstChunkSeconds: `${(timeToFirstChunk / 1000).toFixed(2)}s`,
+              conversationId,
+              timestamp: new Date(firstChunkTime).toISOString()
             });
             
             // İlk chunk geldi, connection timeout'u iptal et ve stream timeout'u başlat
@@ -692,6 +796,16 @@ class BackendApiService {
             // Stream timeout'u başlat - eğer stream başladıktan sonra uzun süre veri gelmezse
             streamTimeout = setTimeout(() => {
               if (isAborted || isResolved) return;
+              
+              // CRITICAL FIX: Abort etmeden önce responseText'i kontrol et
+              // ai_complete event'i gelmiş olabilir
+              if (xhr && xhr.responseText && !isResolved) {
+                console.log('🔍 [streamTimeout] Timeout öncesi responseText kontrol ediliyor (ai_complete için):', {
+                  responseTextLength: xhr.responseText.length
+                });
+                processRemainingEvents(xhr.responseText);
+              }
+              
               console.error('❌ Stream timeout - uzun süre veri gelmedi');
               if (xhr) {
                 xhr.abort();
@@ -707,6 +821,16 @@ class BackendApiService {
               clearTimeout(streamTimeout);
               streamTimeout = setTimeout(() => {
                 if (isAborted || isResolved) return;
+                
+                // CRITICAL FIX: Abort etmeden önce responseText'i kontrol et
+                // ai_complete event'i gelmiş olabilir
+                if (xhr && xhr.responseText && !isResolved) {
+                  console.log('🔍 [streamTimeout] Timeout öncesi responseText kontrol ediliyor (ai_complete için):', {
+                    responseTextLength: xhr.responseText.length
+                  });
+                  processRemainingEvents(xhr.responseText);
+                }
+                
                 console.error('❌ Stream timeout - uzun süre veri gelmedi');
                 if (xhr) {
                   xhr.abort();
@@ -723,9 +847,31 @@ class BackendApiService {
           const currentResponseText = xhr.responseText;
           const newData = currentResponseText.substring(buffer.length);
           
-          if (!newData) return; // Yeni data yoksa işleme
+          if (!newData) {
+            // Yeni data yoksa, ama ai_complete event'i gelmiş olabilir
+            // responseText'in tamamını kontrol et
+            if (currentResponseText && !isResolved) {
+              processRemainingEvents(currentResponseText);
+            }
+            return;
+          }
           
           buffer += newData;
+          
+          // CRITICAL FIX: Her chunk geldiğinde responseText'in tamamını kontrol et
+          // ai_complete event'i stream'in sonunda gelebilir ve hemen işlenmeli
+          // isResolved kontrolünü kaldırdık - her zaman kontrol et (duplicate kontrolü processedEvents ile yapılıyor)
+          if (currentResponseText) {
+            // Sadece ai_complete event'ini kontrol et (performans için)
+            // Eğer responseText'te "event: ai_complete" varsa, hemen işle
+            if (currentResponseText.includes('event: ai_complete')) {
+              console.log('🔍 [onprogress] responseText\'te ai_complete event\'i tespit edildi, işleniyor:', {
+                responseTextLength: currentResponseText.length,
+                isResolved
+              });
+              processRemainingEvents(currentResponseText);
+            }
+          }
           
           // Event'leri parse et - sadece tamamlanmış event'leri işle
           // Buffer'ı '\n\n' ile böl, son kısmı (tamamlanmamış) buffer'da kalır
@@ -810,19 +956,28 @@ class BackendApiService {
                 
                 // CRITICAL FIX: Event type bazlı duplicate kontrolü
                 // Özellikle user_message ve ai_start event'leri için daha sıkı kontrol
+                // Duplicate event'ler normal olabilir (network retry, SSE reconnection vb.)
+                // Bu yüzden sadece ilk birkaç kez log göster, sonra sessizce atla
                 if (eventType === 'user_message' && userMessageProcessed) {
-                  console.warn(`⚠️ Duplicate ${eventType} event atlandı (flag kontrolü): ${messageId || 'no ID'} (${eventCount}. event)`);
+                  // Sadece ilk 3 duplicate event için log göster
+                  if (eventCount <= 3) {
+                    console.log(`ℹ️ Duplicate ${eventType} event atlandı (flag kontrolü): ${messageId || 'no ID'}`);
+                  }
                   continue;
                 }
                 
                 if (eventType === 'ai_start' && aiStartCalled) {
-                  console.warn(`⚠️ Duplicate ${eventType} event atlandı (flag kontrolü): (${eventCount}. event)`);
+                  // Sadece ilk 3 duplicate event için log göster
+                  if (eventCount <= 3) {
+                    console.log(`ℹ️ Duplicate ${eventType} event atlandı (flag kontrolü)`);
+                  }
                   continue;
                 }
                 
                 if (processedEvents.has(eventKey)) {
-                  if (eventCount <= 5) {
-                    console.warn(`⚠️ Duplicate event atlandı: ${eventType} (${eventCount}. event) - Key: ${eventKey.substring(0, 100)}`);
+                  // Sadece ilk 3 duplicate event için log göster
+                  if (eventCount <= 3) {
+                    console.log(`ℹ️ Duplicate event atlandı: ${eventType}`);
                   }
                   continue; // Bu event zaten işlendi, sessizce atla
                 }
@@ -850,15 +1005,33 @@ class BackendApiService {
                   }
                   
                   // Event logları azaltıldı - sadece önemli event'ler için log
+                  // DEBUG: Her event için detaylı log (backend response tracking için)
+                  const eventReceivedTime = Date.now();
+                  const timeSinceRequestStart = eventReceivedTime - requestStartTime;
+                  
                   if (eventCount <= 5 || eventType === 'ai_complete' || eventType === 'error') {
-                    console.log(`📨 SSE event: ${eventType} (${eventCount}. event)`);
+                    console.log(`📨 [BACKEND RESPONSE] SSE event alındı: ${eventType}`, {
+                      eventNumber: eventCount,
+                      timeSinceRequestStart: `${timeSinceRequestStart}ms`,
+                      timestamp: new Date(eventReceivedTime).toISOString(),
+                      conversationId
+                    });
                   }
                   
                   switch (eventType) {
                     case 'user_message':
+                      console.log('📨 [BackendApiService] user_message event alındı:', {
+                        eventCount,
+                        userMessageProcessed,
+                        hasData: !!data,
+                        dataSuccess: data?.success,
+                        hasUserMessage: !!(data?.data?.userMessage),
+                        userMessageId: data?.data?.userMessage?.id
+                      });
+                      
                       // CRITICAL FIX: Duplicate user_message event'lerini engelle
                       if (userMessageProcessed) {
-                        console.warn('⚠️ user_message event zaten işlendi, duplicate event atlanıyor');
+                        // Duplicate event normal olabilir, sessizce atla
                         break;
                       }
                       
@@ -866,22 +1039,43 @@ class BackendApiService {
                         // UserMessage validation
                         const userMsg = data.data.userMessage;
                         if (!userMsg || !userMsg.id) {
-                          console.error('❌ Geçersiz userMessage:', userMsg);
+                          console.error('❌ [BACKEND RESPONSE] Geçersiz userMessage:', userMsg);
                           break;
                         }
                         userMessageProcessed = true; // İşlendi olarak işaretle
-                        console.log('✅ User message event isleniyor');
+                        const userMessageTime = Date.now();
+                        const timeToUserMessage = userMessageTime - requestStartTime;
+                        console.log('✅ [BACKEND RESPONSE] User message event işlendi - Backend mesajı alındı!', {
+                          messageId: userMsg.id,
+                          textLength: userMsg.text?.length || 0,
+                          timeToUserMessage: `${timeToUserMessage}ms`,
+                          conversationId,
+                          timestamp: new Date(userMessageTime).toISOString()
+                        });
                         onUserMessage(userMsg);
+                      } else {
+                        console.warn('⚠️ [BackendApiService] user_message event\'inde data yok veya başarısız:', {
+                          hasData: !!data,
+                          dataSuccess: data?.success,
+                          hasUserMessage: !!(data?.data?.userMessage),
+                          dataKeys: data ? Object.keys(data) : []
+                        });
                       }
                       break;
                     case 'ai_start':
                       // Duplicate ai_start event'lerini engelle
                       if (aiStartCalled) {
-                        console.warn('⚠️ ai_start event zaten işlendi, duplicate event atlanıyor');
+                        // Duplicate event normal olabilir, sessizce atla
                         break;
                       }
                       aiStartCalled = true;
-                      console.log('✅ AI start event isleniyor');
+                      const aiStartTime = Date.now();
+                      const timeToAIStart = aiStartTime - requestStartTime;
+                      console.log('✅ [BACKEND RESPONSE] AI start event işlendi - AI cevabı başladı!', {
+                        timeToAIStart: `${timeToAIStart}ms`,
+                        conversationId,
+                        timestamp: new Date(aiStartTime).toISOString()
+                      });
                       onAIStart();
                       break;
                     case 'ai_thinking_step':
@@ -949,8 +1143,25 @@ class BackendApiService {
                       }
                       break;
                     case 'ai_complete':
-                      if (isAborted) return;
-                      console.log('✅ AI complete event isleniyor');
+                      // CRITICAL FIX: Abort edildiyse ai_complete event'ini işleme
+                      // Kullanıcı mesajı durdurduysa, backend'den gelen cevabı gösterme
+                      if (isAborted) {
+                        console.log('ℹ️ [ai_complete] Stream abort edildi, ai_complete eventi işlenmiyor');
+                        return;
+                      }
+                      const aiCompleteTime = Date.now();
+                      const timeToAIComplete = aiCompleteTime - requestStartTime;
+                      console.log('✅ [BACKEND RESPONSE] AI complete event işlendi - Backend cevabı tamamlandı!', {
+                        hasData: !!data,
+                        hasSuccess: !!data?.success,
+                        hasAiMessage: !!data?.data?.aiMessage,
+                        aiMessageId: data?.data?.aiMessage?.id,
+                        aiMessageTextLength: data?.data?.aiMessage?.text?.length || 0,
+                        timeToAIComplete: `${timeToAIComplete}ms`,
+                        timeToAICompleteSeconds: `${(timeToAIComplete / 1000).toFixed(2)}s`,
+                        conversationId,
+                        timestamp: new Date(aiCompleteTime).toISOString()
+                      });
                       // Timeout'ları temizle
                       if (connectionTimeout) {
                         clearTimeout(connectionTimeout);
@@ -961,6 +1172,13 @@ class BackendApiService {
                         streamTimeout = null;
                       }
                       if (data.success && data.data?.aiMessage) {
+                        // CRITICAL FIX: Callback'i çağırmadan önce tekrar abort kontrolü yap
+                        // Abort edildiyse callback'i çağırma (kullanıcı mesajı durdurdu)
+                        if (isAborted) {
+                          console.log('ℹ️ [ai_complete] Stream abort edildi, onAIComplete callback çağrılmıyor');
+                          break; // return yerine break kullan (switch case içinde)
+                        }
+                        
                         // AIMessage validation
                         const aiMsg = data.data.aiMessage;
                         if (!aiMsg || !aiMsg.id) {
@@ -975,9 +1193,33 @@ class BackendApiService {
                           // Thinking steps log'u kaldırıldı
                         }
                         
+                        // Duplicate kontrolü - normal akışta da processedEvents'e ekle
+                        const eventKey = `ai_complete:${aiMsg.id}`;
+                        if (processedEvents.has(eventKey)) {
+                          console.log('ℹ️ [ai_complete case] ai_complete zaten işlendi:', aiMsg.id);
+                          break;
+                        }
+                        processedEvents.add(eventKey);
+                        
+                        console.log('📤 onAIComplete callback çağrılıyor:', {
+                          messageId: aiMsg.id,
+                          textLength: aiMsg.text?.length || 0,
+                          hasText: !!aiMsg.text
+                        });
+                        // CRITICAL FIX: isResolved flag'ini set etmeden önce callback'i çağır
+                        // Çünkü callback içinde state güncellemeleri yapılacak
                         onAIComplete(aiMsg);
+                        console.log('✅ onAIComplete callback çağrıldı');
+                        // CRITICAL FIX: isResolved flag'ini callback'ten SONRA set et
+                        // Böylece onload/onerror/ontimeout callback'leri processRemainingEvents çağırmaz
+                        isResolved = true;
                       } else {
-                        console.error('❌ Geçersiz ai_complete data:', data);
+                        console.error('❌ Geçersiz ai_complete data:', {
+                          hasData: !!data,
+                          hasSuccess: !!data?.success,
+                          hasAiMessage: !!data?.data?.aiMessage,
+                          data: data
+                        });
                         onError('AI cevabı alınamadı');
                       }
                       const totalDuration = Date.now() - requestStartTime;
@@ -1015,16 +1257,27 @@ class BackendApiService {
                         errorMsg = data.data.error;
                       }
                       
-                      // Eğer success: true ise, bu gerçek bir error değil, yanlış parse edilmiş olabilir
-                      // Backend'den gelen error event'i kontrol et
-                      if (data?.success === true && !data?.error && !data?.message) {
-                        console.warn('⚠️ Error event ama success: true, yanlış parse edilmiş olabilir:', {
+                      // Eğer success: true ise ve data içinde userMessage varsa, bu gerçek bir error değil
+                      // Backend'den yanlış parse edilmiş bir user_message event'i olabilir
+                      if (data?.success === true && (data?.data?.userMessage || data?.userMessage)) {
+                        console.warn('⚠️ Error event ama success: true ve userMessage var, yanlış parse edilmiş olabilir:', {
                           eventType,
                           dataKeys: Object.keys(data || {}),
                           dataDataKeys: data?.data ? Object.keys(data.data) : [],
-                          fullData: data
+                          hasUserMessage: !!(data?.data?.userMessage || data?.userMessage)
                         });
-                        // Gerçek bir error değilse, devam et (ai_chunk event'leri gelebilir)
+                        // Gerçek bir error değilse, devam et (user_message event'i olabilir)
+                        break; // return yerine break - diğer event'ler gelebilir
+                      }
+                      
+                      // Eğer success: true ise ve error/message yoksa, bu gerçek bir error değil
+                      if (data?.success === true && !data?.error && !data?.message && !data?.data?.error && !data?.data?.message) {
+                        console.warn('⚠️ Error event ama success: true ve hata mesajı yok, yanlış parse edilmiş olabilir:', {
+                          eventType,
+                          dataKeys: Object.keys(data || {}),
+                          dataDataKeys: data?.data ? Object.keys(data.data) : []
+                        });
+                        // Gerçek bir error değilse, devam et
                         break; // return yerine break - diğer event'ler gelebilir
                       }
                       
@@ -1076,11 +1329,89 @@ class BackendApiService {
             
             // Buffer'ı güncelle - sadece tamamlanmamış kısmı tut
             buffer = incompleteEvent;
+            
+            // CRITICAL FIX: Buffer'da tamamlanmamış event varsa, özellikle ai_complete event'ini kontrol et
+            // ai_complete event'i stream'in sonunda gelebilir ve tamamlanmamış olarak buffer'da kalabilir
+            if (incompleteEvent && incompleteEvent.trim()) {
+              // Buffer'da tamamlanmamış event var - ai_complete event'i olabilir
+              // Eğer buffer'da "event: ai_complete" varsa, data'nın tamamını beklemek yerine
+              // mevcut kısmı parse etmeyi dene (stream kapandığında tamamlanmış olabilir)
+              if (incompleteEvent.includes('event: ai_complete')) {
+                console.log('🔍 [onprogress] Buffer\'da tamamlanmamış ai_complete event\'i tespit edildi:', {
+                  bufferLength: incompleteEvent.length,
+                  bufferPreview: incompleteEvent.substring(0, 200)
+                });
+                
+                // CRITICAL FIX: Tamamlanmamış olsa bile parse etmeyi dene
+                // Çünkü stream kapandığında tamamlanmış olabilir
+                // Ama önce responseText'in tamamını kontrol et
+                if (xhr && xhr.responseText && !isResolved) {
+                  console.log('🔍 [onprogress] Buffer\'da ai_complete var, responseText kontrol ediliyor:', {
+                    responseTextLength: xhr.responseText.length,
+                    bufferLength: incompleteEvent.length
+                  });
+                  processRemainingEvents(xhr.responseText);
+                }
+              }
+            }
+            
+            // CRITICAL FIX: Her chunk işlendikten sonra responseText'in tamamını kontrol et
+            // ai_complete event'i stream'in sonunda gelebilir ve hemen işlenmeli
+            // isResolved kontrolünü kaldırdık - her zaman kontrol et (duplicate kontrolü processedEvents ile yapılıyor)
+            if (xhr && xhr.responseText) {
+              // Her chunk'ta kontrol etmek performans sorunu yaratabilir
+              // Bu yüzden sadece son birkaç chunk'ta veya belirli aralıklarla kontrol et
+              // Ama ai_complete event'i için her zaman kontrol et
+              if (xhr.responseText.includes('event: ai_complete')) {
+                console.log('🔍 [onprogress] responseText\'te ai_complete event\'i tespit edildi, işleniyor:', {
+                  responseTextLength: xhr.responseText.length,
+                  eventCount,
+                  isResolved
+                });
+                processRemainingEvents(xhr.responseText);
+              }
+            }
           }
         };
         
         xhr.onload = () => {
-          if (isAborted) return;
+          // CRITICAL FIX: Stream kapandığında responseText'in tamamını kontrol et
+          // ai_complete event'i buffer'da veya responseText'in herhangi bir yerinde olabilir
+          // processRemainingEvents içinde abort kontrolü var, bu yeterli
+          if (xhr && xhr.responseText) {
+            console.log('🔍 [onload] Stream kapandı, responseText kontrol ediliyor (ai_complete için):', {
+              responseTextLength: xhr.responseText.length,
+              bufferLength: buffer.length,
+              isResolved,
+              hasAiComplete: xhr.responseText.includes('event: ai_complete'),
+              isAborted
+            });
+            
+            // Önce responseText'in tamamını kontrol et (processRemainingEvents içinde abort kontrolü var)
+            processRemainingEvents(xhr.responseText);
+            
+            // Sonra buffer'ı da kontrol et (eğer farklıysa) - abort kontrolü processRemainingEvents içinde
+            if (buffer && buffer.trim() && buffer !== xhr.responseText) {
+              processRemainingEvents(buffer);
+            }
+          } else if (buffer && buffer.trim()) {
+            // Eğer responseText yoksa sadece buffer'ı kontrol et - abort kontrolü processRemainingEvents içinde
+            console.log('🔍 [onload] Stream kapandı, buffer kontrol ediliyor (ai_complete için):', {
+              bufferLength: buffer.length,
+              isResolved,
+              hasAiComplete: buffer.includes('event: ai_complete'),
+              isAborted
+            });
+            processRemainingEvents(buffer);
+          } else {
+            console.log('ℹ️ [onload] Stream kapandı ama responseText ve buffer yok:', {
+              isResolved,
+              hasResponseText: !!(xhr && xhr.responseText),
+              bufferLength: buffer.length,
+              isAborted
+            });
+          }
+          
           // Timeout'ları temizle
           if (connectionTimeout) {
             clearTimeout(connectionTimeout);
@@ -1103,6 +1434,18 @@ class BackendApiService {
         
         xhr.onerror = () => {
           if (isAborted) return;
+          
+          // CRITICAL FIX: Hata olsa bile responseText'i kontrol et
+          // ai_complete event'i gelmiş olabilir
+          // isResolved kontrolünü kaldırdık - her zaman kontrol et (duplicate kontrolü processedEvents ile yapılıyor)
+          if (xhr && xhr.responseText && xhr.status === 200) {
+            console.log('🔍 [onerror] Status 200, responseText kontrol ediliyor (ai_complete için):', {
+              responseTextLength: xhr.responseText.length,
+              isResolved,
+              hasAiComplete: xhr.responseText.includes('event: ai_complete')
+            });
+            processRemainingEvents(xhr.responseText);
+          }
           
           // Status 200 ise, bu gerçek bir hata değil (SSE stream normal kapanmış olabilir)
           // onload zaten çağrılmışsa veya çağrılacaksa, bu hatayı tamamen ignore et
@@ -1143,6 +1486,19 @@ class BackendApiService {
         
         xhr.ontimeout = () => {
           if (isAborted) return;
+          
+          // CRITICAL FIX: Timeout olsa bile responseText'i kontrol et
+          // CRITICAL FIX: ontimeout her zaman processRemainingEvents çağırmalı
+          // Çünkü ai_complete event'i stream'in sonunda gelebilir ve normal akışta kaçırılmış olabilir
+          if (xhr && xhr.responseText) {
+            console.log('🔍 [ontimeout] Timeout oldu, responseText kontrol ediliyor (ai_complete için):', {
+              responseTextLength: xhr.responseText.length,
+              status: xhr.status,
+              isResolved
+            });
+            processRemainingEvents(xhr.responseText);
+          }
+          
           // Timeout'ları temizle
           if (connectionTimeout) {
             clearTimeout(connectionTimeout);
@@ -1171,7 +1527,28 @@ class BackendApiService {
         xhr.timeout = STREAM_TIMEOUT;
         
         // Request body gönder
-        xhr.send(JSON.stringify({ conversationId, message, attachments, promptType }));
+        // CRITICAL: Telefonun tarih ve saat bilgisini backend'e gönder
+        const deviceDate = new Date();
+        const deviceDateString = deviceDate.toLocaleDateString('tr-TR', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        });
+        const deviceTimeString = deviceDate.toLocaleTimeString('tr-TR', { 
+          hour: '2-digit', 
+          minute: '2-digit' 
+        });
+        
+        xhr.send(JSON.stringify({ 
+          conversationId, 
+          message, 
+          attachments, 
+          promptType,
+          deviceDate: deviceDateString,
+          deviceTime: deviceTimeString,
+          deviceTimestamp: deviceDate.toISOString()
+        }));
         
         console.log('✅ XMLHttpRequest gonderildi, SSE stream bekleniyor...');
         

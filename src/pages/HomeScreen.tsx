@@ -14,6 +14,7 @@ import {
   Modal,
   ScrollView,
   Image,
+  BackHandler,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
@@ -28,6 +29,7 @@ import { useQuickSuggestions } from "../hooks/useQuickSuggestions";
 import { useDictation, useWaveAnimation } from "../features/dictation";
 import { useFilePermissions, usePermissionDialogs } from "../lib/permissions";
 import { useKeyboardHandling } from "../hooks/useKeyboardHandling";
+import { useAdvancedKeyboard } from "../hooks/useAdvancedKeyboard";
 import { useChatUploadModal } from "../hooks/useChatUploadModal";
 import { useChatAttachments } from "../hooks/useChatAttachments";
 import { useChatMessaging } from "../hooks/useChatMessaging";
@@ -54,7 +56,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   selectedConversationId,
   onConversationSelected,
 }) => {
-  const { createNewConversation, selectConversation, currentConversation, loadingMessagesConversationIds, conversations } = useChat();
+  const { createNewConversation, selectConversation, currentConversation, loadingMessagesConversationIds, conversations, updateResearchMode } = useChat();
   const { isLoading, isStreaming, sendMessage, cancelStreamingResponse } = useChatMessages();
   const {
     showQuickSuggestions,
@@ -73,8 +75,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   const messagesScrollViewRef = useRef<ScrollView | null>(null);
   const lastConversationLoadedRef = useRef(false); // Son conversation yükleme flag'i
   const previousSelectedConversationIdRef = useRef<string | undefined>(undefined); // Önceki selectedConversationId'yi takip et
+  const inputTextScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Input text scroll için timeout
   
-  // Memoize messages array to prevent unnecessary re-renders (ChatScreen'deki gibi)
+  // Memoize messages array to prevent unnecessary re-renders
   const messagesArray = useMemo(() => {
     if (currentConversation?.messages && Array.isArray(currentConversation.messages)) {
       return currentConversation.messages;
@@ -196,11 +199,11 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   const bottomPadding = useRef(new Animated.Value(initialPadding)).current;
   const lastPaddingRef = useRef<number>(initialPadding);
   
-  // Bottom position animasyonu - klavye açıldığında bottom section yukarı hareket etsin
-  const bottomPosition = useRef(new Animated.Value(0)).current;
+  // CRITICAL: Flexbox layout kullanıldığı için bottomPosition animasyonu artık gerekmez
+  // Input section artık absolute positioning kullanmıyor, flexbox ile doğal sıralama var
   
-  // MessageList container paddingBottom animasyonu - klavye durumuna göre smooth geçiş
-  const messagesListPaddingBottom = useRef(new Animated.Value(180)).current; // Başlangıç: input section yüksekliği
+  // CRITICAL: Flexbox layout kullanıldığı için paddingBottom animasyonu artık gerekmez
+  // Orta bölüm flex: 1 ile header ve input section arasında otomatik sınırlandırılıyor
 
   // Dikte feature hooks
   const { dictationState, toggleDictation: originalToggleDictation } = useDictation({
@@ -311,7 +314,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
       inputClearedRef.current = true;
       setSelectedImages([]);
       setSelectedFiles([]);
-      setArastirmaModu(false);
+      // Conversation'ın research mode durumuna göre ayarla
+      const conversationFromArray = currentId ? conversations.find(c => c.id === currentId) : null;
+      setArastirmaModu(conversationFromArray?.isResearchMode || false);
       
       // Dikte durdur (eğer aktifse)
       if (dictationState.isDictating || dictationState.isListening) {
@@ -337,9 +342,17 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
       
       // Mevcut ID'yi kaydet
       previousConversationIdRef.current = currentId;
+    } else if (currentId && previousId === currentId) {
+      // Conversation aynı kaldı ama conversation verisi güncellenmiş olabilir (ör. research mode değişmiş)
+      // Bu durumda sadece research mode'u güncelle
+      const conversationFromArray = conversations.find(c => c.id === currentId);
+      if (conversationFromArray && conversationFromArray.isResearchMode !== arastirmaModu) {
+        // Research mode güncellendi
+        setArastirmaModu(conversationFromArray.isResearchMode);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedConversationId, createdConversationId, currentConversation?.id]); // Conversation ID'leri değiştiğinde çalışsın
+  }, [selectedConversationId, createdConversationId, currentConversation?.id, conversations, arastirmaModu]); // Conversation ID'leri ve conversations array'i değiştiğinde çalışsın
 
   const [fontsLoaded, fontError] = useFonts({
     "Poppins-Regular": require("@assets/fonts/Poppins-Regular .ttf"),
@@ -457,9 +470,50 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   }, [dismissKeyboard, onConversationSelected, isStreaming, cancelStreamingResponse]);
 
 
-  const handleArastirmaPress = useCallback(() => {
-    setArastirmaModu((prev) => !prev);
-  }, []);
+  const handleArastirmaPress = useCallback(async () => {
+    const conversationId = selectedConversationId || createdConversationId || currentConversation?.id;
+    
+    if (!conversationId) {
+      // Conversation yoksa sadece local state'i toggle et
+      // Conversation oluşturulduğunda bu değer kullanılacak
+      setArastirmaModu((prev) => !prev);
+      return;
+    }
+    
+    // Conversation varsa backend'e kaydet
+    const newResearchMode = !arastirmaModu;
+    
+    // State'i hemen güncelle (React'in batch update'i ile hemen render edilecek)
+    setArastirmaModu(newResearchMode);
+    
+    // Backend çağrısını arka planda yap (await etmeden)
+    updateResearchMode(conversationId, newResearchMode)
+      .then(() => {
+        console.log('✅ Araştırma modu güncellendi:', { conversationId, isResearchMode: newResearchMode });
+      })
+      .catch((error) => {
+        console.error('❌ Araştırma modu güncellenemedi:', error);
+        // Hata durumunda state'i geri al
+        setArastirmaModu(!newResearchMode);
+        Alert.alert('Hata', 'Araştırma modu güncellenemedi. Lütfen tekrar deneyin.');
+      });
+  }, [selectedConversationId, createdConversationId, currentConversation?.id, arastirmaModu, updateResearchMode]);
+
+  // UX: Android back button ile klavyeyi kapatma
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      // Klavye açıksa veya input focus'ta ise klavyeyi kapat
+      if (isKeyboardVisible || isInputFocused) {
+        dismissKeyboard();
+        return true; // Event'i handle ettik, default davranışı engelle
+      }
+      return false; // Event'i handle etmedik, default davranış devam etsin
+    });
+
+    return () => backHandler.remove();
+  }, [isKeyboardVisible, isInputFocused, dismissKeyboard]);
 
   // Handle send message from home - creates conversation, sends message, and shows messages in hero area
   // Mesaj gönderme işleminin duplicate çağrılmasını önlemek için ref
@@ -484,7 +538,17 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
       return;
     }
 
-    if (!inputText.trim() && selectedImages.length === 0 && selectedFiles.length === 0) {
+    // Hızlı komutlar kontrolü - mesaj göndermeden önce
+    const trimmedText = inputText.trim();
+    if (trimmedText.startsWith('/') && trimmedText.length > 1) {
+      // Komut kontrolü yap (sadece "/" değil, gerçek bir komut varsa)
+      if (handleCommand(trimmedText)) {
+        // Komut işlendi, mesaj gönderme
+        return;
+      }
+    }
+
+    if (!trimmedText && selectedImages.length === 0 && selectedFiles.length === 0) {
       console.log('⚠️ [HomeScreen] Mesaj gönderilemedi: içerik yok');
       return;
     }
@@ -496,10 +560,21 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     try {
       let conversationId = createdConversationId;
       
+      console.log('🔍 [HomeScreen] Conversation durumu kontrol ediliyor:', {
+        hasCreatedConversationId: !!createdConversationId,
+        createdConversationId,
+        hasCurrentConversation: !!currentConversation,
+        currentConversationId: currentConversation?.id,
+        conversationsCount: conversations.length,
+        conversationIds: conversations.map(c => c.id)
+      });
+      
       // Eğer conversation yoksa (yeni sohbet modu), ilk mesaj gönderildiğinde oluştur
       // Bu sayede Chat ikonuna basıldığında sadece hazırlık yapılır, conversation oluşturulmaz
       // Conversation sadece ilk mesaj gönderildiğinde backend'e kaydedilir
       if (!conversationId) {
+        console.log('🆕 [HomeScreen] YENİ CONVERSATION OLUŞTURULACAK - conversationId yok');
+        
         // Yeni conversation oluşturulmadan önce, eski conversation'daki streaming'i durdur
         if (isStreaming) {
           console.log('🛑 [HomeScreen] Yeni conversation oluşturuluyor, eski streaming durduruluyor');
@@ -510,42 +585,132 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
           ? inputText.trim().substring(0, 30) + "..." 
           : inputText.trim() || "Yeni Sohbet";
         
+        console.log('📝 [HomeScreen] Conversation oluşturuluyor:', {
+          title,
+          titleLength: title.length,
+          inputTextLength: inputText.trim().length
+        });
+        
         // İlk mesaj gönderildiğinde conversation oluştur ve backend'e kaydet
         // createNewConversation zaten currentConversation'ı set ediyor, bu yüzden
         // selectConversation çağrısına gerek yok
+        const conversationStartTime = Date.now();
         conversationId = await createNewConversation(title);
+        const conversationEndTime = Date.now();
+        const conversationDuration = conversationEndTime - conversationStartTime;
+        
+        console.log('✅ [HomeScreen] CONVERSATION OLUŞTURULDU:', {
+          conversationId,
+          title,
+          duration: `${conversationDuration}ms`,
+          timestamp: new Date().toISOString()
+        });
+        
+        // Eğer araştırma modu aktifse, conversation oluşturulduktan sonra backend'e kaydet
+        if (arastirmaModu && conversationId) {
+          try {
+            await updateResearchMode(conversationId, true);
+            console.log('✅ [HomeScreen] Araştırma modu yeni conversation için aktif edildi:', conversationId);
+          } catch (error) {
+            console.error('❌ [HomeScreen] Araştırma modu aktif edilemedi:', error);
+          }
+        }
+        
         setCreatedConversationId(conversationId);
         
-        // React state güncellemelerinin tamamlanması için kısa bir bekleme
-        await new Promise(resolve => setTimeout(resolve, 50));
+        console.log('💾 [HomeScreen] createdConversationId state\'e set edildi:', conversationId);
+        
+        // CRITICAL FIX: Gereksiz bekleme kaldırıldı
+        // Optimistic mesaj zaten sendMessage içinde hemen eklenecek
+        // State güncellemeleri React tarafından otomatik batch ediliyor
+      } else {
+        console.log('ℹ️ [HomeScreen] MEVCUT CONVERSATION KULLANILIYOR:', {
+          conversationId,
+          currentConversationId: currentConversation?.id,
+          matchesCurrentConversation: currentConversation?.id === conversationId
+        });
       }
       
       // Mesaj gönder (conversation artık var, yeni mesajlar bu conversation içinde tutulacak)
       if (conversationId) {
+        // conversationId'yi local değişkene kaydet (React state güncellemesi asenkron olabilir)
+        const finalConversationId = conversationId;
+        
         console.log('📤 [HomeScreen] sendMessage çağrılıyor:', {
           messageText: inputText.trim().substring(0, 50),
-          conversationId,
+          conversationId: finalConversationId,
           arastirmaModu,
           imagesCount: selectedImages.length,
-          filesCount: selectedFiles.length
+          filesCount: selectedFiles.length,
+          hasCreatedConversationId: !!createdConversationId,
+          createdConversationId,
+          currentConversationId: currentConversation?.id,
+          conversationExistsInArray: !!conversations.find(c => c.id === finalConversationId)
         });
+        
+        const messageStartTime = Date.now();
+        const messageToSend = inputText.trim();
         await sendMessage(
-          inputText.trim(),
-          conversationId,
+          messageToSend,
+          finalConversationId,
           arastirmaModu,
           selectedImages,
           selectedFiles
         );
-        console.log('✅ [HomeScreen] sendMessage tamamlandı');
         
-        // Mesaj gönderildikten sonra currentConversation'ın güncellenmesi için kısa bir bekleme
-        // sendMessage zaten addMessage çağırıyor ve currentConversation'ı güncelliyor
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // Mesaj geçmişine ekle
+        addToHistory(messageToSend);
+        
+        const messageEndTime = Date.now();
+        const messageDuration = messageEndTime - messageStartTime;
+        
+        console.log('✅ [HomeScreen] sendMessage tamamlandı:', {
+          conversationId: finalConversationId,
+          duration: `${messageDuration}ms`,
+          timestamp: new Date().toISOString()
+        });
+        
+        // Mesaj gönderildikten sonra conversation durumunu kontrol et
+        // State güncellemelerinin tamamlanması için bekleme
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // Birkaç kez kontrol et - state güncellemeleri asenkron olabilir
+        let finalCheckCount = 0;
+        let conversationAfterMessage = conversations.find(conv => conv.id === finalConversationId);
+        while ((!conversationAfterMessage || conversationAfterMessage.messages.length === 0) && finalCheckCount < 5) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          conversationAfterMessage = conversations.find(conv => conv.id === finalConversationId);
+          finalCheckCount++;
+        }
+        
+        console.log('🔍 [HomeScreen] Conversation durumu (mesaj gönderildikten sonra):', {
+          conversationId: finalConversationId,
+          existsInConversations: !!conversationAfterMessage,
+          messageCount: conversationAfterMessage?.messages?.length || 0,
+          currentConversationId: currentConversation?.id,
+          currentConversationMessageCount: currentConversation?.messages?.length || 0,
+          matchesCurrentConversation: currentConversation?.id === finalConversationId,
+          checkAttempts: finalCheckCount + 1
+        });
+        
+        // Final check - conversation ve mesajlar
+        const finalConversation = conversations.find(conv => conv.id === finalConversationId) || currentConversation;
+        console.log('🏁 [HomeScreen] Final conversation durumu:', {
+          conversationId: finalConversationId,
+          existsInConversations: !!conversations.find(c => c.id === finalConversationId),
+          messageCount: finalConversation?.messages?.length || 0,
+          hasUserMessage: finalConversation?.messages?.some(msg => msg.isUser) || false,
+          hasAIMessage: finalConversation?.messages?.some(msg => !msg.isUser) || false,
+          currentConversationId: currentConversation?.id,
+          currentConversationMessageCount: currentConversation?.messages?.length || 0,
+          messages: finalConversation?.messages?.map(m => ({ id: m.id, isUser: m.isUser, textLength: m.text?.length || 0 })) || []
+        });
       } else {
         console.error('❌ [HomeScreen] conversationId yok, mesaj gönderilemedi:', {
           createdConversationId,
           currentConversationId: currentConversation?.id,
-          conversationId
+          conversationId,
+          conversationsCount: conversations.length
         });
         Alert.alert("Hata", "Konuşma oluşturulamadı. Lütfen tekrar deneyin.");
       }
@@ -598,6 +763,67 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     }
   }, [inputText, selectedImages, selectedFiles, createdConversationId, createNewConversation, sendMessage, arastirmaModu, dismissKeyboard, setIsInputFocused, currentConversation, selectConversation]);
 
+  // Gelişmiş klavye özellikleri (handleSendMessage tanımlandıktan sonra)
+  const { 
+    handleCommand, 
+    addToHistory, 
+    navigateHistory,
+    saveCurrentInput 
+  } = useAdvancedKeyboard({
+    onSend: handleSendMessage,
+    onDismiss: dismissKeyboard,
+    onNavigateMessageHistory: (direction) => {
+      // Mesaj geçmişinde gezinme - callback içinde navigateHistory çağrılacak
+    },
+    onCommand: (command) => {
+      // Hızlı komutlar
+      switch (command) {
+        case 'help':
+          Alert.alert(
+            'Klavye Özellikleri',
+            '⌨️ Mobil Klavye Özellikleri:\n\n' +
+            '• Shift + Enter: Yeni satır ekle\n' +
+            '• Enter: Yeni satır (multiline aktifken)\n' +
+            '• /help: Bu yardım menüsü\n' +
+            '• /clear: Input\'u temizle\n' +
+            '• /reset: Sohbeti sıfırla\n\n' +
+            '💡 Fiziksel klavye varsa:\n' +
+            '• Escape: Klavyeyi kapat\n' +
+            '• ↑/↓: Mesaj geçmişinde gezin',
+            [{ text: 'Tamam' }]
+          );
+          break;
+        case 'clear':
+          setInputText('');
+          break;
+        case 'reset':
+          Alert.alert(
+            'Sohbeti Sıfırla',
+            'Sohbeti sıfırlamak istediğinize emin misiniz?',
+            [
+              { text: 'İptal', style: 'cancel' },
+              {
+                text: 'Sıfırla',
+                style: 'destructive',
+                onPress: () => {
+                  setInputText('');
+                  setSelectedImages([]);
+                  setSelectedFiles([]);
+                  openChatScreen();
+                }
+              }
+            ]
+          );
+          break;
+        default:
+          Alert.alert('Bilinmeyen Komut', `"${command}" komutu bulunamadı. /help ile tüm komutları görebilirsiniz.`);
+      }
+    },
+    enableShortcuts: true,
+    enableMessageHistory: true,
+    enableCommands: true,
+  });
+
   const handleQuickSuggestionSelect = useCallback(async (suggestion: QuickSuggestion) => {
     try {
       setShowQuickSuggestions(false);
@@ -621,6 +847,16 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
         // selectConversation çağrısına gerek yok
         conversationId = await createNewConversation(title);
         setCreatedConversationId(conversationId);
+        
+        // Eğer araştırma modu aktifse, conversation oluşturulduktan sonra backend'e kaydet
+        if (arastirmaModu && conversationId) {
+          try {
+            await updateResearchMode(conversationId, true);
+            console.log('✅ [HomeScreen] Araştırma modu yeni conversation için aktif edildi (quick suggestion):', conversationId);
+          } catch (error) {
+            console.error('❌ [HomeScreen] Araştırma modu aktif edilemedi (quick suggestion):', error);
+          }
+        }
         
         // React state güncellemelerinin tamamlanması için kısa bir bekleme
         await new Promise(resolve => setTimeout(resolve, 50));
@@ -747,8 +983,17 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   // Uygulama açıldığında son conversation'ı yükle (sadece bir kez)
   useEffect(() => {
     const loadLastConversation = async () => {
-      // Eğer zaten yüklendiyse veya selectedConversationId varsa, tekrar yükleme
-      if (lastConversationLoadedRef.current || selectedConversationId) {
+      // Eğer zaten yüklendiyse, tekrar yükleme
+      if (lastConversationLoadedRef.current) {
+        return;
+      }
+
+      // CRITICAL: selectedConversationId tanımlıysa (bir conversation seçilmiş), son conversation yükleme
+      // selectedConversationId undefined ise ve AsyncStorage'da conversation varsa yükle
+      // Ama logout sonrası AsyncStorage temizlendiği için yüklenmeyecek
+      if (selectedConversationId !== undefined) {
+        // Bir conversation seçilmiş, son conversation yükleme
+        lastConversationLoadedRef.current = true;
         return;
       }
 
@@ -785,7 +1030,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
 
     loadLastConversation();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Sadece mount'ta çalışmalı
+  }, [selectedConversationId]); // selectedConversationId değiştiğinde de kontrol et
 
   // Conversation oluşturulduğunda createNewConversation zaten currentConversation'ı set ediyor,
   // conversations array'inde arama yapmaya gerek yok
@@ -796,11 +1041,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     if (createdConversationId && !conversationFromArray && currentConversation && currentConversation.id === createdConversationId) {
       // Yeni conversation oluşturuldu ama conversations array'inde henüz yok
       // currentConversation'ı kullan - createNewConversation zaten set ediyor
-      console.log('🔄 [HomeScreen] Yeni conversation oluşturuldu, currentConversation kullanılıyor:', {
-        conversationId: createdConversationId,
-        hasCurrentConversation: !!currentConversation,
-        messagesCount: currentConversation.messages?.length || 0
-      });
     }
   }, [createdConversationId, conversationFromArray, currentConversation]);
   
@@ -829,43 +1069,70 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     };
   }, [heroReveal]);
 
-  // Bottom padding ve position - klavye ile tam senkronize, animasyon yok direkt set
+  // Bottom padding - klavye ile tam senkronize, animasyon yok direkt set
+  // CRITICAL: bottomPosition kaldırıldı - artık flexbox layout kullanılıyor
   useEffect(() => {
     const targetPadding = getKeyboardPadding();
-    const targetBottom = isKeyboardVisible ? keyboardHeight : 0;
     
     // Klavye ile senkronize hareket için animasyon yok, direkt set et
     // Bu sayede klavye ile birlikte anında hareket eder
     bottomPadding.setValue(targetPadding);
-    bottomPosition.setValue(targetBottom);
     lastPaddingRef.current = targetPadding;
-  }, [keyboardHeight, isKeyboardVisible, getKeyboardPadding, bottomPadding, bottomPosition]);
+  }, [keyboardHeight, isKeyboardVisible, getKeyboardPadding, bottomPadding]);
 
-  // MessageList container paddingBottom - klavye ile senkronize, animasyon yok direkt set
+  // CRITICAL: Flexbox layout kullanıldığı için paddingBottom useEffect'i kaldırıldı
+  // Orta bölüm flex: 1 ile header ve input section arasında otomatik sınırlandırılıyor
+  // Klavye açıldığında input section yukarı çıkar, orta bölüm otomatik olarak küçülür
+
+  // CRITICAL FIX: Input'a focus olduğunda veya klavye açıldığında input alanını görünür yap
+  // Kullanıcı mesaj yazarken input alanını net görebilsin
   useEffect(() => {
-    const inputSectionHeight = 180;
-    const targetPadding = isKeyboardVisible 
-      ? inputSectionHeight + keyboardHeight 
-      : inputSectionHeight;
-    
-    // Klavye ile senkronize hareket için animasyon yok, direkt set et
-    // Bu sayede klavye ile birlikte anında hareket eder, kasma olmaz
-    messagesListPaddingBottom.setValue(targetPadding);
-    
-    // Padding güncellendiğinde mesajları da anında son mesaja scroll et
-    // Bu sayede padding ve scroll aynı anda güncellenir, tam senkronize olur
-    if (messagesScrollViewRef.current && messagesArray.length > 0) {
-      // Önce direkt scroll (en hızlı)
-      messagesScrollViewRef.current.scrollToEnd({ animated: false });
+    // Input'a focus olduğunda veya klavye açıldığında scroll yap
+    if ((isInputFocused || isKeyboardVisible) && messagesScrollViewRef.current && messagesArray.length > 0) {
+      // Klavye açılma animasyonu ile senkronize olmak için biraz gecikme
+      const scrollDelay = isKeyboardVisible ? 100 : 50; // Klavye açılıyorsa biraz daha bekle
       
-      // Sonra bir sonraki frame'de tekrar scroll (layout güncellemeleri için)
-      requestAnimationFrame(() => {
+      setTimeout(() => {
         if (messagesScrollViewRef.current) {
-          messagesScrollViewRef.current.scrollToEnd({ animated: false });
+          // Input alanını görünür yapmak için son mesaja scroll et
+          messagesScrollViewRef.current.scrollToEnd({ animated: true }); // Smooth scroll
+          
+          // Layout güncellemeleri için bir frame daha bekle
+          requestAnimationFrame(() => {
+            if (messagesScrollViewRef.current) {
+              messagesScrollViewRef.current.scrollToEnd({ animated: false }); // Anında son pozisyon
+            }
+          });
         }
-      });
+      }, scrollDelay);
     }
-  }, [isKeyboardVisible, keyboardHeight, messagesListPaddingBottom, messagesArray.length]);
+  }, [isInputFocused, isKeyboardVisible, messagesArray.length]);
+
+  // CRITICAL FIX: Mesaj yazılırken input alanının görünür kalmasını sağla
+  // Kullanıcı yazdığı metni net görebilsin
+  useEffect(() => {
+    // Input'a yazı yazılırken scroll yap (kullanıcı yazdığı metni görebilsin)
+    if (inputText.length > 0 && isInputFocused && messagesScrollViewRef.current && messagesArray.length > 0) {
+      // Önceki timeout'u temizle (debounce)
+      if (inputTextScrollTimeoutRef.current) {
+        clearTimeout(inputTextScrollTimeoutRef.current);
+      }
+      
+      // Debounce: 150ms sonra scroll yap (her karakter için scroll yapma, performans için)
+      inputTextScrollTimeoutRef.current = setTimeout(() => {
+        if (messagesScrollViewRef.current && isInputFocused) {
+          // Input alanını görünür yapmak için son mesaja scroll et
+          messagesScrollViewRef.current.scrollToEnd({ animated: false }); // Anında scroll (yazma sırasında)
+        }
+      }, 150);
+    }
+    
+    return () => {
+      if (inputTextScrollTimeoutRef.current) {
+        clearTimeout(inputTextScrollTimeoutRef.current);
+      }
+    };
+  }, [inputText, isInputFocused, messagesArray.length]);
 
   // İlk render'da padding değerini doğru set et
   useEffect(() => {
@@ -910,16 +1177,16 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
     <View style={styles.container}>
       <AnimatedKeyboardAvoidingView
         style={styles.container}
-        behavior={undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
-        enabled={false}
+        enabled={true}
         {...panResponder.panHandlers}
       >
       <TouchableWithoutFeedback onPress={handleScreenPress} accessible={false}>
         <LinearGradient
           colors={["#02020A", "#16163C"]}
           locations={[0.1827, 1.0]}
-          style={styles.container}
+          style={styles.gradientContainer}
           start={{ x: 0, y: 0 }}
           end={{ x: 0, y: 1 }}
         >
@@ -950,43 +1217,81 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
               // messagesToShow zaten useMemo ile optimize edilmiş ve conversations array'inden alınıyor
               // Bu sayede mesajlar gecikme olmadan ekrana yansır
               
+              // CRITICAL: Klavye açıldığında orta bölümün maksimum yüksekliğini ayarla
+              // Ekran yüksekliği - Header yüksekliği - Input Section yüksekliği - Klavye yüksekliği
+              const headerHeight = 60; // Header yaklaşık yüksekliği
+              const inputSectionHeight = 180; // Input section yaklaşık yüksekliği
+              const availableHeight = height - headerHeight - inputSectionHeight - (isKeyboardVisible ? keyboardHeight : 0);
+              
               return (
                 <TouchableWithoutFeedback onPress={handleScreenPress} accessible={false}>
-                  <Animated.View 
-                    style={[
-                      styles.messagesListContainer, 
-                      { paddingBottom: messagesListPaddingBottom }
-                    ]}
-                  >
+                  <View style={[
+                    styles.messagesListContainer,
+                    { maxHeight: availableHeight } // CRITICAL: Klavye açıldığında orta bölümün yüksekliğini sınırla
+                  ]}>
                     <MessageList
                       messages={messagesToShow}
                       isLoading={isLoading}
                       scrollViewRef={messagesScrollViewRef}
                       isKeyboardVisible={isKeyboardVisible}
                       keyboardHeight={keyboardHeight}
+                      paddingBottom={0} // CRITICAL: Flexbox layout kullanıldığı için paddingBottom gerekmez
                       conversationId={selectedConversationId || createdConversationId}
                       isDataLoading={isConversationDataLoading && (!currentConversation?.messages || currentConversation.messages.length === 0)}
-                      aiBubbleColor="#00DDA5"
                       onScrollToEnd={() => {
                         // Optional: Additional scroll handling
                       }}
                       onScrollBeginDrag={() => {
-                        // Scroll başladığında klavye kapat (kullanıcı mesajları okumak istiyor)
-                        if (isKeyboardVisible) {
+                        // CRITICAL FIX: Scroll başladığında klavye kapat (sadece iOS'ta, Android'de manuel)
+                        // iOS'ta keyboardDismissMode="on-drag" zaten klavyeyi kapatıyor, burada sadece Android için
+                        if (isKeyboardVisible && Platform.OS === 'android') {
+                          // Android'de scroll başladığında klavye kapat (kullanıcı mesajları okumak istiyor)
                           dismissKeyboard();
                         }
                       }}
                     />
-                  </Animated.View>
+                  </View>
                 </TouchableWithoutFeedback>
               );
             } else {
               // HeroSection (conversation yoksa veya input boşsa)
-              // Klavye açıksa HeroSection'ı tamamen render etme - layout hesaplamalarını etkilemesin
+              // CRITICAL: Klavye açıksa boş MessageList göster - layout düzgün çalışsın ve input section görünür kalsın
               if (isKeyboardVisible) {
-                return null;
+                // Klavye açıkken conversation yoksa bile boş mesaj alanı göster
+                // Bu sayede input section görünür kalır ve layout düzgün çalışır
+                const headerHeight = 60;
+                const inputSectionHeight = 180;
+                const availableHeight = height - headerHeight - inputSectionHeight - keyboardHeight;
+                
+                return (
+                  <TouchableWithoutFeedback onPress={handleScreenPress} accessible={false}>
+                    <View style={[
+                      styles.messagesListContainer,
+                      { maxHeight: availableHeight } // CRITICAL: Klavye açıldığında orta bölümün yüksekliğini sınırla
+                    ]}>
+                      <MessageList
+                        messages={[]} // Boş mesaj listesi
+                        isLoading={false}
+                        scrollViewRef={messagesScrollViewRef}
+                        isKeyboardVisible={isKeyboardVisible}
+                        keyboardHeight={keyboardHeight}
+                        paddingBottom={0}
+                        conversationId={undefined}
+                        isDataLoading={false}
+                        onScrollToEnd={() => {}}
+                        onScrollBeginDrag={() => {
+                          // CRITICAL FIX: Scroll başladığında klavye kapat (sadece Android'de)
+                          if (isKeyboardVisible && Platform.OS === 'android') {
+                            dismissKeyboard();
+                          }
+                        }}
+                      />
+                    </View>
+                  </TouchableWithoutFeedback>
+                );
               }
               
+              // Klavye kapalıyken HeroSection göster
               return (
                 <TouchableWithoutFeedback onPress={handleScreenPress} accessible={false}>
                   <View style={styles.heroSectionWrapper}>
@@ -997,7 +1302,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
             }
           })()}
 
-          {/* Input Section - Fixed at bottom */}
+          {/* Input Section - Flexbox layout ile alt sınır */}
           <ChatInputSection
             inputText={inputText}
             setInputText={setInputText}
@@ -1015,6 +1320,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
             isResearchMode={arastirmaModu}
             isDictating={dictationState.isDictating}
             isProcessing={dictationState.isProcessing}
+            isKeyboardVisible={isKeyboardVisible}
             selectedImages={selectedImages}
             selectedFiles={selectedFiles}
             onRemoveImage={removeImage}
@@ -1034,6 +1340,25 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
             autoFocus={false}
             blurOnSubmit={false} // Multiline aktifken blur yapma
             onSubmitEditing={undefined} // Multiline aktifken onSubmitEditing'i devre dışı bırak
+            onKeyPress={(key) => {
+              // Mesaj geçmişinde gezinme
+              if (key === 'ArrowUp' || key === 'ArrowDown') {
+                saveCurrentInput(inputText);
+                const historyText = navigateHistory(key === 'ArrowUp' ? 'up' : 'down');
+                if (historyText !== null) {
+                  setInputText(historyText);
+                } else if (key === 'ArrowDown') {
+                  // En alta geldi, orijinal input'a dön
+                  setInputText('');
+                }
+                return;
+              }
+              
+              // Enter tuşuna basıldığında komut kontrolü yap
+              // (Cmd/Ctrl + Enter zaten InputComponent'te handle ediliyor)
+              // Burada sadece normal Enter kontrolü yapılacak ama multiline aktifken Enter yeni satır ekler
+              // Bu yüzden komut kontrolü handleSendMessage içinde yapılacak
+            }}
             testID="home-input"
             accessibilityLabel="Soru girişi"
             accessibilityHint="AI asistanınıza soru yazın veya sesli yazma kullanın"
@@ -1041,7 +1366,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
             waveAnimations={waveAnimations}
             containerStyle={styles.inputSectionContainer}
             animatedPaddingBottom={bottomPadding}
-            animatedBottom={bottomPosition}
+            // animatedBottom kaldırıldı - artık flexbox layout kullanılıyor
           />
 
 
@@ -1090,23 +1415,26 @@ const styles = StyleSheet.create({
     width,
     height,
   },
+  gradientContainer: {
+    flex: 1,
+    flexDirection: 'column', // CRITICAL: Flexbox column layout - Header, Orta Bölüm, Input Section sıralı
+    width: '100%',
+    height: '100%',
+  },
   heroSectionWrapper: {
     flex: 1,
     justifyContent: "flex-start",
     alignItems: "center",
   },
   messagesListContainer: {
-    flex: 1,
-    minHeight: 0, // Important for ScrollView to work properly (ChatScreen'deki gibi)
+    flex: 1, // CRITICAL: Header ve Input Section arasında kalan TÜM alanı doldurur
+    minHeight: 0, // Important for ScrollView to work properly
     backgroundColor: "transparent",
     position: "relative",
-    // paddingBottom dinamik olarak ayarlanacak (klavye durumuna göre)
+    // paddingBottom artık gerekmez - flexbox layout ile sınırlandırıldı
   },
   inputSectionContainer: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
+    // CRITICAL: Absolute positioning kaldırıldı - artık flexbox layout kullanılıyor
     flexDirection: "column",
     justifyContent: "flex-start",
     alignItems: "flex-start",
@@ -1117,7 +1445,7 @@ const styles = StyleSheet.create({
     gap: getResponsiveGap(),
     alignSelf: "center",
     backgroundColor: "transparent",
-    zIndex: 1000,
+    // zIndex artık gerekmez - flexbox layout ile doğal sıralama var
   },
 });
 

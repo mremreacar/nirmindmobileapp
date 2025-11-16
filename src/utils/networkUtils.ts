@@ -2,8 +2,7 @@
  * Network utility functions for checking internet connectivity
  */
 
-// Backend API URL - BackendApiService ile aynı olmalı
-const API_BASE_URL = 'http://10.172.1.103:3000/api';
+import { API_BASE_URL } from '../config/api';
 
 /**
  * Checks if the device has internet connectivity

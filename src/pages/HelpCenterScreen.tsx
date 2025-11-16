@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,11 +8,13 @@ import {
   ScrollView,
   Linking,
   Animated,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFonts } from 'expo-font';
 import { SvgXml } from 'react-native-svg';
 import Header from '../components/Header';
+import BackendApiService from '../services/BackendApiService';
 
 const { width, height } = Dimensions.get('window');
 
@@ -39,52 +41,58 @@ interface HelpCenterScreenProps {
   onChatPress?: () => void;
 }
 
+interface FAQItem {
+  id?: string;
+  question: string;
+  answer: string;
+  category?: string;
+}
+
 const HelpCenterScreen: React.FC<HelpCenterScreenProps> = ({ onBack, onChatPress }) => {
   const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set());
+  const [faqData, setFaqData] = useState<FAQItem[]>([]);
+  const [isLoadingFAQ, setIsLoadingFAQ] = useState(true);
+  const [faqError, setFaqError] = useState<string | null>(null);
+  const backendApiService = BackendApiService.getInstance();
   
   let [fontsLoaded] = useFonts({
     'Poppins-Regular': require('@assets/fonts/Poppins-Regular .ttf'),
     'Poppins-Medium': require('@assets/fonts/Poppins-Medium.ttf'),
   });
 
+  // Backend'den FAQ verilerini çek
+  useEffect(() => {
+    const loadFAQ = async () => {
+      try {
+        setIsLoadingFAQ(true);
+        setFaqError(null);
+        const response = await backendApiService.getFAQ();
+        
+        if (response.success && response.data) {
+          // Backend'den gelen format: { faqs: [...], pagination: {...} }
+          const faqs = response.data.faqs || response.data || [];
+          setFaqData(faqs);
+        } else {
+          // Backend'den veri alınamazsa boş liste
+          setFaqData([]);
+          console.warn('⚠️ FAQ verileri backend\'den alınamadı');
+        }
+      } catch (error) {
+        console.error('❌ FAQ yükleme hatası:', error);
+        setFaqError('FAQ verileri yüklenemedi');
+        // Hata durumunda boş liste
+        setFaqData([]);
+      } finally {
+        setIsLoadingFAQ(false);
+      }
+    };
+
+    loadFAQ();
+  }, []);
+
   if (!fontsLoaded) {
     return null;
   }
-
-  const faqData = [
-    {
-      question: 'NirMind uygulaması nasıl çalışır?',
-      answer: 'NirMind, yapay zeka destekli kişisel gelişim ve zihin eğitimi uygulamasıdır. Çeşitli egzersizler ve rehberlik ile zihinsel gelişiminize katkıda bulunur. Uygulama, meditasyon, nefes egzersizleri ve mindfulness teknikleri sunar.'
-    },
-    {
-      question: 'Hesabımı nasıl güncelleyebilirim?',
-      answer: 'Profil sayfasından kişisel bilgilerinizi düzenleyebilir ve güncelleyebilirsiniz. Tüm değişiklikler otomatik olarak kaydedilir ve hemen etkili olur.'
-    },
-    {
-      question: 'Uygulamada sorun yaşıyorum, ne yapmalıyım?',
-      answer: 'Teknik sorunlar için canlı destek hattımızdan yardım alabilir veya support@nirmind.io adresine e-posta gönderebilirsiniz. Sorununuzu detaylı şekilde açıklayarak daha hızlı çözüm bulabiliriz.'
-    },
-    {
-      question: 'Uygulamayı nasıl güncelleyebilirim?',
-      answer: 'Uygulama otomatik olarak güncellenir. Manuel güncelleme için App Store veya Google Play Store\'dan "Güncelle" butonuna basabilirsiniz. Her zaman en son sürümü kullanmanızı öneririz.'
-    },
-    {
-      question: 'Verilerim güvende mi?',
-      answer: 'Evet, tüm kişisel verileriniz end-to-end şifreleme ile korunur. Verileriniz sadece size ait ve üçüncü taraflarla paylaşılmaz. Gizlilik politikamızı inceleyebilirsiniz.'
-    },
-    {
-      question: 'Premium özellikler nelerdir?',
-      answer: 'Premium üyelik ile sınırsız meditasyon seansları, özel egzersizler, kişisel koçluk ve gelişmiş analitik raporlara erişebilirsiniz. Detaylar için fiyatlandırma sayfasını inceleyin.'
-    },
-    {
-      question: 'Nasıl abonelik iptal edebilirim?',
-      answer: 'Abonelik iptalini App Store veya Google Play Store hesabınızdan yapabilirsiniz. İptal işlemi sonrası mevcut dönemin sonuna kadar premium özellikleri kullanmaya devam edebilirsiniz.'
-    },
-    {
-      question: 'Offline modda çalışır mı?',
-      answer: 'Bazı meditasyon ve egzersizler offline olarak çalışır. Ancak tam özellik deneyimi için internet bağlantısı gereklidir. İndirilen içerikler offline kullanılabilir.'
-    }
-  ];
 
   const toggleAccordion = (index: number) => {
     const newExpandedItems = new Set(expandedItems);
@@ -97,9 +105,9 @@ const HelpCenterScreen: React.FC<HelpCenterScreenProps> = ({ onBack, onChatPress
   };
 
   const handleEmailPress = () => {
-    const email = 'support@nirmind.io';
+    const email = 'support@nirmind.app';
     const subject = 'Yardım Talebi';
-    const body = 'Merhaba,\n\nSize nasıl yardımcı olabilirsiniz?\n\n';
+    const body = 'Merhaba,\n\n';
     const url = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     
     Linking.canOpenURL(url).then(supported => {
@@ -146,7 +154,7 @@ const HelpCenterScreen: React.FC<HelpCenterScreenProps> = ({ onBack, onChatPress
             <TouchableOpacity style={styles.contactButton} onPress={handleEmailPress}>
               <View style={styles.contactButtonContent}>
                 <SvgXml xml={emailIcon} width="20" height="20" />
-                <Text style={styles.contactButtonText}>Bize Ulaşın: support@nirmind.io</Text>
+                <Text style={styles.contactButtonText}>Bize Ulaşın: support@nirmind.app</Text>
               </View>
             </TouchableOpacity>
 
@@ -156,33 +164,50 @@ const HelpCenterScreen: React.FC<HelpCenterScreenProps> = ({ onBack, onChatPress
           <View style={styles.faqSection}>
             <Text style={styles.faqTitle}>Sık Sorulan Sorular</Text>
             
-            {faqData.map((faq, index) => {
-              const isExpanded = expandedItems.has(index);
-              return (
-                <View key={index} style={styles.faqItem}>
-                  <TouchableOpacity 
-                    style={styles.faqHeader} 
-                    onPress={() => toggleAccordion(index)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.faqQuestion}>{faq.question}</Text>
-                    <Animated.View
-                      style={{
-                        transform: [{ rotate: isExpanded ? '180deg' : '0deg' }],
-                      }}
+            {isLoadingFAQ ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="small" color="#FFFFFF" />
+                <Text style={styles.loadingText}>FAQ yükleniyor...</Text>
+              </View>
+            ) : faqData.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>Henüz FAQ bulunmuyor</Text>
+              </View>
+            ) : (
+              faqData.map((faq, index) => {
+                const isExpanded = expandedItems.has(index);
+                return (
+                  <View key={faq.id || index} style={styles.faqItem}>
+                    <TouchableOpacity 
+                      style={styles.faqHeader} 
+                      onPress={() => toggleAccordion(index)}
+                      activeOpacity={0.7}
                     >
-                      <SvgXml xml={chevronDownIcon} width="16" height="16" />
-                    </Animated.View>
-                  </TouchableOpacity>
-                  
-                  {isExpanded && (
-                    <Animated.View style={styles.faqContent}>
-                      <Text style={styles.faqAnswer}>{faq.answer}</Text>
-                    </Animated.View>
-                  )}
-                </View>
-              );
-            })}
+                      <Text style={styles.faqQuestion}>{faq.question}</Text>
+                      <Animated.View
+                        style={{
+                          transform: [{ rotate: isExpanded ? '180deg' : '0deg' }],
+                        }}
+                      >
+                        <SvgXml xml={chevronDownIcon} width="16" height="16" />
+                      </Animated.View>
+                    </TouchableOpacity>
+                    
+                    {isExpanded && (
+                      <Animated.View style={styles.faqContent}>
+                        <Text style={styles.faqAnswer}>{faq.answer}</Text>
+                      </Animated.View>
+                    )}
+                  </View>
+                );
+              })
+            )}
+            
+            {faqError && (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorText}>{faqError}</Text>
+              </View>
+            )}
           </View>
         </ScrollView>
       </LinearGradient>
@@ -279,6 +304,38 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     color: '#9CA3AF',
     lineHeight: 20,
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+    gap: 12,
+  },
+  loadingText: {
+    fontFamily: 'Poppins-Regular',
+    fontSize: 14,
+    color: '#9CA3AF',
+  },
+  emptyContainer: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontFamily: 'Poppins-Regular',
+    fontSize: 14,
+    color: '#9CA3AF',
+  },
+  errorContainer: {
+    padding: 12,
+    backgroundColor: '#FF000010',
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  errorText: {
+    fontFamily: 'Poppins-Regular',
+    fontSize: 12,
+    color: '#FF6B6B',
   },
 });
 

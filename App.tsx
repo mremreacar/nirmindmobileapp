@@ -1,7 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, StyleSheet, Keyboard as RNKeyboard, Linking } from 'react-native';
+import { View, StyleSheet, Keyboard as RNKeyboard, Linking, Text, TextInput } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+
+// Font scaling'i devre dışı bırak - telefonların ayarlarından etkilenmesin
+Text.defaultProps = Text.defaultProps || {};
+Text.defaultProps.allowFontScaling = false;
+
+TextInput.defaultProps = TextInput.defaultProps || {};
+TextInput.defaultProps.allowFontScaling = false;
 import SplashScreen from './src/pages/SplashScreen';
 import OnboardingScreen from './src/pages/OnboardingScreen';
 import LoginMethodScreen from './src/pages/LoginMethodScreen';
@@ -94,9 +101,15 @@ function AppContent() {
     // Auth kontrolü tamamlandı
     if (user) {
       // Kullanıcı giriş yapmış, profil bilgilerini kontrol et
+      // Yeni giriş yapıldığında seçili konuşmayı temizle - Home'da başlasın
+      setSelectedConversationId(undefined);
+      setPreviousScreen(null);
       checkProfileCompleteness();
     } else {
       // Kullanıcı giriş yapmamış, onboarding'e git
+      // Logout sonrası state'leri temizle
+      setSelectedConversationId(undefined);
+      setPreviousScreen(null);
       console.log('ℹ️ Kullanıcı giriş yapmamış, onboarding ekranına yönlendiriliyor');
       performSmoothTransition(Screen.ONBOARDING);
     }
@@ -174,6 +187,9 @@ function AppContent() {
   const handleLogout = useCallback(() => {
     // Çıkış yap - AuthContext logout'u çağır ve onboarding'e dön
     console.log('🚪 Logout işlemi başlatılıyor...');
+    // Seçili konuşmayı temizle - tekrar giriş yapınca Home'da başlasın
+    setSelectedConversationId(undefined);
+    setPreviousScreen(null);
     performSmoothTransition(Screen.ONBOARDING);
   }, [performSmoothTransition]);
 

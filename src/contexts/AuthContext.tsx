@@ -190,9 +190,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       console.log('🔍 Nirmind\'ten profil bilgileri çekiliyor...');
       
-      // Local development için: http://localhost:3000/api/nirmind/auth/verify
-      // Fiziksel cihaz için: http://[BILGISAYAR_IP]:3000/api/nirmind/auth/verify
-      const backendUrl = 'http://10.172.1.103:3000/api/nirmind/auth/verify';
+      // API_BASE_URL'i config'ten import et
+      const { API_BASE_URL } = require('../config/api');
+      const backendUrl = `${API_BASE_URL}/nirmind/auth/verify`;
       
       const response = await fetch(backendUrl, {
         method: 'POST',
@@ -242,6 +242,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     await backendApiService.clearAuthToken();
     await AsyncStorage.removeItem('authToken');
     await AsyncStorage.removeItem('user');
+    // Son conversation ID'yi de temizle - logout sonrası Home'da başlasın
+    await AsyncStorage.removeItem('@nirmind_last_conversation_id');
   };
 
   const value: AuthContextType = {

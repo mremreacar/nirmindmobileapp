@@ -1,8 +1,5 @@
 import { Linking, Platform } from 'react-native';
-
-// Local development için: http://localhost:3000/api
-// Fiziksel cihaz için: http://[BILGISAYAR_IP]:3000/api (örn: http://192.168.1.100:3000/api)
-const API_BASE_URL = 'http://10.172.1.103:3000/api';
+import { API_BASE_URL } from '../config/api';
 
 class CrossAppAuthService {
   private static instance: CrossAppAuthService;
@@ -10,7 +7,7 @@ class CrossAppAuthService {
   private readonly NIRPAX_PACKAGE_NAME = 'com.nireya.nirpax'; // Android package name
   private readonly NIRPAX_BUNDLE_ID = 'com.nireya.nirpax'; // iOS bundle ID
   private readonly BACKEND_LOGIN_URL = `${API_BASE_URL}/nirpax/auth/cross-app-login-page`;
-  private readonly WEB_CALLBACK_URL = 'http://10.172.1.103:3000/api/nirpax/auth/google/callback';
+  private readonly WEB_CALLBACK_URL = `${API_BASE_URL}/nirpax/auth/google/callback`;
   private readonly APP_CALLBACK_URL = 'nirmind://auth';
 
   private constructor() {}
